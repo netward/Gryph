@@ -5,6 +5,53 @@
 #include <QDragMoveEvent>
 #include <QHeaderView>
 #include <QMimeData>
+#include <QMouseEvent>
+#include <QStyledItemDelegate>
+#include <QPainter>
+#include <QStyleOptionViewItem>
+
+class ProfilesTableItemDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void paint(QPainter* painter,
+        const QStyleOptionViewItem& option,
+        const QModelIndex& index) const override {
+        QStyleOptionViewItem opt = option;
+        initStyleOption(&opt, index);
+
+        const auto* table = qobject_cast<const ProfilesTableView*>(opt.widget);
+
+        const bool isSelected = opt.state & QStyle::State_Selected;
+        const bool isHoveredRow = table && index.row() == table->hoveredRow();
+
+        QColor background;
+
+        if (isSelected) {
+            background = QColor("#cce8ff");
+        }
+        else if (isHoveredRow) {
+            background = QColor("#cce8ff");
+        }
+
+        painter->save();
+
+        if (background.isValid()) {
+            painter->fillRect(opt.rect, background);
+        }
+
+        // Убираем стандартные фон, hover, выделение и рамку фокуса,
+        // чтобы Qt не рисовал скругления и чёрную рамку поверх нашего фона.
+        opt.state &= ~QStyle::State_Selected;
+        opt.state &= ~QStyle::State_MouseOver;
+        opt.state &= ~QStyle::State_HasFocus;
+        opt.backgroundBrush = Qt::NoBrush;
+
+        QStyledItemDelegate::paint(painter, opt, index);
+
+        painter->restore();
+    }
+};
 
 ProfilesTableView::ProfilesTableView(QWidget *parent)
     : QTableView(parent) {
@@ -14,6 +61,10 @@ ProfilesTableView::ProfilesTableView(QWidget *parent)
     setDragEnabled(true);
     setAcceptDrops(true);
     setDefaultDropAction(Qt::MoveAction);
+
+    setMouseTracking(true);
+    viewport()->setMouseTracking(true);
+    setItemDelegate(new ProfilesTableItemDelegate(this));
 
     m_verticalHeader = new ProfilesTableVerticalHeader(this);
     setVerticalHeader(m_verticalHeader);
@@ -151,4 +202,25 @@ void ProfilesTableView::dropEvent(QDropEvent *event) {
     } else {
         QTableView::dropEvent(event);
     }
+}
+
+void ProfilesTableView::mouseMoveEvent(QMouseEvent* event) {
+    const QModelIndex index = indexAt(event->position().toPoint());
+    const int newHoveredRow = index.isValid() ? index.row() : -1;
+
+    if (m_hoveredRow != newHoveredRow) {
+        m_hoveredRow = newHoveredRow;
+        viewport()->update();
+    }
+
+    QTableView::mouseMoveEvent(event);
+}
+
+void ProfilesTableView::leaveEvent(QEvent* event) {
+    if (m_hoveredRow != -1) {
+        m_hoveredRow = -1;
+        viewport()->update();
+    }
+
+    QTableView::leaveEvent(event);
 }

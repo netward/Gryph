@@ -5,6 +5,7 @@
 #ifndef Q_MOC_RUN
 #include <core/server/gen/libcore.pb.h>
 #endif
+#include <QIcon>
 
 class DataViewHtmlGenerator {
 public:

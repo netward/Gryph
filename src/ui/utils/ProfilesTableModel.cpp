@@ -100,9 +100,9 @@ QVariant ProfilesTableModel::data(const QModelIndex &index, int role) const {
 
     if (role == Qt::DisplayRole) {
         switch (index.column()) {
-        case 0: return profile->outbound ? profile->outbound->DisplayType() : QString();
-        case 1: return profile->outbound ? profile->outbound->DisplayAddress() : QString();
-        case 2: return profile->outbound ? profile->outbound->name : QString();
+        case 0: return profile->outbound ? profile->outbound->name : QString();
+        case 1: return profile->outbound ? profile->outbound->DisplayType() : QString();
+        case 2: return profile->outbound ? profile->outbound->DisplayAddress() : QString();
         case 3: return profile->DisplayTestResult();
         case 4: return profile->DisplayTraffic();
         default: return {};
@@ -121,16 +121,18 @@ QVariant ProfilesTableModel::data(const QModelIndex &index, int role) const {
 
 QVariant ProfilesTableModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (role != Qt::DisplayRole) return {};
+
     if (orientation == Qt::Horizontal) {
         switch (section) {
-        case 0: return tr("Type");
-        case 1: return tr("Address");
-        case 2: return tr("Name");
+        case 0: return tr("Name");
+        case 1: return tr("Type");
+        case 2: return tr("Address");
         case 3: return tr("Test Result");
         case 4: return tr("Traffic");
         default: return {};
         }
     }
+
     return {};
 }
 
@@ -205,4 +207,11 @@ QString ProfilesTableModel::rowLabel(int row) const {
         return QStringLiteral("✓");
     }
     return QString::number(row + 1) + QStringLiteral("  ");
+}
+
+bool ProfilesTableModel::isRunningRow(int row) const {
+    if (row < 0 || row >= m_profileIds.size()) return false;
+
+    const int id = m_profileIds[row];
+    return Configs::dataManager->settingsRepo->started_id == id;
 }

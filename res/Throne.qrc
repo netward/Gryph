@@ -15,6 +15,7 @@
         <file>icon/material/swap-vertical.png</file>
         <file>icon/material/delete.png</file>
         <file>icon/material/swap-horizontal.png</file>
+        <file alias="checkmark.svg">icon/checkmark.svg</file>
     </qresource>
     <qresource prefix="/Throne">
         <file alias="Throne.png">public/Throne.png</file>

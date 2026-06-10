@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <QTableView>
 #include <QFontMetrics>
+#include <QIcon>
 
 ProfilesTableVerticalHeader::ProfilesTableVerticalHeader(QWidget *parent)
     : QHeaderView(Qt::Vertical, parent) {
@@ -41,20 +42,44 @@ void ProfilesTableVerticalHeader::updateWidthFromRowCount() {
     setMaximumWidth(w);
 }
 
-void ProfilesTableVerticalHeader::paintSection(QPainter *painter, const QRect &rect, int logicalIndex) const {
+void ProfilesTableVerticalHeader::paintSection(QPainter* painter, const QRect& rect, int logicalIndex) const {
     painter->save();
+
     painter->fillRect(rect, palette().color(QPalette::Button));
+
     if (rect.width() > 1) {
         painter->setPen(palette().color(QPalette::Mid));
         painter->drawLine(rect.topRight(), rect.bottomRight());
     }
-    QString text;
-    if (m_model) {
-        text = m_model->rowLabel(logicalIndex);
-    } else {
-        text = QString::number(logicalIndex + 1) + QStringLiteral("  ");
+
+    const bool isRunning = m_model && m_model->isRunningRow(logicalIndex);
+
+    if (isRunning) {
+        QIcon icon(QStringLiteral(":/checkmark.svg"));
+
+        const int iconSize = 16;
+        QRect iconRect(
+            rect.center().x() - iconSize / 2,
+            rect.center().y() - iconSize / 2,
+            iconSize,
+            iconSize
+        );
+
+        icon.paint(painter, iconRect, Qt::AlignCenter);
     }
-    painter->setPen(palette().color(foregroundRole()));
-    painter->drawText(rect, Qt::AlignCenter, text);
+    else {
+        QString text;
+
+        if (m_model) {
+            text = QString::number(logicalIndex + 1) + QStringLiteral("  ");
+        }
+        else {
+            text = QString::number(logicalIndex + 1) + QStringLiteral("  ");
+        }
+
+        painter->setPen(palette().color(foregroundRole()));
+        painter->drawText(rect, Qt::AlignCenter, text);
+    }
+
     painter->restore();
 }
