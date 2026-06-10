@@ -19,6 +19,51 @@ ProfilesTableView::ProfilesTableView(QWidget *parent)
     setVerticalHeader(m_verticalHeader);
     m_filterHeader = new ProfilesTableFilterHeader(this);
     setHorizontalHeader(m_filterHeader);
+
+    setObjectName("profilesTableView");
+
+    setStyleSheet(R"(
+        QTableView#profilesTableView {
+            selection-background-color: #cce8ff;
+            selection-color: #111111;
+        }
+
+        QTableView#profilesTableView::item:selected {
+            background-color: #cce8ff;
+            color: #111111;
+        }
+
+        QTableView#profilesTableView::item:selected:active {
+            background-color: #cce8ff;
+            color: #111111;
+        }
+
+        QTableView#profilesTableView::item:selected:!active {
+            background-color: #cce8ff;
+            color: #111111;
+        }
+        QTableView#profilesTableView {
+            selection-background-color: #cce8ff;
+            selection-color: #111111;
+            outline: 0;
+        }
+
+        QTableView#profilesTableView::item:selected {
+            background-color: #cce8ff;
+            color: #111111;
+            border: none;
+        }
+
+        QTableView#profilesTableView::item:focus {
+            outline: none;
+            border: none;
+        }
+
+        QTableView#profilesTableView::item:selected:focus {
+            outline: none;
+            border: none;
+        }
+    )");
 }
 
 void ProfilesTableView::setModel(QAbstractItemModel *model) {
