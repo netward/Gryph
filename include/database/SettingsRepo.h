@@ -1,0 +1,252 @@
+#pragma once
+
+#include "Database.h"
+#include "include/global/Const.hpp"
+#include <QMutexLocker>
+#include <QJsonObject>
+#include <QMap>
+#include <QKeySequence>
+#include <atomic>
+
+#ifdef Q_OS_WIN
+#include "include/sys/windows/WinVersion.h"
+#endif
+
+namespace Configs {
+    class SettingsRepo {
+    private:
+        Database& db;
+
+        QMap<QString, bool*>        boolMap;
+        QMap<QString, int*>         intMap;
+        QMap<QString, QString*>     stringMap;
+        QMap<QString, QStringList*> stringListMap;
+
+        void initMaps();
+        void createTables() const;
+        void loadAllSettings();
+        void saveAllSettings() const;
+
+    public:
+        bool noSave = false;
+
+        explicit SettingsRepo(Database& database);
+        
+        // Save all settings to database (like old Save() method)
+        bool Save();
+        
+        // Public fields (mirroring DataStore interface for direct access)
+        
+        // Running (not saved to DB, runtime state only)
+        QString core_socket_name = "";
+        int started_id = -1919;
+        bool core_running = false;
+        bool prepare_exit = false;
+        bool spmode_vpn = false;
+        bool spmode_system_proxy = false;
+        QString appdataDir = "";
+        QStringList ignoreConnTag = {};
+        int imported_count = 0;
+        bool refreshing_group_list = false;
+        bool refreshing_group = false;
+        std::atomic<int> resolve_count = 0;
+
+        // Flags (not saved to DB, runtime flags only)
+        QStringList argv = {};
+        bool flag_use_appdata = false;
+        bool flag_many = false;
+        bool flag_tray = false;
+        bool flag_debug = false;
+        bool flag_restart_tun_on = false;
+        bool flag_dns_set = false;
+        
+        // Saved settings (mirroring DataStore "Saved" section)
+        
+        // Misc
+        QString mainWindowGeometry;
+        QString log_level = "info";
+        QString test_latency_url = "http://cp.cloudflare.com/";
+        int url_test_timeout_ms = 3000;
+        bool disable_tray = false;
+        int test_concurrent = 10;
+        bool disable_traffic_stats = false;
+        int current_group = 0; // group id
+        QString mux_protocol = "yamux";
+        bool mux_padding = false;
+        int mux_concurrency = 8;
+        bool mux_default_on = false;
+        QString theme = "0";
+        int language = 0;
+        QString font = "";
+        int font_size = 0;
+        QString mw_size = "";
+        bool log_enable_include = false;
+        bool log_enable_exclude = false;
+        QStringList log_include_keyword = {};
+        QStringList log_include_regex = {};
+        QStringList log_exclude_keyword = {};
+        QStringList log_exclude_regex = {};
+        bool log_auto_scroll = true;
+        bool start_minimal = false;
+        int max_log_line = 200;
+        QString splitter_state = "";
+        bool enable_stats = true;
+        int stats_tab = 0; // either connection or log
+        int speed_test_mode = TestConfig::FULL;
+        int speed_test_timeout_ms = 5000;
+        QString simple_dl_url = "http://cachefly.cachefly.net/1mb.test";
+        bool allow_beta_update = false;
+        bool show_system_dns = false;
+        bool use_custom_icons = false;
+        bool skip_delete_confirmation = false;
+
+        // throne:// URL scheme: mirror of what we last wrote to the OS (registry/desktop/bundle).
+        // Re-registered on startup only when the current state differs (e.g. install moved).
+        QString url_scheme_mirror = "";
+
+        // Network
+        bool net_use_proxy = false;
+        bool net_insecure = false;
+        bool reset_proxy_on_disable_sp = false;
+
+        // Subscription
+        QString user_agent = ""; // set at main.cpp
+        int sub_auto_update = -30;
+        bool sub_clear = false;
+        bool sub_send_hwid = false;
+        QString sub_custom_hwid_params = "";
+        bool allow_stopping_active_profile = false;
+
+        // Security
+        bool skip_cert = false;
+        QString utlsFingerprint = "";
+        bool disable_run_admin = false; // windows only
+        bool use_mozilla_certs = false;
+
+        // Remember
+        bool remember_system_proxy = false;
+        bool remember_tun = false;
+        int remember_id = -1919;
+        bool remember_enable = false;
+        bool windows_set_admin = false;
+        QMap<QString, QKeySequence> shortcuts;
+
+        // Routing
+        int current_route_id = 1;
+        QString remote_dns = "8.8.8.8";
+        QString remote_dns_strategy = "";
+        QString direct_dns = "localhost";
+        QString direct_dns_strategy = "";
+        int dns_cache_capacity = 65536;
+        bool dns_disable_cache = false;
+        bool dns_disable_expire = false;
+        bool dns_reverse_mapping = false;
+        bool enable_dns_routing = true;
+        bool use_dns_object = false;
+        QString dns_object = "";
+        QString dns_final_out = "remote";
+        QString resolve_domain_strategy = "";
+        QString default_domain_strategy = "";
+        int sniffing_mode = SniffingMode::FOR_ROUTING;
+        int ruleset_mirror = Mirrors::CLOUDFLARE;
+
+        // Socks & HTTP Inbound
+        bool disable_mixed_inbound = false;
+        QString inbound_address = "127.0.0.1";
+        int inbound_socks_port = 2080; // Mixed, actually
+        bool random_inbound_port = false;
+        QString custom_inbound = "{\"inbounds\": []}";
+        QString proxy_scheme = "{ip}:{port}";
+        bool inbound_auth = false;
+        QString inbound_user = "";
+        QString inbound_pass = "";
+
+        // Routing
+        QString custom_route_global = "{\"rules\": []}";
+        QString active_routing = "Default";
+        bool adblock_enable = false;
+
+        // VPN
+        bool fake_dns = false;
+        bool enable_tun_routing = false;
+#ifdef Q_OS_MACOS
+        QString vpn_implementation = "gvisor";
+        bool vpn_strict_route = true;
+#elif defined(Q_OS_WIN)
+        QString vpn_implementation = WinVersion::IsBuildNumGreaterOrEqual(BuildNumber::Windows_10_1507) ? "system" : "gvisor";
+        bool vpn_strict_route = WinVersion::IsBuildNumGreaterOrEqual(BuildNumber::Windows_10_1507);
+#else
+        QString vpn_implementation = "system";
+        bool vpn_strict_route = true;
+#endif
+        int vpn_mtu = 1500;
+        bool vpn_ipv6 = false;
+        QString vpn_tun_ipv4_cidr = "172.19.0.1/24";
+        QString vpn_tun_ipv6_cidr = "fdfe:dcba:9876::1/96";
+        bool disable_privilege_req = false;
+
+        // NTP
+        bool enable_ntp = false;
+        QString ntp_server_address = "";
+        int ntp_server_port = 0;
+        QString ntp_interval = "";
+
+        // Warp
+        bool enable_warp = false;
+        QString warp_private_key = "";
+        QString warp_public_key = "";
+        QStringList warp_ifc_addrs = {};
+        QString warp_ep = "";
+
+        // Hijack
+        bool enable_dns_server = false;
+        bool dns_server_listen_lan = false;
+        int dns_server_listen_port = 53;
+        QString dns_v4_resp = "127.0.0.1";
+        QString dns_v6_resp = "::1";
+        QStringList dns_server_rules = {};
+        bool enable_redirect = false;
+        QString redirect_listen_address = "127.0.0.1";
+        int redirect_listen_port = 443;
+
+        // System dns
+        bool system_dns_set = false;
+
+        // Hotkey
+        QString hotkey_mainwindow = "";
+        QString hotkey_group = "";
+        QString hotkey_route = "";
+        QString hotkey_system_proxy_menu = "";
+        QString hotkey_toggle_system_proxy = "";
+
+        // Core
+        int core_box_clash_api = -9090;
+        QString core_box_clash_listen_addr = "127.0.0.1";
+        QString core_box_clash_api_secret = "";
+        QString core_box_underlying_dns = "";
+        int core_dns_in_port = 5533;
+
+        // Xray
+        QString xray_log_level = "warning";
+        int xray_mux_concurrency = 8;
+        bool xray_mux_default_on = false;
+        Xray::XrayVlessPreference xray_vless_preference = Xray::XhttpOnly;
+
+        // Extra Core Paths
+        QStringList extraCorePaths = {};
+
+        // Bind address/interface custom entry history (last 5 per field)
+        QStringList dial_bind_interface_history = {};
+        QStringList dial_inet4_bind_address_history = {};
+        QStringList dial_inet6_bind_address_history = {};
+
+        // Methods
+        void UpdateStartedId(int id);
+
+        [[nodiscard]] QString GetUserAgent(bool isDefault = false) const;
+        
+        // Extra Core Paths methods
+        [[nodiscard]] QStringList GetExtraCorePaths() const;
+        bool AddExtraCorePath(const QString &path);
+    };
+}

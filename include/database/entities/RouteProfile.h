@@ -1,0 +1,84 @@
+#pragma once
+
+#include "include/database/entities/RouteRule.h"
+#include <QUrl>
+#include <QJsonArray>
+
+namespace Configs {
+    const int INVALID_ID = -99999;
+
+    enum simpleAction{bypass, block, proxy, warpBypass};
+    inline QString simpleActionToString(simpleAction action)
+    {
+        if (action == bypass) return {"direct"};
+        if (action == block) return {"block"};
+        if (action == proxy) return {"proxy"};
+        if (action == warpBypass) return {"warp-bypass"};
+        return {"invalid"};
+    }
+
+    class RouteProfile {
+    public:
+        int id = -1;
+        QString name = "";
+        QList<std::shared_ptr<RouteRule>> Rules;
+        int defaultOutboundID = proxyID;
+
+        RouteProfile() = default;
+
+        RouteProfile(const RouteProfile& other);
+
+        static QList<std::shared_ptr<RouteRule>> parseJsonArray(const QJsonArray& arr, QString* parseError, QString* warnings = nullptr);
+
+        QJsonArray get_route_rules(bool forView = false, std::map<int, QString> outboundMap = {});
+
+        // Lossless share schema: a tagged JSON object carrying the profile name, default
+        // outbound and every rule (with its simple/advanced type).
+        QJsonObject ToShareObject();
+        // ToShareObject() compacted, base64url-encoded, wrapped as throne://route?data=<...>
+        QString ToShareLink();
+        // Parse any shared form: a throne://route link, a base64 blob, a raw share object,
+        // or a legacy bare rule array. Returns nullptr and fills *fatalError on failure;
+        // non-fatal notes (e.g. outbound fallbacks) go to *warnings. *wasOldArray is set
+        // true when the input was a legacy array (no name / default outbound to import).
+        static std::shared_ptr<RouteProfile> FromShareInput(const QString& input, QString* fatalError, QString* warnings, bool* wasOldArray);
+
+        static std::shared_ptr<RouteProfile> GetDefaultChain();
+
+        std::shared_ptr<QList<int>> get_used_outbounds();
+
+        std::shared_ptr<QStringList> get_used_rule_sets();
+
+        QStringList get_direct_sites();
+
+        QStringList get_proxy_sites();
+
+        QStringList get_direct_ips();
+
+        bool IsEmpty();
+
+        void ResetRules();
+
+        void ResetSimpleRule(ruleType type);
+
+        QString GetSimpleRules(simpleAction action);
+
+        QString UpdateSimpleRules(const QString& content, simpleAction action);
+
+        void FilterEmptyRules();
+    private:
+        static bool add_simple_rule(const QString& content, const std::shared_ptr<RouteRule>& rule, ruleType type);
+
+        static bool add_simple_address_rule(const QString& content, const std::shared_ptr<RouteRule>& rule);
+
+        static bool add_simple_process_rule(const QString& content, const std::shared_ptr<RouteRule>& rule);
+
+        std::shared_ptr<RouteRule> get_simple_rule_by_type(ruleType type);
+
+        static ruleType get_rule_type(const QString& content, simpleAction action);
+
+        static QList<std::shared_ptr<RouteRule>> get_simple_rules();
+
+        static void reset_simple_rule(std::shared_ptr<RouteRule>& rule);
+    };
+} // namespace Configs
