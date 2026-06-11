@@ -96,7 +96,8 @@ QVariant ProfilesTableModel::data(const QModelIndex &index, int role) const {
 
     const int startedId = Configs::dataManager->settingsRepo->started_id;
     const bool isRunning = (profile->id == startedId);
-    QColor linkColor = isRunning ? QApplication::palette().link().color() : QColor();
+    //QColor linkColor = isRunning ? QApplication::palette().link().color() : QColor();
+    QColor linkColor = isRunning ? QColor("#008000") : QColor();
 
     if (role == Qt::DisplayRole) {
         switch (index.column()) {
