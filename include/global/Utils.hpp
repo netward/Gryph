@@ -98,7 +98,7 @@ namespace MwArg {
 }
 
 inline std::function<void(MwMessage, QStringList)> MW_dialog_message;
-// Handles a "throne://" deeplink. Set by MainWindow; marshals to the UI thread.
+// Handles a "Gryph://" deeplink. Set by MainWindow; marshals to the UI thread.
 inline std::function<void(QString)> MW_handle_deeplink;
 
 // Deeplink plumbing (see Utils.cpp). Delivery channels feed URLs in here; the

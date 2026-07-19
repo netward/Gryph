@@ -1,7 +1,7 @@
 package test_utils
 
 import (
-	"ThroneCore/internal/boxbox"
+	"GryphCore/internal/boxbox"
 	"context"
 	"encoding/json"
 	"errors"

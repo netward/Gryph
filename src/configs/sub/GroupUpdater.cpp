@@ -99,7 +99,7 @@ namespace Subscription {
     }
 
     // Convert a real Xray VLESS outbound (settings.vnext[0].address etc.) into
-    // the simplified shape Throne's xrayVless::ParseFromJson expects. Returns
+    // the simplified shape Gryph's xrayVless::ParseFromJson expects. Returns
     // an empty object if the input doesn't have the expected structure.
     QJsonObject normalizeXrayVlessForParse(const QJsonObject &out) {
         if (out["protocol"].toString() != "vless") return {};

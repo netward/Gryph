@@ -200,7 +200,7 @@ namespace Configs {
 
     QJsonObject RouteProfile::ToShareObject() {
         QJsonObject root;
-        root["kind"] = "throne-route-profile";
+        root["kind"] = "Gryph-route-profile";
         root["v"] = 1;
         root["name"] = name;
         root["default_outbound"] = outboundIDToString(defaultOutboundID);
@@ -218,7 +218,7 @@ namespace Configs {
     QString RouteProfile::ToShareLink() {
         const auto json = QJsonDocument(ToShareObject()).toJson(QJsonDocument::Compact);
         const auto b64 = json.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
-        return QStringLiteral("throne://route?data=") + QString::fromLatin1(b64);
+        return QStringLiteral("Gryph://route?data=") + QString::fromLatin1(b64);
     }
 
     std::shared_ptr<RouteProfile> RouteProfile::FromShareInput(const QString& input, QString* fatalError, QString* warnings, bool* wasOldArray) {
@@ -229,8 +229,8 @@ namespace Configs {
             return nullptr;
         }
 
-        // throne://route?data=<base64> deep link
-        if (text.startsWith("throne://", Qt::CaseInsensitive)) {
+        // Gryph://route?data=<base64> deep link
+        if (text.startsWith("Gryph://", Qt::CaseInsensitive)) {
             const QUrl u(text);
             if (u.host().compare("route", Qt::CaseInsensitive) != 0) {
                 fatalError->append("Unsupported deep link command");
@@ -251,14 +251,14 @@ namespace Configs {
                 doc = QJsonDocument::fromJson(QByteArray::fromBase64(text.toUtf8()));
         }
         if (doc.isNull()) {
-            fatalError->append("Input is not valid JSON, base64, or a Throne route link");
+            fatalError->append("Input is not valid JSON, base64, or a Gryph route link");
             return nullptr;
         }
 
         // New schema: a tagged object carrying the whole profile.
         if (doc.isObject()) {
             const QJsonObject root = doc.object();
-            if (root.value("kind").toString() != QStringLiteral("throne-route-profile")) {
+            if (root.value("kind").toString() != QStringLiteral("Gryph-route-profile")) {
                 fatalError->append("Unrecognized route object");
                 return nullptr;
             }
@@ -305,7 +305,7 @@ namespace Configs {
             QJsonObject obj;
             obj["action"] = "reject";
             QJsonArray jarray;
-            jarray.append("throne-adblocksingbox");
+            jarray.append("Gryph-adblocksingbox");
             obj["rule_set"] = jarray;
             return obj;
         };

@@ -2,7 +2,7 @@
 
 #include <QString>
 
-// Registration of the "throne://" URL scheme with the OS.
+// Registration of the "Gryph://" URL scheme with the OS.
 //
 // The app is distributed as a portable zip, so there is no installer step and
 // the executable path changes whenever the user moves or updates the folder.

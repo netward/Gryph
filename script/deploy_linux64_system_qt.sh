@@ -5,20 +5,20 @@ rm -rf $DEST
 mkdir -p $DEST
 
 #### copy binary ####
-cp $GITHUB_WORKSPACE/build/Throne $DEST
+cp $GITHUB_WORKSPACE/build/Gryph $DEST
 
-#### copy Throne.png ####
-cp $GITHUB_WORKSPACE/res/public/Throne.png $DEST
+#### copy Gryph.png ####
+cp $GITHUB_WORKSPACE/res/public/Gryph.png $DEST
 
 #### copy Core ####
 cd download-artifact
 cd *${DEST_SUFFIX%-system-qt}
 tar xvzf artifacts.tgz -C ../../
 cd ../..
-cp deployment/${DEST_SUFFIX%-system-qt}/ThroneCore $DEST
+cp deployment/${DEST_SUFFIX%-system-qt}/GryphCore $DEST
 rm -rf deployment/${DEST_SUFFIX%-system-qt}
 
 # handle debug info
-objcopy --only-keep-debug $DEST/Throne $DEST/Throne.debug
-strip --strip-debug --strip-unneeded $DEST/Throne
-objcopy --add-gnu-debuglink=$DEST/Throne.debug $DEST/Throne
+objcopy --only-keep-debug $DEST/Gryph $DEST/Gryph.debug
+strip --strip-debug --strip-unneeded $DEST/Gryph
+objcopy --add-gnu-debuglink=$DEST/Gryph.debug $DEST/Gryph

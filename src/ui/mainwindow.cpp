@@ -1,3 +1,17 @@
+// mainwindow.cpp — реализация главного окна Gryph.
+// MainWindow является центральным координатором пользовательского интерфейса.
+// Этот файл связывает UI с базой данных, GryphCore, системным прокси, TUN/VPN, подписками, маршрутами, журналом, таблицей профилей, системным треем, горячими клавишами, QR-кодами и механизмом обновления.
+// Основные подсистемы файла:
+//  1. Создание окна и регистрация сигналов/слотов.
+//  2. Запуск GryphCore и защищённый IPC через QLocalServer.
+//  3. Управление группами и профилями.
+//  4. Управление режимами System Proxy, VPN/TUN и DNS.
+//  5. Журнал, статистика соединений и график трафика.
+//  6. Импорт подписок, deeplink-ссылок и QR-кодов.
+//  7. Системный трей, меню, сочетания клавиш и глобальные hotkey.
+//  8. Сохранение состояния и корректное завершение приложения.
+//  9. Проверка и установка обновлений.
+
 #include "include/ui/mainwindow.h"
 
 #include <QAbstractItemView>
@@ -25,11 +39,8 @@
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
 
-
 #include "include/database/RoutesRepo.h"
-
 #include "include/ui/utils/ProfilesTableFilterHeader.h"
-
 #include "include/ui/group/dialog_edit_group.h"
 
 #ifdef Q_OS_WIN
@@ -80,11 +91,15 @@
 
 #include "include/sys/macos/MacOS.h"
 
+// Создание единственного экземпляра главного окна.
+// Вызывается из main.cpp после подготовки приложения, БД и рабочих потоков.
 void UI_InitMainWindow() {
     mainwindow = new MainWindow;
 }
 
-// Caller must hold coreProcessMutex (reads core_process lock-free by design).
+// Проверяет, что подключившийся к IPC-серверу процесс действительно является запущенным GryphCore.
+// PID извлекается платформенным способом и сравнивается с PID объекта core_process. 
+// Вызывающий код обязан удерживать coreProcessMutex.
 bool MainWindow::verify_core_pid(QLocalSocket *socket) {
     if (!core_process) return false;
     qint64 expectedPid = core_process->processId();
@@ -117,8 +132,8 @@ bool MainWindow::verify_core_pid(QLocalSocket *socket) {
 #endif
 }
 
-// Maps a theme name to the log viewer's syntax-highlight mode (true = dark, false = light).
-// Stylesheet themes have a known brightness; plain QStyle themes follow the OS preference.
+// Определяет, нужно ли использовать тёмную цветовую схему подсветки журнала.
+// Для известных тем яркость задаётся явно, для системных тем берётся режим ОС.
 static bool themeUsesDarkLog(const QString &theme) {
     const auto lower = theme.toLower();
     if (lower.contains("vista") || lower.contains("flatgray") || lower.contains("lightblue")) {
@@ -130,6 +145,16 @@ static bool themeUsesDarkLog(const QString &theme) {
     return isDarkMode(); // bi-mode themes, follow system preference
 }
 
+// Конструктор полностью собирает рабочее состояние главного окна.
+// Последовательность инициализации:
+//   1. Регистрирует глобальные UI-callback и deeplink-обработчик.
+//   2. Восстанавливает автозапуск, URL-схему, тему, геометрию и шрифты.
+//   3. Настраивает журнал и фоновые потоки.
+//   4. Создаёт локальный IPC-сервер для GryphCore и запускает ядро.
+//   5. Подключает меню, таблицы, фильтры, статистику и график скорости.
+//   6. Формирует системный трей и динамические меню.
+//   7. Настраивает маршруты, тестирование, импорт, таймеры и обновления.
+// Большинство connect() связывают действие пользователя или системное событие с методом MainWindow либо асинхронной задачей.
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     mainwindow = this;
     setAcceptDrops(true);
@@ -150,7 +175,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     AutoRun_FixPrivilegeIfNeeded();
     AutoRun_MigrateIfNeeded();
 
-    // register the throne:// URL scheme (self-heals if the install was moved)
+    // register the Gryph:// URL scheme (self-heals if the install was moved)
     UrlScheme_RegisterIfNeeded();
 
     // Setup misc UI
@@ -211,13 +236,13 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Prepare core
     auto core_path = QApplication::applicationDirPath() + "/";
-    core_path += "ThroneCore";
+    core_path += "GryphCore";
 
     bool coreDebugMode = (Configs::dataManager->settingsRepo->log_level == "debug");
 
     // Create IPC server with a random UUID name
     Configs::dataManager->settingsRepo->core_socket_name =
-        "throneIPC-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+        "gryphIPC-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
     core_server = new QLocalServer(this);
     core_server->setSocketOptions(QLocalServer::UserAccessOption);
     if (!core_server->listen(Configs::dataManager->settingsRepo->core_socket_name)) {
@@ -312,11 +337,11 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     }
 
     // software_name
-    software_name = "Throne";
+    software_name = "Gryph";
     software_core_name = "sing-box";
     //
     if (auto dashDir = QDir("dashboard"); !dashDir.exists() && QDir().mkdir("dashboard")) {
-        if (auto dashFile = QFile(":/Throne/dashboard-notice.html"); dashFile.exists() && dashFile.open(QIODevice::ReadOnly))
+        if (auto dashFile = QFile(":/Gryph/dashboard-notice.html"); dashFile.exists() && dashFile.open(QIODevice::ReadOnly))
         {
             auto data = dashFile.readAll();
             if (auto dest = QFile("dashboard/index.html"); dest.open(QIODevice::Truncate | QIODevice::WriteOnly))
@@ -1246,7 +1271,7 @@ void MainWindow::show_group(int gid) {
 
 void MainWindow::handle_deeplink_impl(const QString &url) {
     const QUrl u(url);
-    // QUrl lowercases the host, so "throne://AddSub/" arrives with host "addsub".
+    // QUrl lowercases the host, so "Gryph://AddSub/" arrives with host "addsub".
     const QString cmd = u.host();
     const QUrlQuery q(u);
 
@@ -1315,7 +1340,7 @@ void MainWindow::handle_addsub(const QString &url, const QString &name, bool aut
 }
 
 void MainWindow::import_or_handle_deeplink(const QString &text) {
-    if (const QString trimmed = text.trimmed(); trimmed.startsWith("throne://")) {
+    if (const QString trimmed = text.trimmed(); trimmed.startsWith("Gryph://")) {
         handle_deeplink_impl(trimmed);
         return;
     }
@@ -1620,7 +1645,7 @@ bool MainWindow::get_elevated_permissions(int reason) {
     }
 #endif
 #ifdef Q_OS_WIN
-    auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please run Throne as admin"), QMessageBox::Yes | QMessageBox::No);
+    auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please run Gryph as admin"), QMessageBox::Yes | QMessageBox::No);
     if (n == QMessageBox::Yes) {
         this->exit_reason = reason;
         on_menu_exit_triggered();
@@ -3142,7 +3167,7 @@ bool MainWindow::StopVPNProcess() {
 
 bool isNewer(QString assetName) {
     if (QString(NKR_VERSION).isEmpty()) return false;
-    assetName = assetName.mid(7); // take out Throne-
+    assetName = assetName.mid(7); // take out Gryph-
     QString version;
     auto spl = assetName.split('-');
     version += spl[0]; // version: 1.2.3
@@ -3246,7 +3271,7 @@ void MainWindow::CheckUpdate() {
         return;
     }
 
-    auto resp = NetworkRequestHelper::HttpGet("https://api.github.com/repos/throneproj/Throne/releases");
+    auto resp = NetworkRequestHelper::HttpGet("https://api.github.com/repos/throneproj/Gryph/releases");
     if (!resp.error.isEmpty()) {
         runOnUiThread([=,this] {
             MessageBoxWarning(QObject::tr("Update"), QObject::tr("Requesting update error: %1").arg(resp.error + "\n" + resp.data));
@@ -3305,7 +3330,7 @@ void MainWindow::CheckUpdate() {
                 }
                 QString errors;
                 if (!release_download_url.isEmpty()) {
-                    auto res = NetworkRequestHelper::DownloadAsset(release_download_url, "Throne.zip");
+                    auto res = NetworkRequestHelper::DownloadAsset(release_download_url, "Gryph.zip");
                     if (!res.isEmpty()) {
                         errors += res;
                     }

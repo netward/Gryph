@@ -9,7 +9,7 @@
 #include <QStandardPaths>
 #include <QTextStream>
 
-static const QString kDesktopId = "throne-url-handler.desktop";
+static const QString kDesktopId = "Gryph-url-handler.desktop";
 
 // For AppImage the launcher must point at the outer image ($APPIMAGE), not the
 // extracted binary inside the mount, which disappears after exit.
@@ -37,9 +37,9 @@ void UrlScheme_Apply() {
         QTextStream ts(&f);
         ts << "[Desktop Entry]\n"
            << "Type=Application\n"
-           << "Name=Throne\n"
+           << "Name=Gryph\n"
            << "Exec=\"" << execTarget() << "\" %u\n"
-           << "MimeType=x-scheme-handler/throne;\n"
+           << "MimeType=x-scheme-handler/Gryph;\n"
            << "Terminal=false\n"
            << "NoDisplay=true\n";
         ts.flush();
@@ -50,5 +50,5 @@ void UrlScheme_Apply() {
     // may be absent on minimal systems; execute() just returns nonzero then.
     const QString appsDir = QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation);
     QProcess::execute("update-desktop-database", {appsDir});
-    QProcess::execute("xdg-mime", {"default", kDesktopId, "x-scheme-handler/throne"});
+    QProcess::execute("xdg-mime", {"default", kDesktopId, "x-scheme-handler/Gryph"});
 }

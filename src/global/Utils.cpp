@@ -338,13 +338,13 @@ static QString g_pendingDeeplink;
 
 QString Deeplink_ExtractFromArgs(const QStringList &args) {
     for (const auto &arg : args) {
-        if (arg.startsWith("throne://")) return arg;
+        if (arg.startsWith("Gryph://")) return arg;
     }
     return {};
 }
 
 void Deeplink_Submit(const QString &url) {
-    if (url.isEmpty() || !url.startsWith("throne://")) return;
+    if (url.isEmpty() || !url.startsWith("Gryph://")) return;
     if (MW_handle_deeplink) {
         MW_handle_deeplink(url);
     } else {

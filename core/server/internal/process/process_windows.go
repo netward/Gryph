@@ -152,7 +152,7 @@ func findProcess(name string) (uint32, error) {
 // unprivileged users lack, so an ordinary O_CREATE|O_EXCL temp file (the
 // default of os.CreateTemp) already creates a clean, un-hijackable file.
 func createSecureConfigFile() (*os.File, string, error) {
-	f, err := os.CreateTemp("", "throne-extra-*.conf")
+	f, err := os.CreateTemp("", "Gryph-extra-*.conf")
 	if err != nil {
 		return nil, "", err
 	}

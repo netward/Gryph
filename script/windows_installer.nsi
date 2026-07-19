@@ -1,5 +1,5 @@
-Name "Throne"
-OutFile "ThroneSetup.exe"
+Name "Gryph"
+OutFile "GryphSetup.exe"
 
 ; 1. NEVER ask for UAC on launch
 RequestExecutionLevel user 
@@ -14,12 +14,12 @@ SetCompressorDictSize 64
 !include WinVer.nsh
 !include x64.nsh
 
-!define MUI_ICON "res\Throne.ico"
+!define MUI_ICON "res\Gryph.ico"
 !define MUI_ABORTWARNING
-!define MUI_WELCOMEPAGE_TITLE "Welcome to Throne Installer"
-!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the installation of Throne."
-!define MUI_FINISHPAGE_RUN "$INSTDIR\Throne.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Launch Throne"
+!define MUI_WELCOMEPAGE_TITLE "Welcome to Gryph Installer"
+!define MUI_WELCOMEPAGE_TEXT "This wizard will guide you through the installation of Gryph."
+!define MUI_FINISHPAGE_RUN "$INSTDIR\Gryph.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Launch Gryph"
 !addplugindir .\script\
 
 ; This is the Windows constant used to draw the UAC Shield on a button
@@ -57,8 +57,8 @@ Page custom InstallModePageCreate InstallModePageLeave
 
 !insertmacro MUI_LANGUAGE "English"
 
-UninstallText "This will uninstall Throne. Do you wish to continue?"
-UninstallIcon "res\ThroneDel.ico"
+UninstallText "This will uninstall Gryph. Do you wish to continue?"
+UninstallIcon "res\GryphDel.ico"
 
 ; =====================================
 ; INIT & SEAMLESS RESTART LOGIC
@@ -74,14 +74,14 @@ Function .onInit
     StrCpy $IsAllUsers "1"
 
     ; Read the chosen installation path from the temporary registry key
-    ReadRegStr $INSTDIR HKCU "Software\Throne" "TempSetupPath"
-    DeleteRegValue HKCU "Software\Throne" "TempSetupPath" ; Clean it up immediately
+    ReadRegStr $INSTDIR HKCU "Software\Gryph" "TempSetupPath"
+    DeleteRegValue HKCU "Software\Gryph" "TempSetupPath" ; Clean it up immediately
 
     SetShellVarContext all
   ${Else}
     ; Normal launch. Default to "Just Me" (Current User)
     StrCpy $IsAllUsers "0"
-    StrCpy $INSTDIR "$LOCALAPPDATA\Throne"
+    StrCpy $INSTDIR "$LOCALAPPDATA\Gryph"
     SetShellVarContext current
   ${EndIf}
 FunctionEnd
@@ -126,10 +126,10 @@ Function InstallModePageLeave
   ${NSD_GetState} $RadioAllUsers $0
   ${If} $0 == ${BST_CHECKED}
     StrCpy $IsAllUsers "1"
-    StrCpy $INSTDIR "$PROGRAMFILES64\Throne"
+    StrCpy $INSTDIR "$PROGRAMFILES64\Gryph"
   ${Else}
     StrCpy $IsAllUsers "0"
-    StrCpy $INSTDIR "$LOCALAPPDATA\Throne"
+    StrCpy $INSTDIR "$LOCALAPPDATA\Gryph"
   ${EndIf}
 FunctionEnd
 
@@ -154,7 +154,7 @@ Function DirectoryLeave
     Pop $0
     ${If} $0 != "Admin"
       ; Write the chosen path safely to the registry for the elevated process to grab
-      WriteRegStr HKCU "Software\Throne" "TempSetupPath" "$INSTDIR"
+      WriteRegStr HKCU "Software\Gryph" "TempSetupPath" "$INSTDIR"
 
       ; Trigger UAC and silently launch the elevated installer
       ExecShell "runas" "$EXEPATH" "/ELEVATED"
@@ -205,41 +205,38 @@ Section "Install"
   SetOutPath "$INSTDIR"
   SetOverwrite on
 
-  !insertmacro AbortOnRunningApp "$INSTDIR\Throne.exe"
+  !insertmacro AbortOnRunningApp "$INSTDIR\Gryph.exe"
 
   ${If} ${IsNativeAMD64}
-    ${If} ${AtLeastWaaS} 1809
-      File /oname=libcronet.dll "deployment\windows-amd64\libcronet.dll"
-      File /oname=ThroneCore.exe "deployment\windows-amd64\ThroneCore.exe"
-      File /oname=Throne.exe "deployment\windows-amd64\Throne.exe"
-      File /oname=updater.exe "deployment\windows-amd64\updater.exe"
-    ${Else}
-      File /oname=ThroneCore.exe "deployment\windowslegacy-amd64\ThroneCore.exe"
-      File /oname=Throne.exe "deployment\windowslegacy-amd64\Throne.exe"
-      File /oname=updater.exe "deployment\windowslegacy-amd64\updater.exe"
+  ${If} ${AtLeastWaaS} 1809
+    File /r /x "*.pdb" /x "*.lib" /x "*.exp" "dist\windows-amd64\*.*"
+  ${Else}
+      ;File /oname=GryphCore.exe "deployment\windowslegacy-amd64\GryphCore.exe"
+      ;File /oname=Gryph.exe "deployment\windowslegacy-amd64\Gryph.exe"
+      ;File /oname=updater.exe "deployment\windowslegacy-amd64\updater.exe"
     ${EndIf}
   ${ElseIf} ${IsNativeARM64}
-    File /oname=libcronet.dll "deployment\windows-arm64\libcronet.dll"
-    File /oname=ThroneCore.exe "deployment\windows-arm64\ThroneCore.exe"
-    File /oname=Throne.exe "deployment\windows-arm64\Throne.exe"
-    File /oname=updater.exe "deployment\windows-arm64\updater.exe"
+    ;File /oname=libcronet.dll "deployment\windows-arm64\libcronet.dll"
+    ;File /oname=GryphCore.exe "deployment\windows-arm64\GryphCore.exe"
+    ;File /oname=Gryph.exe "deployment\windows-arm64\Gryph.exe"
+    ;File /oname=updater.exe "deployment\windows-arm64\updater.exe"
   ${ElseIf} ${IsNativeIA32}
-    File /oname=ThroneCore.exe "deployment\windowslegacy-386\ThroneCore.exe"
-    File /oname=Throne.exe "deployment\windowslegacy-386\Throne.exe"
-    File /oname=updater.exe "deployment\windowslegacy-386\updater.exe"
+    ;File /oname=GryphCore.exe "deployment\windowslegacy-386\GryphCore.exe"
+    ;File /oname=Gryph.exe "deployment\windowslegacy-386\Gryph.exe"
+    ;File /oname=updater.exe "deployment\windowslegacy-386\updater.exe"
   ${Else}
     Abort "Unsupported CPU architecture!"
   ${EndIf}
 
-  CreateShortcut "$DESKTOP\Throne.lnk" "$INSTDIR\Throne.exe"
-  CreateShortcut "$SMPROGRAMS\Throne.lnk" "$INSTDIR\Throne.exe" "" "$INSTDIR\Throne.exe" 0
+  CreateShortcut "$DESKTOP\Gryph.lnk" "$INSTDIR\Gryph.exe"
+  CreateShortcut "$SMPROGRAMS\Gryph.lnk" "$INSTDIR\Gryph.exe" "" "$INSTDIR\Gryph.exe" 0
 
-  WriteRegStr SHCTX "Software\Throne" "InstallPath" "$INSTDIR"
-  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Throne" "DisplayName" "Throne"
-  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Throne" "UninstallString" "$INSTDIR\uninstall.exe"
-  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Throne" "InstallLocation" "$INSTDIR"
-  WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Throne" "NoModify" 1
-  WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Throne" "NoRepair" 1
+  WriteRegStr SHCTX "Software\Gryph" "InstallPath" "$INSTDIR"
+  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Gryph" "DisplayName" "Gryph"
+  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Gryph" "UninstallString" "$INSTDIR\uninstall.exe"
+  WriteRegStr SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Gryph" "InstallLocation" "$INSTDIR"
+  WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Gryph" "NoModify" 1
+  WriteRegDWORD SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Gryph" "NoRepair" 1
   WriteUninstaller "uninstall.exe"
 SectionEnd
 
@@ -260,7 +257,7 @@ Function un.onInit
   ${EndIf}
 
   ; Read the Admin registry to see if THIS specific folder belongs to an Admin installation
-  ReadRegStr $0 HKLM "Software\Throne" "InstallPath"
+  ReadRegStr $0 HKLM "Software\Gryph" "InstallPath"
 
   ${If} $0 == $UninstPath
     ; --- IT IS AN ALL USERS INSTALL ---
@@ -268,7 +265,7 @@ Function un.onInit
     UserInfo::GetAccountType
     Pop $1
     ${If} $1 != "Admin"
-       MessageBox MB_YESNO|MB_ICONEXCLAMATION "Uninstalling Throne for all users requires Administrator privileges.$\n$\nDo you want to elevate?" IDNO Stay
+       MessageBox MB_YESNO|MB_ICONEXCLAMATION "Uninstalling Gryph for all users requires Administrator privileges.$\n$\nDo you want to elevate?" IDNO Stay
        ; Elevate via UAC and explicitly pass the real folder path in quotes!
        ExecShell "runas" "$EXEPATH" '/UINSTDIR="$UninstPath"'
        Quit
@@ -285,15 +282,15 @@ Function un.onInit
 FunctionEnd
 
 Section "Uninstall"
-  !insertmacro AbortOnRunningApp "$INSTDIR\Throne.exe"
+  !insertmacro AbortOnRunningApp "$INSTDIR\Gryph.exe"
 
-  Delete "$SMPROGRAMS\Throne.lnk"
-  Delete "$DESKTOP\Throne.lnk"
-  RMDir "$SMPROGRAMS\Throne"
+  Delete "$SMPROGRAMS\Gryph.lnk"
+  Delete "$DESKTOP\Gryph.lnk"
+  RMDir "$SMPROGRAMS\Gryph"
 
   RMDir /r "$INSTDIR"
 
   ; Clean up registry!
-  DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Throne"
-  DeleteRegKey SHCTX "Software\Throne"
+  DeleteRegKey SHCTX "Software\Microsoft\Windows\CurrentVersion\Uninstall\Gryph"
+  DeleteRegKey SHCTX "Software\Gryph"
 SectionEnd

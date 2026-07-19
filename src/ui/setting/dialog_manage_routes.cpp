@@ -377,7 +377,7 @@ void DialogManageRoutes::on_import_route_clicked()
 
     auto layout = new QGridLayout(w);
     auto tEdit = new QTextEdit(w);
-    tEdit->setPlaceholderText(tr("Paste a Throne route link, a base64 blob, or a JSON rule array"));
+    tEdit->setPlaceholderText(tr("Paste a Gryph route link, a base64 blob, or a JSON rule array"));
     layout->addWidget(tEdit, 0, 0);
 
     auto buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, Qt::Horizontal, w);

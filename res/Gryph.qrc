@@ -17,8 +17,8 @@
         <file>icon/material/swap-horizontal.png</file>
         <file alias="checkmark.svg">icon/checkmark.svg</file>
     </qresource>
-    <qresource prefix="/Throne">
-        <file alias="Throne.png">public/Throne.png</file>
+    <qresource prefix="/Gryph">
+        <file alias="Gryph.png">public/Gryph.png</file>
         <file alias="Dns.png">public/Dns.png</file>
         <file alias="Off.png">public/Off.png</file>
         <file alias="Proxy.png">public/Proxy.png</file>

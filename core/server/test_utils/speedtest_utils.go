@@ -1,8 +1,8 @@
 package test_utils
 
 import (
-	"ThroneCore/internal"
-	"ThroneCore/internal/boxbox"
+	"GryphCore/internal"
+	"GryphCore/internal/boxbox"
 	"bytes"
 	"context"
 	"errors"

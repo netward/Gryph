@@ -1,10 +1,10 @@
 package main
 
 import (
-	"ThroneCore/internal/boxmain"
-	"ThroneCore/ipc"
-	"ThroneCore/parentcheck"
-	"ThroneCore/test_utils"
+	"GryphCore/internal/boxmain"
+	"GryphCore/ipc"
+	"GryphCore/parentcheck"
+	"GryphCore/test_utils"
 	"context"
 	"fmt"
 	"github.com/xtls/xray-core/core"
@@ -16,16 +16,16 @@ import (
 	"syscall"
 	"time"
 
-	_ "ThroneCore/internal/distro/all"
+	_ "GryphCore/internal/distro/all"
 	C "github.com/sagernet/sing-box/constant"
 )
 
 func RunCore() {
-	socketName := os.Getenv("THRONE_CORE_SOCKET")
+	socketName := os.Getenv("GRYPH_CORE_SOCKET")
 	if socketName == "" {
-		log.Fatal("THRONE_CORE_SOCKET not set")
+		log.Fatal("GRYPH_CORE_SOCKET not set")
 	}
-	debug = os.Getenv("THRONE_CORE_DEBUG") == "1"
+	debug = os.Getenv("GRYPH_CORE_DEBUG") == "1"
 
 	parentcheck.CheckParentProcess()
 
@@ -66,7 +66,7 @@ func RunCore() {
 		log.Fatalf("failed to connect to GUI socket after 10 attempts: %v", err)
 	}
 
-	fmt.Println("Core Has Successfully Connected to Throne!")
+	fmt.Println("Core Has Successfully Connected to Gryph!")
 	runDispatch(conn)
 }
 

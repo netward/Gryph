@@ -15,7 +15,7 @@ QString GetTaskName() {
 
     QString shortHash = QString(hash).left(8);
 
-    return QString("Throne AutoRun %1").arg(shortHash);
+    return QString("Gryph AutoRun %1").arg(shortHash);
 }
 
 QString getCurrentUser() {

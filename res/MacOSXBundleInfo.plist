@@ -36,10 +36,10 @@
 	<array>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>moe.Throne.macosx</string>
+			<string>moe.Gryph.macosx</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>throne</string>
+				<string>Gryph</string>
 			</array>
 		</dict>
 	</array>

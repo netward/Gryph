@@ -1,7 +1,7 @@
 package main
 
 import (
-	"ThroneCore/gen"
+	"GryphCore/gen"
 	"context"
 	"encoding/binary"
 	"fmt"

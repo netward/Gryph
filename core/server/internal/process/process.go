@@ -127,13 +127,13 @@ func CreateExtraConfig(content string) (string, string, error) {
 	return configPath, cleanupPath, nil
 }
 
-// childEnv returns the parent environment minus any THRONE-prefixed variables,
+// childEnv returns the parent environment minus any Gryph-prefixed variables,
 // which carry app-internal configuration the external process must not see.
 func childEnv() []string {
 	parent := os.Environ()
 	out := make([]string, 0, len(parent))
 	for _, kv := range parent {
-		if name, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(strings.ToUpper(name), "THRONE") {
+		if name, _, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(strings.ToUpper(name), "Gryph") {
 			continue
 		}
 		out = append(out, kv)

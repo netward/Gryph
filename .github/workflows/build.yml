@@ -1,4 +1,4 @@
-name: Throne build matrix
+name: Gryph build matrix
 on:
   workflow_dispatch:
     inputs:
@@ -110,7 +110,7 @@ jobs:
       - name: Uploading Artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: Throne-${{ github.sha }}-Common-${{ matrix.cross_os }}-${{ matrix.cross_arch }}
+          name: Gryph-${{ github.sha }}-Common-${{ matrix.cross_os }}-${{ matrix.cross_arch }}
           path: artifacts.tgz
   build-cpp:
     permissions:
@@ -255,7 +255,7 @@ jobs:
       - name: Uploading Artifact
         uses: actions/upload-artifact@v4.6.2
         with:
-          name: Throne-${{ github.sha }}-${{ matrix.dest_suffix }}
+          name: Gryph-${{ github.sha }}-${{ matrix.dest_suffix }}
           path: artifacts.tgz
   publish:
     name: Pack & Publish Release
@@ -281,77 +281,77 @@ jobs:
           sudo apt install nsis
           cp ./script/windows_installer.nsi .
           makensis windows_installer.nsi
-          cp ThroneSetup.exe deployment/Throne-${{ github.event.inputs.tag }}-windows-universal-installer.exe
+          cp GryphSetup.exe deployment/Gryph-${{ github.event.inputs.tag }}-windows-universal-installer.exe
           ####
           cd deployment
           mkdir debug
           ####
           bash ../script/pack_debian.sh ${{ github.event.inputs.tag }} amd64
-          mv Throne.deb Throne-${{ github.event.inputs.tag }}-debian-amd64.deb
-          rm -rf Throne
+          mv Gryph.deb Gryph-${{ github.event.inputs.tag }}-debian-amd64.deb
+          rm -rf Gryph
           ####
           bash ../script/pack_debian.sh ${{ github.event.inputs.tag }} amd64 systemqt
-          mv Throne.deb Throne-${{ github.event.inputs.tag }}-debian-amd64-system-qt.deb
-          rm -rf Throne
+          mv Gryph.deb Gryph-${{ github.event.inputs.tag }}-debian-amd64-system-qt.deb
+          rm -rf Gryph
           ####
           bash ../script/pack_debian.sh ${{ github.event.inputs.tag }} arm64
-          mv Throne.deb Throne-${{ github.event.inputs.tag }}-debian-arm64.deb
-          rm -rf Throne
+          mv Gryph.deb Gryph-${{ github.event.inputs.tag }}-debian-arm64.deb
+          rm -rf Gryph
           ####
           bash ../script/pack_debian.sh ${{ github.event.inputs.tag }} arm64 systemqt
-          mv Throne.deb Throne-${{ github.event.inputs.tag }}-debian-arm64-system-qt.deb
-          rm -rf Throne
+          mv Gryph.deb Gryph-${{ github.event.inputs.tag }}-debian-arm64-system-qt.deb
+          rm -rf Gryph
           ####
-          mv linux-amd64 Throne
-          mv Throne/Throne.debug debug/Throne-${{ github.event.inputs.tag }}-linux-amd64.debug
-          zip -9 -r Throne-${{ github.event.inputs.tag }}-linux-amd64.zip Throne
-          rm -rf Throne
+          mv linux-amd64 Gryph
+          mv Gryph/Gryph.debug debug/Gryph-${{ github.event.inputs.tag }}-linux-amd64.debug
+          zip -9 -r Gryph-${{ github.event.inputs.tag }}-linux-amd64.zip Gryph
+          rm -rf Gryph
           ####
-          mv linux-arm64 Throne
-          mv Throne/Throne.debug debug/Throne-${{ github.event.inputs.tag }}-linux-arm64.debug
-          zip -9 -r Throne-${{ github.event.inputs.tag }}-linux-arm64.zip Throne
-          rm -rf Throne
+          mv linux-arm64 Gryph
+          mv Gryph/Gryph.debug debug/Gryph-${{ github.event.inputs.tag }}-linux-arm64.debug
+          zip -9 -r Gryph-${{ github.event.inputs.tag }}-linux-arm64.zip Gryph
+          rm -rf Gryph
           ####
-          mv windows-amd64 Throne
-          mv Throne/Throne.pdb debug/Throne-${{ github.event.inputs.tag }}-windows-amd64.pdb
-          zip -9 -r Throne-${{ github.event.inputs.tag }}-windows64.zip Throne
-          rm -rf Throne
+          mv windows-amd64 Gryph
+          mv Gryph/Gryph.pdb debug/Gryph-${{ github.event.inputs.tag }}-windows-amd64.pdb
+          zip -9 -r Gryph-${{ github.event.inputs.tag }}-windows64.zip Gryph
+          rm -rf Gryph
           ####
-          mv windows-arm64 Throne
-          mv Throne/Throne.pdb debug/Throne-${{ github.event.inputs.tag }}-windows-arm64.pdb
-          zip -9 -r Throne-${{ github.event.inputs.tag }}-windows-arm64.zip Throne
-          rm -rf Throne
+          mv windows-arm64 Gryph
+          mv Gryph/Gryph.pdb debug/Gryph-${{ github.event.inputs.tag }}-windows-arm64.pdb
+          zip -9 -r Gryph-${{ github.event.inputs.tag }}-windows-arm64.zip Gryph
+          rm -rf Gryph
           ####
-          mv windowslegacy-386 Throne
-          mv Throne/Throne.pdb debug/Throne-${{ github.event.inputs.tag }}-windowslegacy-386.pdb
-          zip -9 -r Throne-${{ github.event.inputs.tag }}-windows32.zip Throne
-          rm -rf Throne
+          mv windowslegacy-386 Gryph
+          mv Gryph/Gryph.pdb debug/Gryph-${{ github.event.inputs.tag }}-windowslegacy-386.pdb
+          zip -9 -r Gryph-${{ github.event.inputs.tag }}-windows32.zip Gryph
+          rm -rf Gryph
           ####
-          mv windowslegacy-amd64 Throne
-          mv Throne/Throne.pdb debug/Throne-${{ github.event.inputs.tag }}-windowslegacy-amd64.pdb
-          zip -9 -r Throne-${{ github.event.inputs.tag }}-windowslegacy64.zip Throne
-          rm -rf Throne
+          mv windowslegacy-amd64 Gryph
+          mv Gryph/Gryph.pdb debug/Gryph-${{ github.event.inputs.tag }}-windowslegacy-amd64.pdb
+          zip -9 -r Gryph-${{ github.event.inputs.tag }}-windowslegacy64.zip Gryph
+          rm -rf Gryph
           ####
-          mkdir Throne
-          mv darwin-arm64/Throne.app Throne/Throne.app
-          mv Throne/Throne.app/Contents/MacOS/Throne.dSYM debug/Throne-${{ github.event.inputs.tag }}-macos-arm64.dSYM
-          zip -9 --symlinks -r Throne-${{ github.event.inputs.tag }}-macos-arm64.zip Throne
+          mkdir Gryph
+          mv darwin-arm64/Gryph.app Gryph/Gryph.app
+          mv Gryph/Gryph.app/Contents/MacOS/Gryph.dSYM debug/Gryph-${{ github.event.inputs.tag }}-macos-arm64.dSYM
+          zip -9 --symlinks -r Gryph-${{ github.event.inputs.tag }}-macos-arm64.zip Gryph
           rm -rf darwin-arm64
-          rm -rf Throne
+          rm -rf Gryph
           ####
-          mkdir Throne
-          mv darwin-amd64/Throne.app Throne/Throne.app
-          mv Throne/Throne.app/Contents/MacOS/Throne.dSYM debug/Throne-${{ github.event.inputs.tag }}-macos-amd64.dSYM
-          zip -9 --symlinks -r Throne-${{ github.event.inputs.tag }}-macos-amd64.zip Throne
+          mkdir Gryph
+          mv darwin-amd64/Gryph.app Gryph/Gryph.app
+          mv Gryph/Gryph.app/Contents/MacOS/Gryph.dSYM debug/Gryph-${{ github.event.inputs.tag }}-macos-amd64.dSYM
+          zip -9 --symlinks -r Gryph-${{ github.event.inputs.tag }}-macos-amd64.zip Gryph
           rm -rf darwin-amd64
-          rm -rf Throne
+          rm -rf Gryph
           ####
-          mkdir Throne
-          mv darwinlegacy-amd64/Throne.app Throne/Throne.app
-          mv Throne/Throne.app/Contents/MacOS/Throne.dSYM debug/Throne-${{ github.event.inputs.tag }}-macoslegacy-amd64.dSYM
-          zip -9 --symlinks -r Throne-${{ github.event.inputs.tag }}-macoslegacy-amd64.zip Throne
+          mkdir Gryph
+          mv darwinlegacy-amd64/Gryph.app Gryph/Gryph.app
+          mv Gryph/Gryph.app/Contents/MacOS/Gryph.dSYM debug/Gryph-${{ github.event.inputs.tag }}-macoslegacy-amd64.dSYM
+          zip -9 --symlinks -r Gryph-${{ github.event.inputs.tag }}-macoslegacy-amd64.zip Gryph
           rm -rf darwinlegacy-amd64
-          rm -rf Throne
+          rm -rf Gryph
           ####
           zip -9 -r debug-symbols.zip debug
       - name: Uploading Debug Artifact

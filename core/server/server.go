@@ -1,14 +1,14 @@
 package main
 
 import (
-	"ThroneCore/gen"
-	"ThroneCore/internal/boxbox"
-	"ThroneCore/internal/boxmain"
-	"ThroneCore/internal/process"
-	"ThroneCore/internal/sys"
-	"ThroneCore/internal/wg"
-	"ThroneCore/internal/xray"
-	"ThroneCore/test_utils"
+	"GryphCore/gen"
+	"GryphCore/internal/boxbox"
+	"GryphCore/internal/boxmain"
+	"GryphCore/internal/process"
+	"GryphCore/internal/sys"
+	"GryphCore/internal/wg"
+	"GryphCore/internal/xray"
+	"GryphCore/test_utils"
 	"context"
 	"errors"
 	"fmt"

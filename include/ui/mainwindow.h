@@ -264,7 +264,7 @@ private:
 
     void handle_import_route(const QString &url);
 
-    // Routes user-supplied text: throne:// links go to the deeplink handler, the
+    // Routes user-supplied text: Gryph:// links go to the deeplink handler, the
     // rest to the subscription/profile importer.
     void import_or_handle_deeplink(const QString &text);
 

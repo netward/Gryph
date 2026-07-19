@@ -1,8 +1,8 @@
 package main
 
 import (
-	"ThroneCore/gen"
-	"ThroneCore/internal/boxdns"
+	"GryphCore/gen"
+	"GryphCore/internal/boxdns"
 	"context"
 )
 

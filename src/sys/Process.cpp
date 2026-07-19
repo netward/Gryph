@@ -80,8 +80,8 @@ namespace Configs_sys {
         started = true;
 
         auto env = QProcessEnvironment::systemEnvironment();
-        env.insert("THRONE_CORE_SOCKET", m_socketName);
-        if (m_debugMode) env.insert("THRONE_CORE_DEBUG", "1");
+        env.insert("GRYPH_CORE_SOCKET", m_socketName);
+        if (m_debugMode) env.insert("GRYPH_CORE_DEBUG", "1");
         setProcessEnvironment(env);
         start(program, {});
     }

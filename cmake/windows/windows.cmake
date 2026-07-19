@@ -4,12 +4,12 @@ set(PLATFORM_LIBRARIES wininet wsock32 ws2_32 user32 rasapi32 iphlpapi ntdll wbe
 include(cmake/windows/generate_product_version.cmake)
 generate_product_version(
         QV2RAY_RC
-        ICON "${CMAKE_SOURCE_DIR}/res/Throne.ico"
-        NAME "Throne"
-        BUNDLE "Throne"
-        COMPANY_NAME "Throne"
-        COMPANY_COPYRIGHT "Throne"
-        FILE_DESCRIPTION "Throne"
+        ICON "${CMAKE_SOURCE_DIR}/res/Gryph.ico"
+        NAME "Gryph"
+        BUNDLE "Gryph"
+        COMPANY_NAME "NetWard Labs"
+        COMPANY_COPYRIGHT "NetWard Labs"
+        FILE_DESCRIPTION "Gryph"
 )
 add_definitions(-DUNICODE -D_UNICODE -DNOMINMAX)
 set(GUI_TYPE WIN32)

@@ -109,7 +109,7 @@ namespace Configs
             }
             QUrl url;
             url.setScheme("json");
-            url.setHost("throne");
+            url.setHost("Gryph");
             url.setFragment(QJsonObject2QString(json, true)
                                 .toUtf8()
                                 .toBase64(QByteArray::Base64UrlEncoding));

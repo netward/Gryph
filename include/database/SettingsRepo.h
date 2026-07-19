@@ -100,7 +100,7 @@ namespace Configs {
         bool use_custom_icons = false;
         bool skip_delete_confirmation = false;
 
-        // throne:// URL scheme: mirror of what we last wrote to the OS (registry/desktop/bundle).
+        // Gryph:// URL scheme: mirror of what we last wrote to the OS (registry/desktop/bundle).
         // Re-registered on startup only when the current state differs (e.g. install moved).
         QString url_scheme_mirror = "";
 

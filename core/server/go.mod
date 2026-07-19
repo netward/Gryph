@@ -1,4 +1,4 @@
-module ThroneCore
+module GryphCore
 
 go 1.26
 
