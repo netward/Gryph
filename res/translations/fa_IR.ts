@@ -2,141 +2,6 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="fa_IR" sourcelanguage="en">
 <context>
-    <name>QObject</name>
-    <message>
-        <source>Request with proxy but no profile started.</source>
-        <translation type="unfinished">درخواست با پروکسی اما هیچ نمایه‌ای شروع نشده است.</translation>
-    </message>
-    <message>
-        <source>Could not open file.</source>
-        <translation type="unfinished">نمی‌توان پرونده را باز کرد.</translation>
-    </message>
-    <message>
-        <source>Proxy: %1
-Direct: %2</source>
-        <translation type="unfinished">پروکسی: %1 مستقیم: %2</translation>
-    </message>
-    <message>
-        <source>Add profiles to this group</source>
-        <translation type="unfinished">افزودن نمایه‌ها به این گروه</translation>
-    </message>
-    <message>
-        <source>Create new subscription group</source>
-        <translation type="unfinished">ایجاد گروه اشتراک جدید</translation>
-    </message>
-    <message>
-        <source>url detected</source>
-        <translation type="unfinished">آدرس شناسایی شد</translation>
-    </message>
-    <message>
-        <source>%1
-How to update?</source>
-        <translation type="unfinished">چگونه بروزرسانی کنم ؟</translation>
-    </message>
-    <message>
-        <source>Requesting subscription: %1</source>
-        <translation type="unfinished">درخواست اشتراک: %1</translation>
-    </message>
-    <message>
-        <source>Requesting subscription %1 error: %2</source>
-        <translation type="unfinished">خطای درخواست اشتراک %1: %2</translation>
-    </message>
-    <message>
-        <source>Subscription request fininshed: %1</source>
-        <translation type="unfinished">درخواست اشتراک به پایان رسید: %1</translation>
-    </message>
-    <message>
-        <source>Clearing servers...</source>
-        <translation type="unfinished">در حال پاک کردن سرورها...</translation>
-    </message>
-    <message>
-        <source>Processing subscription data...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Process complete, applying...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Added %1 profiles:
-%2
-Deleted %3 Profiles:
-%4</source>
-        <translation type="unfinished">%1 نمایه افزوده شده:
-%2
-%3 نمایه پاک شده:
-%4</translation>
-    </message>
-    <message>
-        <source>Nothing</source>
-        <translation type="unfinished">خالی</translation>
-    </message>
-    <message>
-        <source>Change of %1:</source>
-        <translation type="unfinished">تغییر %1:</translation>
-    </message>
-    <message>
-        <source>Core exited, cleaning up...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Core exits too frequently, stop automatic restart this profile.</source>
-        <translation type="unfinished">هسته بیش از حد متوقف می‌شود، راه‌اندازی خودکار این نمایه متوقف شود.</translation>
-    </message>
-    <message>
-        <source>Restarting the core ...</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Download Profiles</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Requesting profile error: %1</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Update</source>
-        <translation type="unfinished">بروزرسانی</translation>
-    </message>
-    <message>
-        <source>Not official support platform</source>
-        <translation type="unfinished">پلتفرم پشتیبانی رسمی نیست</translation>
-    </message>
-    <message>
-        <source>Requesting update error: %1</source>
-        <translation type="unfinished">خطای درخواست به‌روزرسانی: %1</translation>
-    </message>
-    <message>
-        <source>No update</source>
-        <translation type="unfinished">بدون بروزرسانی جدید</translation>
-    </message>
-    <message>
-        <source>Update found: %1
-Release note:
-%2</source>
-        <translation type="unfinished">به‌روزرسانی یافت شد: %1
-یادداشت انتشار:
-%2</translation>
-    </message>
-    <message>
-        <source>Open in browser</source>
-        <translation type="unfinished">در مرور گر باز شود</translation>
-    </message>
-    <message>
-        <source>Close</source>
-        <translation type="unfinished">بستن</translation>
-    </message>
-    <message>
-        <source>Update is ready, restart to install?</source>
-        <translation type="unfinished">به روز رسانی آماده است، برای نصب مجدد راه اندازی شود؟</translation>
-    </message>
-    <message>
-        <source>Select</source>
-        <translation type="unfinished"></translation>
-    </message>
-</context>
-<context>
     <name>DialogBasicSettings</name>
     <message>
         <source>Basic Settings</source>
@@ -185,10 +50,6 @@ Release note:
     <message>
         <source>Custom Inbound</source>
         <translation>ورودی سفارشی</translation>
-    </message>
-    <message>
-        <source>Concurrent</source>
-        <translation>هم زمان</translation>
     </message>
     <message>
         <source>Security</source>
@@ -268,8 +129,117 @@ Release note:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Enable Authorization</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inbound Username</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disable Mixed Inbound</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>
+														&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Socks
+														+ HTTP Proxy&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+													</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Inbound Password</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restart Proxy On System Proxy Disable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use proxy for subscription request, update request etc&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Testing</source>
+        <translation type="unfinished">آزمایش کردن</translation>
+    </message>
+    <message>
+        <source>Concurrency</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Logging</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sing-box Log level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xray Log level</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Log Filtering</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Include Keywords</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Include Regex</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Include Rules</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Exclude Rules</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exclude Keywords</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Exclude Regex</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;When enabled, If the currently active profile needs to be removed, it will be stopped and removed, otherwise it will not be removed at all&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Allow stopping the active profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>
+																			&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Might
+																			Improve Ping and Performance&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+																		</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Disable Traffic Stats</source>
         <translation>غیرفعال کردن آمار ترافیک</translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;A DNS server for local use will be deployed on this port&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>DNS Server Port</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>
+														&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Settings for the
+														sing-box&apos;s built-in NTP client&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+													</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>NTP Settings</source>
@@ -288,6 +258,13 @@ Release note:
         <translation>فاصله همگام‌سازی</translation>
     </message>
     <message>
+        <source>
+																			&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;In
+																			minutes&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+																		</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>5m</source>
         <translation>۵ دقیقه</translation>
     </message>
@@ -304,44 +281,12 @@ Release note:
         <translation>پورت شنود</translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Socks
-                                                                + HTTP Proxy&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;پروکسی Socks
-                                                                + HTTP&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </translation>
-    </message>
-    <message>
         <source>Font Size</source>
         <translation>اندازه قلم</translation>
     </message>
     <message>
         <source>Font</source>
         <translation>قلم</translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Might
-                                                                            Improve Ping and Performance&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                                        </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;ممکن است
-                                                                            پینگ و کارایی را بهبود بخشد&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                                        </translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Settings for the
-                                            sing-box&apos;s built-in NTP client&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                        </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;تنظیمات برای کلاینت
-                                             NTP داخلی sing-box&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                        </translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;In
-                                                                minutes&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;به
-                                                                دقیقه&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </translation>
     </message>
     <message>
         <source>Proxy Format</source>
@@ -372,10 +317,6 @@ Release note:
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Loglevel</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Mux Concurrency</source>
         <translation type="unfinished"></translation>
     </message>
@@ -389,6 +330,50 @@ Release note:
     </message>
     <message>
         <source>Xray VLESS Preference</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup and Restore</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Backup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create a portable backup file. Choose which parts to include:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Profiles (groups and proxies)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Routing profiles</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation type="unfinished">تنظیمات</translation>
+    </message>
+    <message>
+        <source>Custom icons</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Create Backup...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Backup</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore from a backup file. You can choose which parts to restore; each selected part replaces the current data. The application restarts after restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore from Backup...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -440,10 +425,6 @@ Release note:
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Test Settings</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Only Country</source>
         <translation type="unfinished"></translation>
     </message>
@@ -469,7 +450,7 @@ Release note:
     </message>
     <message>
         <source>Select</source>
-        <translation type="unfinished"></translation>
+        <translation type="unfinished">انتخاب</translation>
     </message>
     <message>
         <source>Enable Custom Icons</source>
@@ -489,6 +470,104 @@ Release note:
     </message>
     <message>
         <source>Image Files (*.png)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one part to include in the backup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gryph Backup (*.thrbackup)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to create database snapshot: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to read database snapshot.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cannot write to: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Profiles</source>
+        <translation type="unfinished">نمایه‌ها</translation>
+    </message>
+    <message>
+        <source>Backup Created</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup created successfully:
+%1
+
+Included: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cannot open backup file: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not a valid Gryph backup file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsupported backup format version: %1.
+This backup may have been created with a newer version of the application.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This backup file does not contain any restorable data.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup created on %1.
+Select which parts to restore:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>unknown date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each selected part replaces the current data. This cannot be undone.
+Gryph will restart to complete the restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one part to restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to create temporary file for restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to restore database: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Complete</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup restored successfully. Gryph will now restart for the changes to take effect.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -626,6 +705,22 @@ Release note:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Pinned Cert SHA256</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>pinnedPeerCertSha256: hex SHA256 of the peer certificate (comma-separated for multiple). Replacement for allowInsecure.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verify Cert Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>verifyPeerCertByName: verify the peer certificate against this name instead of the SNI.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Reality Pbk</source>
         <translation type="unfinished"></translation>
     </message>
@@ -642,6 +737,122 @@ Release note:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Server Max Header Bytes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Padding Obfuscation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingObfsMode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingMethod</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingHeader</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Upload / Stream Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scMaxEachPostBytes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scMinPostsIntervalMs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scMaxBufferedPosts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkHTTPMethod</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkDataPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkDataKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkChunkSize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>noGRPCHeader</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>noSSEHeader</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scStreamUpServerSecs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>sessionPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>sessionKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>seqPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>seqKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xmux</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>maxConcurrency</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>maxConnections</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>hMaxRequestTimes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>hMaxReusableSecs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>cMaxReuseTimes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>hKeepAlivePeriod</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Max Concurrency</source>
         <translation type="unfinished"></translation>
     </message>
@@ -650,7 +861,196 @@ Release note:
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>JSON: %1
+%2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xmux Reuse</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>XHTTP mode: auto usually uses packet-up, REALITY uses stream-one, and REALITY with downloadSettings uses stream-up. downloadSettings is removed when saving stream-one mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Range of extra XHTTP padding bytes. Default: 100-1000. If set, both bounds must be positive.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Maximum request header size accepted by the server. Default: 8192.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Padding Obfuscation</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable custom X-Padding placement, key, header, and method. When disabled, the client uses Referer?...x_padding and the server uses X-Padding.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Padding Method</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Padding value format: repeat-x or tokenish. Default: repeat-x.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Padding Placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Where X-Padding is sent: queryInHeader, cookie, header, or query. Default: queryInHeader.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Padding Key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Query or cookie key for X-Padding, and query key inside queryInHeader. Default: x_padding.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Padding Header</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Header name used by header or queryInHeader padding. Default: X-Padding.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Packet-up upload POST size: client split size and server reject limit. Default: 1000000.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Packet-up client interval between upload POST requests per proxied connection, in milliseconds. Default: 30.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Max Buffered Posts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Packet-up server upload queue size per proxied connection. Default: 30.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uplink HTTP Method</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>HTTP method for upload requests. Default: POST. Xray uppercases it; GET is accepted only in packet-up mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uplink Data Placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Where upload data is placed. Default: auto. cookie/header are accepted only in packet-up mode; auto/body are always accepted.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uplink Data Key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Key used when upload data is placed in a cookie or header. Defaults: X-Data for auto/header, x_data for cookie.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uplink Chunk Size</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Packet-up header/cookie payload chunk size range. Defaults: cookie 2-3 KiB, header 3-4 KB, otherwise scMaxEachPostBytes. Values below 64 are clamped.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side stream-up/stream-one option: do not add Content-Type: application/grpc to upload requests.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>No SSE Headers</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Server-side downstream/stream-one option: do not send Content-Type: text/event-stream in responses.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stream Up Server Seconds</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stream-up server interval for periodic xPaddingBytes keepalive writes, in seconds. Default: 20-80; values &lt;= 0 disable periodic padding.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session Placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Where the XHTTP session id is sent: path, cookie, header, or query. Default: path.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Session Key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Key used for the session id outside path placement. Defaults: x_session for cookie/query, X-Session for header.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sequence Placement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Where the XHTTP packet sequence is sent: path, cookie, header, or query. Default: path.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Sequence Key</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Key used for the sequence value outside path placement. Defaults: x_seq for cookie/query, X-Seq for header.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side H2/H3 xmux limit: maximum concurrent uses per underlying connection. Cannot be used together with maxConnections. Empty xmux defaults to 1-1.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side H2/H3 xmux limit: maximum parallel underlying connections. Cannot be used together with maxConcurrency.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side H2/H3 xmux limit: maximum times an underlying connection may be selected for reuse.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side H2/H3 xmux limit: maximum upload/download requests per underlying connection. Empty xmux defaults to 600-900.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Max Reusable Secs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side H2/H3 keepalive interval for underlying connections, in seconds. 0 uses Xray defaults; negative values disable keepalive where supported.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-only downstream streamSettings, including address and port, for an independent download path. Not allowed in stream-one and removed when saving stream-one mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>XHTTP maxConnections cannot be specified together with maxConcurrency.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -659,6 +1059,14 @@ Release note:
     </message>
     <message>
         <source>Host</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>EarlyData Length</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Multi Mode</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -679,6 +1087,10 @@ Release note:
     </message>
     <message>
         <source>Max Reuse times</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Client-side H2/H3 xmux limit: maximum seconds an underlying connection stays reusable. Empty xmux defaults to 1800-3000.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -732,6 +1144,14 @@ Release note:
     <message>
         <source>Application layer protocol negotiation, clear text. Please separate them with commas.</source>
         <translation>مذاکره پروتکل لایه برنامه، متن آشکار. لطفاً آن‌ها را با ویرگول جدا کنید.</translation>
+    </message>
+    <message>
+        <source>Custom (Xray outbound)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom (Xray config)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Not set</source>
@@ -992,6 +1412,22 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation>سرور دی‌ان‌اس پیش‌فرض</translation>
     </message>
     <message>
+        <source>Disable Cache</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disable Expire</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reverse Mapping</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cache Capacity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Route</source>
         <translation>مسیر</translation>
     </message>
@@ -1004,20 +1440,16 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation>جدید</translation>
     </message>
     <message>
+        <source>Import</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Edit</source>
         <translation></translation>
     </message>
     <message>
         <source>Delete</source>
         <translation>از بین بردن</translation>
-    </message>
-    <message>
-        <source>Outbound Domain Strategy</source>
-        <translation>راهبرد دامنه خروجی</translation>
-    </message>
-    <message>
-        <source>Inbound Domain Strategy</source>
-        <translation>راهبرد دامنه ورودی</translation>
     </message>
     <message>
         <source>Enable FakeIP</source>
@@ -1096,6 +1528,43 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation>قوانین دی‌ان‌اس معتبر نیستند</translation>
     </message>
     <message>
+        <source>a routing rule list</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>routing profile &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import from clipboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import %1 from the clipboard?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported with warnings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import routing profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste a Gryph route link, a base64 blob, or a JSON rule array</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalid input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not import this routing profile:
+</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Invalid operation</source>
         <translation>عملیات نادرست</translation>
     </message>
@@ -1112,15 +1581,23 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation>اجازه اتصال به LAN</translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Resolve domains to IP before connect, also affects the server address as well&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;examples:&lt;br/&gt;tls://8.8.8.8&lt;br/&gt;https://domain/path&lt;/p&gt;&lt;p&gt;tcp://8.8.8.8:1234&lt;/p&gt;&lt;p&gt;dhcp://auto&lt;/p&gt;&lt;p&gt;h3://domain/path&lt;/p&gt;&lt;p&gt;quic://domain:4632&lt;/p&gt;&lt;p&gt;etc&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Remote Rule-set Mirror</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Used as default strategy when resolving outbound/dns server Domain addresses&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Default Domain Strategy</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Resolve Domain Strategy</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1145,6 +1622,50 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     </message>
     <message>
         <source>jsDelivr(CDN)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>WARP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Enables the following config to be used as egress, useful for bypassing services restrciting non-warp VPNs&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable WARP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Endpoint</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Private Key</source>
+        <translation type="unfinished">کلید خصوصی</translation>
+    </message>
+    <message>
+        <source>Public Key</source>
+        <translation type="unfinished">کلید عمومی</translation>
+    </message>
+    <message>
+        <source>Interface Addresses</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Gets a new config from cloudflare API&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Generate WARP Config</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;When enabled, domains destined for direct outbound will also be resolved using direct dns&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable DNS Routing</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1244,6 +1765,18 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Bind Interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>IPv4 Bind Address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>IPv6 Bind Address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>TCP Fast Open</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1300,6 +1833,14 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;h4 style=&quot; margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;a name=&quot;query_server_name&quot;/&gt;&lt;span style=&quot; font-size:medium; font-weight:700;&quot;&gt;q&lt;/span&gt;&lt;span style=&quot; font-size:medium; font-weight:700;&quot;&gt;uery_server_name in sing-box&lt;/span&gt;&lt;/h4&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ECH Server Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Certificate sha256</source>
         <translation type="unfinished"></translation>
     </message>
@@ -1337,6 +1878,14 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <source>Name cannot be empty.</source>
         <translation>نام نمیتواند خالی باشد</translation>
     </message>
+    <message>
+        <source>Profiles that use an extra core can only be the final hop in the chain. Move it to the top of the list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only one extra-core profile is allowed in a chain.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>EditCustom</name>
@@ -1353,12 +1902,31 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>JSON خروجی، لطفاً مستندات را بخوانید.</translation>
     </message>
     <message>
+        <source>Xray outbound JSON, please read the Xray documentation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xray full config (Gryph adds a socks inbound and uses sing-box for tun/routing).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Please fill the complete config.</source>
         <translation>لطفاً پیکربندی کامل را پر کنید.</translation>
     </message>
     <message>
         <source>Name cannot be empty.</source>
         <translation>نام نمیتواند خالی باشد</translation>
+    </message>
+</context>
+<context>
+    <name>EditDirect</name>
+    <message>
+        <source>Form</source>
+        <translation type="unfinished">فرم</translation>
+    </message>
+    <message>
+        <source>Use the Advanced section to specify bind options</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1487,6 +2055,48 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     </message>
 </context>
 <context>
+    <name>EditJuicity</name>
+    <message>
+        <source>Form</source>
+        <translation type="unfinished">فرم</translation>
+    </message>
+    <message>
+        <source>Password</source>
+        <translation type="unfinished">کلمه عبور</translation>
+    </message>
+    <message>
+        <source>UUID</source>
+        <translation type="unfinished">شناسه یکتا</translation>
+    </message>
+</context>
+<context>
+    <name>EditNaive</name>
+    <message>
+        <source>Form</source>
+        <translation type="unfinished">فرم</translation>
+    </message>
+    <message>
+        <source>Password</source>
+        <translation type="unfinished">کلمه عبور</translation>
+    </message>
+    <message>
+        <source>UDP over TCP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Username</source>
+        <translation type="unfinished">نام کاربری</translation>
+    </message>
+    <message>
+        <source>Congestion Control</source>
+        <translation type="unfinished">کنترل ازدحام</translation>
+    </message>
+    <message>
+        <source>QUIC</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>EditSSH</name>
     <message>
         <source>EditSSH</source>
@@ -1550,6 +2160,33 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Plugin</source>
         <translation>پلاگین</translation>
+    </message>
+</context>
+<context>
+    <name>EditShadowTLS</name>
+    <message>
+        <source>Form</source>
+        <translation type="unfinished">فرم</translation>
+    </message>
+    <message>
+        <source>Password</source>
+        <translation type="unfinished">کلمه عبور</translation>
+    </message>
+    <message>
+        <source>1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Version</source>
+        <translation type="unfinished">نسخه</translation>
     </message>
 </context>
 <context>
@@ -1647,6 +2284,57 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Password</source>
         <translation type="unfinished">کلمه عبور</translation>
+    </message>
+</context>
+<context>
+    <name>EditTrustTunnel</name>
+    <message>
+        <source>Form</source>
+        <translation type="unfinished">فرم</translation>
+    </message>
+    <message>
+        <source>Password</source>
+        <translation type="unfinished">کلمه عبور</translation>
+    </message>
+    <message>
+        <source>Health Check</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Username</source>
+        <translation type="unfinished">نام کاربری</translation>
+    </message>
+    <message>
+        <source>bbr</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>cubic</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>reno</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>bbr_standard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>bbr2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>bbr_variant</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Congestion Control</source>
+        <translation type="unfinished">کنترل ازدحام</translation>
+    </message>
+    <message>
+        <source>QUIC</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1797,47 +2485,103 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>نگه‌داری پایدار</translation>
     </message>
     <message>
+        <source>Generate a Cloudflare WARP account and fill the key, address and endpoint fields above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Generate Warp Config</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cookie Reply Packet Junk Size (S3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cookie Reply Packet Magic Header (H3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Junk Packet Count (Jc)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Response Packet Magic Header (H2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Init Packet Junk Size (S1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Junk Packet Min Size (Jmin)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Junk Packet Max Size (Jmax)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I4)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Enable</source>
         <translation type="unfinished">فعال کردن</translation>
     </message>
     <message>
-        <source>Junk Packet Count</source>
+        <source>Response Packet Junk Size (S2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Junk Packet Min Size</source>
+        <source>Transport Packet Magic Header (H4)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Junk Packet Max Size</source>
+        <source>Init Packet Magic Header (H1)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Init Packet Junk Size</source>
+        <source>Transport Packet Junk Size (S4)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Response Packet Junk Size</source>
+        <source>Signature Packet (I2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Init Packet Magic Header</source>
+        <source>Signature Packet (I3)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Response Packet Magic Header</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Underload Packet Magic Header</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Transport Header Magic Header</source>
+        <source>Signature Packet (I5)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Amnezia Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Getting keypair...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to get key pair</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Generating config...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to generate warp config</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Success!</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
@@ -2009,10 +2753,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>آغازکردن</translation>
     </message>
     <message>
-        <source>Return</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Stop</source>
         <translation>متوقف کردن</translation>
     </message>
@@ -2029,10 +2769,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>از بین بردن</translation>
     </message>
     <message>
-        <source>Del</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Debug Info</source>
         <translation>اطلاعات اشکال زدایی</translation>
     </message>
@@ -2047,10 +2783,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Clear Test Result</source>
         <translation>نتایج تست پاک شود</translation>
-    </message>
-    <message>
-        <source>Export %1 config</source>
-        <translation>استخراج پیکربندی %1</translation>
     </message>
     <message>
         <source>Reset Traffic</source>
@@ -2154,6 +2886,14 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     </message>
     <message>
         <source>Refresh Column Widths</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Export Xray config</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Copy Test Result</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -2297,16 +3037,8 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>تست نشانی انتخاب‌شده</translation>
     </message>
     <message>
-        <source>Ctrl+Shift+S</source>
-        <translation></translation>
-    </message>
-    <message>
         <source>Url Test Group</source>
         <translation>تست نشانی گروه</translation>
-    </message>
-    <message>
-        <source>Ctrl+Shift+G</source>
-        <translation></translation>
     </message>
     <message>
         <source>Hidden menu</source>
@@ -2321,10 +3053,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>حذف موارد نادرست</translation>
     </message>
     <message>
-        <source>Ctrl+Alt+I</source>
-        <translation>Ctrl+Alt+I</translation>
-    </message>
-    <message>
         <source>If you have trouble starting VPN, you can force reset Core process here and then try starting the profile again. The error is %1</source>
         <translation>اگر در راه‌اندازی VPN مشکل دارید، می‌توانید فرآیند هسته را اینجا بازنشانی کنید و سپس دوباره نمایه را راه‌اندازی کنید. خطا: %1</translation>
     </message>
@@ -2335,6 +3063,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Remove %1 Invalid item(s) ?</source>
         <translation>حذف %1 مورد نادرست؟</translation>
+    </message>
+    <message>
+        <source>Enable Filter</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Include:</source>
@@ -2367,6 +3099,81 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>IP Out</source>
         <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Total</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Downloaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Uploaded</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select Server</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Stop: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source> Test result(s) copied to clipboard!</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ignored deeplink with unknown command: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import routing profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The link could not be parsed:
+</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this routing profile?
+
+Name: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Note:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add subscription</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The link did not contain a subscription URL.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this subscription?
+
+Name: %1
+URL: %2
+Auto update: %3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>On</source>
+        <translation type="unfinished">فعال</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation type="unfinished">خاموش</translation>
     </message>
     <message>
         <source>Replace domain server addresses with their resolved IPs?</source>
@@ -2435,6 +3242,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Routing Menu</source>
         <translation>منوی مسیریابی</translation>
+    </message>
+    <message>
+        <source>Export Sing-box config</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Restart Core</source>
@@ -2616,6 +3427,25 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     </message>
 </context>
 <context>
+    <name>ProfilesTableFilterHeader</name>
+    <message>
+        <source>Filter...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Filter by country...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Disable Filter</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Filter</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ProfilesTableModel</name>
     <message>
         <source>Type</source>
@@ -2658,6 +3488,142 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
 </context>
 <context>
     <name>QObject</name>
+    <message>
+        <source>Request with proxy but no profile started.</source>
+        <translation type="unfinished">درخواست با پروکسی اما هیچ نمایه‌ای شروع نشده است.</translation>
+    </message>
+    <message>
+        <source>Could not open file.</source>
+        <translation type="unfinished">نمی‌توان پرونده را باز کرد.</translation>
+    </message>
+    <message>
+        <source>Proxy: %1
+Direct: %2</source>
+        <translation type="unfinished">پروکسی: %1 مستقیم: %2</translation>
+    </message>
+    <message>
+        <source>Add profiles to this group</source>
+        <translation type="unfinished">افزودن نمایه‌ها به این گروه</translation>
+    </message>
+    <message>
+        <source>Create new subscription group</source>
+        <translation type="unfinished">ایجاد گروه اشتراک جدید</translation>
+    </message>
+    <message>
+        <source>Import HTTP proxy profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>url detected</source>
+        <translation type="unfinished">آدرس شناسایی شد</translation>
+    </message>
+    <message>
+        <source>%1
+How to update?</source>
+        <translation type="unfinished">چگونه بروزرسانی کنم ؟</translation>
+    </message>
+    <message>
+        <source>Requesting subscription: %1</source>
+        <translation type="unfinished">درخواست اشتراک: %1</translation>
+    </message>
+    <message>
+        <source>Requesting subscription %1 error: %2</source>
+        <translation type="unfinished">خطای درخواست اشتراک %1: %2</translation>
+    </message>
+    <message>
+        <source>Subscription request fininshed: %1</source>
+        <translation type="unfinished">درخواست اشتراک به پایان رسید: %1</translation>
+    </message>
+    <message>
+        <source>Clearing servers...</source>
+        <translation type="unfinished">در حال پاک کردن سرورها...</translation>
+    </message>
+    <message>
+        <source>Processing subscription data...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Process complete, applying...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Added %1 profiles:
+%2
+Deleted %3 Profiles:
+%4</source>
+        <translation type="unfinished">%1 نمایه افزوده شده:
+%2
+%3 نمایه پاک شده:
+%4</translation>
+    </message>
+    <message>
+        <source>Nothing</source>
+        <translation type="unfinished">خالی</translation>
+    </message>
+    <message>
+        <source>Change of %1:</source>
+        <translation type="unfinished">تغییر %1:</translation>
+    </message>
+    <message>
+        <source>Core exited, cleaning up...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Core exits too frequently, stop automatic restart this profile.</source>
+        <translation type="unfinished">هسته بیش از حد متوقف می‌شود، راه‌اندازی خودکار این نمایه متوقف شود.</translation>
+    </message>
+    <message>
+        <source>Restarting the core ...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Download Profiles</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Requesting profile error: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Update</source>
+        <translation type="unfinished">بروزرسانی</translation>
+    </message>
+    <message>
+        <source>Not official support platform</source>
+        <translation type="unfinished">پلتفرم پشتیبانی رسمی نیست</translation>
+    </message>
+    <message>
+        <source>Requesting update error: %1</source>
+        <translation type="unfinished">خطای درخواست به‌روزرسانی: %1</translation>
+    </message>
+    <message>
+        <source>No update</source>
+        <translation type="unfinished">بدون بروزرسانی جدید</translation>
+    </message>
+    <message>
+        <source>Update found: %1
+Release note:
+%2</source>
+        <translation type="unfinished">به‌روزرسانی یافت شد: %1
+یادداشت انتشار:
+%2</translation>
+    </message>
+    <message>
+        <source>Open in browser</source>
+        <translation type="unfinished">در مرور گر باز شود</translation>
+    </message>
+    <message>
+        <source>Close</source>
+        <translation type="unfinished">بستن</translation>
+    </message>
+    <message>
+        <source>Update is ready, restart to install?</source>
+        <translation type="unfinished">به روز رسانی آماده است، برای نصب مجدد راه اندازی شود؟</translation>
+    </message>
+    <message>
+        <source>Select</source>
+        <translation type="unfinished">انتخاب</translation>
+    </message>
     <message>
         <source>Used: %1 Remain: %2 Expire: %3</source>
         <translation>استفاده‌شده: %1 باقی‌مانده: %2 انقضا: %3</translation>
@@ -2716,6 +3682,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>نام</translation>
     </message>
     <message>
+        <source>Warp-bypass</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Rules</source>
         <translation>قوانین</translation>
     </message>
@@ -2736,20 +3706,16 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>از بین بردن</translation>
     </message>
     <message>
-        <source>Rule Attributes</source>
-        <translation>ویژگی‌های قانون</translation>
+        <source>Preview</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Attribute</source>
-        <translation>ویژگی</translation>
+        <source>Rule Settings</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Name_Placeholder</source>
-        <translation>جای‌نما_نام</translation>
-    </message>
-    <message>
-        <source>Import JSON</source>
-        <translation>وارد کردن JSON</translation>
+        <source>Action</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Basic</source>
@@ -2790,16 +3756,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>راهنمای ساده قوانین</translation>
     </message>
     <message>
-        <source>Invalid JSON Array</source>
-        <translation>آرایه JSON نادرست</translation>
-    </message>
-    <message>
-        <source>The provided input cannot be parsed to a valid route rule array:
-</source>
-        <translation>ورودی ارائه‌شده نمی‌تواند به آرایه قوانین مسیر معتبر تجزیه شود:
-</translation>
-    </message>
-    <message>
         <source>Invalid operation</source>
         <translation></translation>
     </message>
@@ -2814,6 +3770,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>No valid rules are in the profile</source>
         <translation>هیچ قانون معتبری در نمایه وجود ندارد</translation>
+    </message>
+    <message>
+        <source>Check attributes to show as tabs; unchecking clears their values.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Some rules could not be added, fix them before saving:

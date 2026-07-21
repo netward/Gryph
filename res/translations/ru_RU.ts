@@ -65,7 +65,7 @@
     </message>
     <message>
         <source>Max log lines</source>
-        <translation>Макс. кол-во строк в логах</translation>
+        <translation type="unfinished">Количество строк в журнале</translation>
     </message>
     <message>
         <source>Subscription</source>
@@ -160,6 +160,50 @@
         <translation>Предпочтение Xray для VLESS</translation>
     </message>
     <message>
+        <source>Backup and Restore</source>
+        <translation>Резервное копирование</translation>
+    </message>
+    <message>
+        <source>Create Backup</source>
+        <translation>Создание резервной копии</translation>
+    </message>
+    <message>
+        <source>Create a portable backup file. Choose which parts to include:</source>
+        <translation type="unfinished">Выберите данные для резервного копирования:</translation>
+    </message>
+    <message>
+        <source>Profiles (groups and proxies)</source>
+        <translation>Профили (группы и прокси)</translation>
+    </message>
+    <message>
+        <source>Routing profiles</source>
+        <translation>Профили маршрутизации</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation type="unfinished">Настройки</translation>
+    </message>
+    <message>
+        <source>Custom icons</source>
+        <translation>Пользовательские иконки</translation>
+    </message>
+    <message>
+        <source>Create Backup...</source>
+        <translation>Создать...</translation>
+    </message>
+    <message>
+        <source>Restore Backup</source>
+        <translation type="unfinished">Восстановление из резервной копии</translation>
+    </message>
+    <message>
+        <source>Restore from a backup file. You can choose which parts to restore; each selected part replaces the current data. The application restarts after restore.</source>
+        <translation type="unfinished">Выберите резервную копию и данные для восстановления. Выбранные данные заменят текущие. После восстановления приложение будет перезапущено.</translation>
+    </message>
+    <message>
+        <source>Restore from Backup...</source>
+        <translation type="unfinished">Восстановить...</translation>
+    </message>
+    <message>
         <source>Security</source>
         <translation>Безопасность</translation>
     </message>
@@ -200,6 +244,17 @@
         <translation>Отключить смешанный входящий порт</translation>
     </message>
     <message>
+        <source>
+														&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Socks
+														+ HTTP Proxy&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+													</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restart Proxy On System Proxy Disable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Use proxy for subscription request, update request etc&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Использовать прокси для обновления подписок, запросов на обновление и т. д.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
     </message>
@@ -213,11 +268,11 @@
     </message>
     <message>
         <source>Logging</source>
-        <translation>Логирование</translation>
+        <translation type="unfinished">Журнал</translation>
     </message>
     <message>
         <source>Auto-scroll log</source>
-        <translation>Авто-скролл логов</translation>
+        <translation type="unfinished">Авто-прокрутка журнала</translation>
     </message>
     <message>
         <source>Sing-box Log level</source>
@@ -229,7 +284,7 @@
     </message>
     <message>
         <source>Log Filtering</source>
-        <translation>Фильтрация логов</translation>
+        <translation type="unfinished">Фильтрация журнала</translation>
     </message>
     <message>
         <source>Include Keywords</source>
@@ -268,6 +323,13 @@
         <translation>Разрешить остановку активного профиля</translation>
     </message>
     <message>
+        <source>
+																			&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Might
+																			Improve Ping and Performance&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+																		</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Disable Traffic Stats</source>
         <translation>Отключить статистику трафика</translation>
     </message>
@@ -278,6 +340,13 @@
     <message>
         <source>DNS Server Port</source>
         <translation>Порт DNS-сервера</translation>
+    </message>
+    <message>
+        <source>
+														&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Settings for the
+														sing-box&apos;s built-in NTP client&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+													</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>NTP Settings</source>
@@ -296,6 +365,13 @@
         <translation>Интервал синхронизации</translation>
     </message>
     <message>
+        <source>
+																			&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;In
+																			minutes&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
+																		</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>5m</source>
         <translation>5m</translation>
     </message>
@@ -312,44 +388,12 @@
         <translation>Прослушиваемый порт</translation>
     </message>
     <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Socks
-                                                                + HTTP Proxy&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;SOCKS
-                                                                + HTTP-прокси&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </translation>
-    </message>
-    <message>
         <source>Font Size</source>
         <translation>Размер шрифта</translation>
     </message>
     <message>
         <source>Font</source>
         <translation>Шрифт</translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Might
-                                                                            Improve Ping and Performance&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                                        </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Может
-                                                                            улучшить пинг и производительность&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                                        </translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Settings for the
-                                            sing-box&apos;s built-in NTP client&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                        </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Настройки встроенного
-                                            NTP-клиента sing-box&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                        </translation>
-    </message>
-    <message>
-        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;In
-                                                                minutes&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </source>
-        <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Через
-                                                                минут&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
-                                                            </translation>
     </message>
     <message>
         <source>Proxy Format</source>
@@ -426,6 +470,104 @@
     <message>
         <source>Image Files (*.png)</source>
         <translation>Изображения (*.png)</translation>
+    </message>
+    <message>
+        <source>Select at least one part to include in the backup.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Gryph Backup (*.thrbackup)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to create database snapshot: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to read database snapshot.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cannot write to: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Profiles</source>
+        <translation type="unfinished">Профили</translation>
+    </message>
+    <message>
+        <source>Backup Created</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup created successfully:
+%1
+
+Included: %2</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Failed</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cannot open backup file: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Not a valid Gryph backup file.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Unsupported backup format version: %1.
+This backup may have been created with a newer version of the application.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>This backup file does not contain any restorable data.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Backup created on %1.
+Select which parts to restore:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>unknown date</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Each selected part replaces the current data. This cannot be undone.
+Gryph will restart to complete the restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Select at least one part to restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to create temporary file for restore.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to restore database: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Restore Complete</source>
+        <translation></translation>
+    </message>
+    <message>
+        <source>Backup restored successfully. Gryph will now restart for the changes to take effect.</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -630,6 +772,22 @@
         <translation>ALPN</translation>
     </message>
     <message>
+        <source>Pinned Cert SHA256</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>pinnedPeerCertSha256: hex SHA256 of the peer certificate (comma-separated for multiple). Replacement for allowInsecure.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Verify Cert Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>verifyPeerCertByName: verify the peer certificate against this name instead of the SNI.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Reality Pbk</source>
         <translation>Reality Pbk</translation>
     </message>
@@ -652,6 +810,114 @@
     <message>
         <source>Multi Mode</source>
         <translation>Мульти-режим</translation>
+    </message>
+    <message>
+        <source>xPaddingObfsMode</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingMethod</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>xPaddingHeader</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Upload / Stream Tuning</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scMaxEachPostBytes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scMinPostsIntervalMs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scMaxBufferedPosts</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkHTTPMethod</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkDataPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkDataKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>uplinkChunkSize</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>noGRPCHeader</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>noSSEHeader</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>scStreamUpServerSecs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>sessionPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>sessionKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>seqPlacement</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>seqKey</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xmux</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>maxConcurrency</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>maxConnections</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>hMaxRequestTimes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>hMaxReusableSecs</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>cMaxReuseTimes</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>hKeepAlivePeriod</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Max Concurrency</source>
@@ -702,16 +968,8 @@
         <translation>Настройки скачивания</translation>
     </message>
     <message>
-        <source>XHTTP Parameters</source>
-        <translation>Параметры XHTTP</translation>
-    </message>
-    <message>
         <source>Padding Obfuscation</source>
         <translation>Обфускация padding</translation>
-    </message>
-    <message>
-        <source>XMUX</source>
-        <translation>XMUX</translation>
     </message>
     <message>
         <source>Max Connections</source>
@@ -740,6 +998,14 @@
     <message>
         <source>Custom (%1 config)</source>
         <translation>Польз. (%1 конфигурация)</translation>
+    </message>
+    <message>
+        <source>Custom (Xray outbound)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Custom (Xray config)</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Not set</source>
@@ -814,6 +1080,10 @@
 %2</source>
         <translation>JSON: %1
 %2</translation>
+    </message>
+    <message>
+        <source>Xmux Reuse</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>XHTTP mode: auto usually uses packet-up, REALITY uses stream-one, and REALITY with downloadSettings uses stream-up. downloadSettings is removed when saving stream-one mode.</source>
@@ -1066,7 +1336,7 @@
     <name>DialogManageRoutes</name>
     <message>
         <source>Routes</source>
-        <translation>Маршруты</translation>
+        <translation type="unfinished">Маршрутизация</translation>
     </message>
     <message>
         <source>Common</source>
@@ -1097,16 +1367,8 @@
         <translation>Стратегия разрешения доменов</translation>
     </message>
     <message>
-        <source>Warp</source>
-        <translation type="unfinished">Warp</translation>
-    </message>
-    <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Enables the following config to be used as egress, useful for bypassing services restrciting non-warp VPNs&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Позволяет использовать данную конфигурацию в качестве выхода (egress); полезно для обхода сервисов, блокирующих обычные VPN (кроме Warp)&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
-    </message>
-    <message>
-        <source>Enable Warp</source>
-        <translation>Включить Warp</translation>
     </message>
     <message>
         <source>Endpoint</source>
@@ -1127,10 +1389,6 @@
     <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Gets a new config from cloudflare API&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Получить новую конфигурацию через Cloudflare API&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</translation>
-    </message>
-    <message>
-        <source>Generate Warp Config</source>
-        <translation>Сгенерировать конфиг Warp</translation>
     </message>
     <message>
         <source>DNS</source>
@@ -1194,11 +1452,39 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     </message>
     <message>
         <source>Remote Rule-set Mirror</source>
-        <translation>Источник профилей маршрутизации</translation>
+        <translation type="unfinished">Зеркало загрузки профилей и наборов правил</translation>
+    </message>
+    <message>
+        <source>WARP</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable WARP</source>
+        <translation type="unfinished">Включить WARP</translation>
+    </message>
+    <message>
+        <source>Generate WARP Config</source>
+        <translation type="unfinished">Сгенерировать</translation>
     </message>
     <message>
         <source>Default DNS server</source>
         <translation>DNS-сервер по умолчанию</translation>
+    </message>
+    <message>
+        <source>Disable Cache</source>
+        <translation>Отключить кэширование</translation>
+    </message>
+    <message>
+        <source>Disable Expire</source>
+        <translation type="unfinished">Отключить TTL</translation>
+    </message>
+    <message>
+        <source>Reverse Mapping</source>
+        <translation type="unfinished">Сопоставлять IP с доменами</translation>
+    </message>
+    <message>
+        <source>Cache Capacity</source>
+        <translation>Вместимость кэша</translation>
     </message>
     <message>
         <source>Route</source>
@@ -1211,6 +1497,10 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     <message>
         <source>New</source>
         <translation>Новый</translation>
+    </message>
+    <message>
+        <source>Import</source>
+        <translation type="unfinished">Импортировать</translation>
     </message>
     <message>
         <source>Edit</source>
@@ -1270,11 +1560,11 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     </message>
     <message>
         <source>Clone</source>
-        <translation>Клонировать</translation>
+        <translation type="unfinished">Дублировать</translation>
     </message>
     <message>
         <source>Export</source>
-        <translation>Экспорт</translation>
+        <translation type="unfinished">Экспортировать</translation>
     </message>
     <message>
         <source>Invalid state</source>
@@ -1295,6 +1585,43 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     <message>
         <source>DNS Rules are not valid</source>
         <translation>Правила DNS недействительны</translation>
+    </message>
+    <message>
+        <source>a routing rule list</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>routing profile &quot;%1&quot;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import from clipboard</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import %1 from the clipboard?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported with warnings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import routing profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Paste a Gryph route link, a base64 blob, or a JSON rule array</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Invalid input</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Could not import this routing profile:
+</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Invalid operation</source>
@@ -1437,6 +1764,18 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>Таймаут подключения</translation>
     </message>
     <message>
+        <source>Bind Interface</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>IPv4 Bind Address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>IPv6 Bind Address</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>TCP Fast Open</source>
         <translation>TCP Fast Open</translation>
     </message>
@@ -1493,6 +1832,14 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>Макс. версия TLS</translation>
     </message>
     <message>
+        <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;h4 style=&quot; margin-top:12px; margin-bottom:12px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;&quot;&gt;&lt;a name=&quot;query_server_name&quot;/&gt;&lt;span style=&quot; font-size:medium; font-weight:700;&quot;&gt;q&lt;/span&gt;&lt;span style=&quot; font-size:medium; font-weight:700;&quot;&gt;uery_server_name in sing-box&lt;/span&gt;&lt;/h4&gt;&lt;/body&gt;&lt;/html&gt;</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>ECH Server Name</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Certificate sha256</source>
         <translation>Сертификат SHA256</translation>
     </message>
@@ -1530,6 +1877,14 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <source>Name cannot be empty.</source>
         <translation>Название не может быть пустым.</translation>
     </message>
+    <message>
+        <source>Profiles that use an extra core can only be the final hop in the chain. Move it to the top of the list.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Only one extra-core profile is allowed in a chain.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>EditCustom</name>
@@ -1546,12 +1901,31 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>Outbound JSON — пожалуйста, прочтите документацию.</translation>
     </message>
     <message>
+        <source>Xray outbound JSON, please read the Xray documentation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Xray full config (Gryph adds a socks inbound and uses sing-box for tun/routing).</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Please fill the complete config.</source>
         <translation>Пожалуйста, заполните конфигурацию полностью.</translation>
     </message>
     <message>
         <source>Name cannot be empty.</source>
         <translation>Название не может быть пустым.</translation>
+    </message>
+</context>
+<context>
+    <name>EditDirect</name>
+    <message>
+        <source>Form</source>
+        <translation type="unfinished">Форма</translation>
+    </message>
+    <message>
+        <source>Use the Advanced section to specify bind options</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -1711,22 +2085,6 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Username</source>
         <translation>Имя пользователя</translation>
-    </message>
-    <message>
-        <source>bbr</source>
-        <translation>BBR</translation>
-    </message>
-    <message>
-        <source>bbr2</source>
-        <translation>BBR 2</translation>
-    </message>
-    <message>
-        <source>cubic</source>
-        <translation>CUBIC</translation>
-    </message>
-    <message>
-        <source>reno</source>
-        <translation>Reno</translation>
     </message>
     <message>
         <source>Congestion Control</source>
@@ -2086,6 +2444,86 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>Локальный адрес</translation>
     </message>
     <message>
+        <source>Generate a Cloudflare WARP account and fill the key, address and endpoint fields above.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Generate Warp Config</source>
+        <translation type="unfinished">Сгенерировать конфиг Warp</translation>
+    </message>
+    <message>
+        <source>Amnezia Settings</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cookie Reply Packet Junk Size (S3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cookie Reply Packet Magic Header (H3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Junk Packet Count (Jc)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Response Packet Magic Header (H2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Init Packet Junk Size (S1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Junk Packet Min Size (Jmin)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Junk Packet Max Size (Jmax)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I4)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Response Packet Junk Size (S2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transport Packet Magic Header (H4)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Init Packet Magic Header (H1)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Transport Packet Junk Size (S4)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I2)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I3)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Signature Packet (I5)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Pre Shared Key</source>
         <translation>Предв. раздел. ключ (Pre-shared Key, PSK)</translation>
     </message>
@@ -2124,6 +2562,26 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
     <message>
         <source>Persistent Keepalive</source>
         <translation>Поддержание активности (Persistent Keepalive)</translation>
+    </message>
+    <message>
+        <source>Getting keypair...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to get key pair</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Generating config...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Failed to generate warp config</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Success!</source>
+        <translation type="unfinished"></translation>
     </message>
 </context>
 <context>
@@ -2690,6 +3148,57 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>Результаты теста скопированы в буфер обмена!</translation>
     </message>
     <message>
+        <source>Ignored deeplink with unknown command: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Import routing profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The link could not be parsed:
+</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Imported profile</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this routing profile?
+
+Name: %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Note:</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add subscription</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>The link did not contain a subscription URL.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Add this subscription?
+
+Name: %1
+URL: %2
+Auto update: %3</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>On</source>
+        <translation type="unfinished">Вкл.</translation>
+    </message>
+    <message>
+        <source>Off</source>
+        <translation type="unfinished">Выкл.</translation>
+    </message>
+    <message>
         <source>Replace domain server addresses with their resolved IPs?</source>
         <translation>Заменить домены в адресах серверов на их разрешённые IP-адреса?</translation>
     </message>
@@ -3174,6 +3683,10 @@ Release note:
         <translation>Название</translation>
     </message>
     <message>
+        <source>Warp-bypass</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Rules</source>
         <translation>Правила</translation>
     </message>
@@ -3204,10 +3717,6 @@ Release note:
     <message>
         <source>Action</source>
         <translation>Действие</translation>
-    </message>
-    <message>
-        <source>Import JSON</source>
-        <translation>Импорт JSON</translation>
     </message>
     <message>
         <source>Basic</source>
@@ -3246,16 +3755,6 @@ Release note:
     <message>
         <source>Simple rule manual</source>
         <translation>Инструкция по простым правилам</translation>
-    </message>
-    <message>
-        <source>Invalid JSON Array</source>
-        <translation>Неверный массив JSON</translation>
-    </message>
-    <message>
-        <source>The provided input cannot be parsed to a valid route rule array:
-</source>
-        <translation>Введённые данные не могут быть преобразованы в допустимый массив правил маршрутизации:
-</translation>
     </message>
     <message>
         <source>Invalid operation</source>

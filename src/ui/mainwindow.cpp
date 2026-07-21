@@ -156,6 +156,7 @@ static bool themeUsesDarkLog(const QString &theme) {
 //   7. Настраивает маршруты, тестирование, импорт, таймеры и обновления.
 // Большинство connect() связывают действие пользователя или системное событие с методом MainWindow либо асинхронной задачей.
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
+    // Регистрация главного окна и глобальных UI-маршрутизаторов.
     mainwindow = this;
     setAcceptDrops(true);
     MW_dialog_message = [=,this](MwMessage cmd, QStringList args) {
@@ -164,6 +165,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             dialog_message_impl(cmd, args);
         });
     };
+    // Общий обработчик deeplink-ссылок Gryph://.
     MW_handle_deeplink = [=,this](const QString &url) {
         runOnUiThread([=,this]
         {
@@ -171,34 +173,35 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         });
     };
 
-    // handle AutoRun migration and privilege matching
+    // Проверка соответствия прав записи автозапуска текущим правам процесса и при необходимости перенос старого формата настройки автозапуска.
     AutoRun_FixPrivilegeIfNeeded();
     AutoRun_MigrateIfNeeded();
 
-    // register the Gryph:// URL scheme (self-heals if the install was moved)
+    // Регистрация пользовательской URL-схемы Gryph://.
     UrlScheme_RegisterIfNeeded();
 
-    // Setup misc UI
-    // migrate old themes
+    // Создание интерфейса и применение темы.
     bool isNum;
     Configs::dataManager->settingsRepo->theme.toInt(&isNum);
     if (isNum) {
         Configs::dataManager->settingsRepo->theme = "System";
     }
+    // Тема применяется до setupUi(), чтобы создаваемые виджеты сразу получили правильную палитру и таблицы стилей.
     themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme);
+    // Создание элементов mainwindow.ui, их назначение ui-полям.
     ui->setupUi(this);
 
-    // init shortcuts
+    // Инициализация сочетаний клавиш.
     setActionsData();
     loadShortcuts();
 
-    // geometry remembering
+    // Восстановление положения и размеров окна.
     if (!Configs::dataManager->settingsRepo->mainWindowGeometry.isEmpty()) {
         auto geo = DecodeB64IfValid(Configs::dataManager->settingsRepo->mainWindowGeometry);
         this->restoreGeometry(geo);
     }
 
-    // setup log
+    // Настройка просмотрщика журналов.
     ui->splitter->restoreState(DecodeB64IfValid(Configs::dataManager->settingsRepo->splitter_state));
     new SyntaxHighlighter(themeUsesDarkLog(Configs::dataManager->settingsRepo->theme), qvLogDocument);
     qvLogDocument->setUndoRedoEnabled(false);
@@ -217,6 +220,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme, true);
     });
 #endif
+    // Реакция на смену темы из настроек.
     connect(themeManager, &ThemeManager::themeChanged, this, [=,this](const QString& theme){
         new SyntaxHighlighter(themeUsesDarkLog(theme), qvLogDocument);
         scheduleProxyListRefresh();
@@ -225,37 +229,40 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         append_log(log);
     };
 
-    // Listen port if random
+    // Выбор входящего порта.
     if (Configs::dataManager->settingsRepo->random_inbound_port)
     {
         Configs::dataManager->settingsRepo->inbound_socks_port = MkPort();
     }
 
-    //init HWID data
+    // Получение сведений об устройстве.
     runOnNewThread([=, this] {GetDeviceDetails(); });
 
-    // Prepare core
+    // Подготовка параметров GryphCore.
     auto core_path = QApplication::applicationDirPath() + "/";
     core_path += "GryphCore";
-
+    // Режим отладки ядра в зависимости от выбранного уровня журналирования.
     bool coreDebugMode = (Configs::dataManager->settingsRepo->log_level == "debug");
 
-    // Create IPC server with a random UUID name
+    // Создание локального IPC-сервера со случаййным UUID для избежания конфликтов между экземплярами.
     Configs::dataManager->settingsRepo->core_socket_name =
         "gryphIPC-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
     core_server = new QLocalServer(this);
+    // Подключение к IPC-серверу только для текущего пользователя.
     core_server->setSocketOptions(QLocalServer::UserAccessOption);
     if (!core_server->listen(Configs::dataManager->settingsRepo->core_socket_name)) {
         qWarning() << "Failed to start IPC server:" << core_server->errorString();
         qApp->quit();
     }
 
+    // Обработка подключения ядра к серверу.
+    // PID клиента дополнительно сверяется с PID GryphCore.
     connect(core_server, &QLocalServer::newConnection, this, [=, this]() {
         auto socket = core_server->nextPendingConnection();
         int profileId = -1;
         {
-            // Hold coreProcessMutex so we never observe a half-published
-            // core_process while DS_cores is still constructing/starting it.
+            // Защита core_process от одновременного чтения и записи.
+            // Поток DS_cores может в этот момент ещё создавать или запускать объект процесса.
             QMutexLocker lock(&coreProcessMutex);
             if (!verify_core_pid(socket)) {
                 MW_show_log("[Warn] IPC connection from unexpected process rejected");
@@ -264,21 +271,27 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 return;
             }
             if (core_process) {
+                // Забираем одноразовое задание запуска сохранённого профиля.
                 profileId = core_process->start_profile_when_core_is_up;
+                // Сбрасываем значение, чтобы профиль не был запущен повторно при следующем переподключении ядра.
                 core_process->start_profile_when_core_is_up = -1;
             }
         }
+        // Создание RPC-канала поверх сокета после проверки клиента.
         setup_rpc(socket);
         Configs::dataManager->settingsRepo->core_running = true;
+        // Уведомление главного окна о готовности ядра.
+        // Обработчик CoreStarted восстановит нужные режимы и при необходимости запустит profileId.
         MW_dialog_message(MwMessage::CoreStarted, {Int2String(profileId)});
     });
 
-    // Start core
+    // Запуск GryphCore
     auto socketFullName = core_server->fullServerName();
     runOnThread(
         [=, this] {
             QMutexLocker lock(&coreProcessMutex);
             core_process = new Configs_sys::CoreProcess(core_path, socketFullName, coreDebugMode);
+            // Если включено восстановление последнего профиля, его ID сохраняется в объекте процесса до фактического запуска ядра.
             if (Configs::dataManager->settingsRepo->remember_enable &&
                 Configs::dataManager->settingsRepo->remember_id >= 0) {
                 core_process->start_profile_when_core_is_up =
@@ -288,6 +301,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         },
         DS_cores);
 
+    // Применение пользовательского шрифта
     if (!Configs::dataManager->settingsRepo->font.isEmpty()) {
         auto font = qApp->font();
         font.setFamily(Configs::dataManager->settingsRepo->font);
@@ -299,12 +313,15 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         qApp->setFont(font);
     }
 
-    parallelCoreCallPool->setMaxThreadCount(10); // constant value
-    //
+    // Ограничение параллельных вызовов ядра
+    parallelCoreCallPool->setMaxThreadCount(10);
+    
+    // Основные действия, вкладки и фильтры
     connect(ui->menu_start, &QAction::triggered, this, [=,this]() { profile_start(); });
     connect(ui->menu_stop, &QAction::triggered, this, [=,this]() { profile_stop(false, false, true); });
+    // При перетаскивании вкладки сохраняем новый порядок групп.
     connect(ui->tabWidget->tabBar(), &QTabBar::tabMoved, this, [=,this](int from, int to) {
-        // use tabData to track tab & gid
+        // tabData каждой вкладки содержит ID соответствующей группы.
         QList<int> tabOrder;
         for (int i = 0; i < ui->tabWidget->tabBar()->count(); i++) {
             tabOrder += ui->tabWidget->tabBar()->tabData(i).toInt();
@@ -312,11 +329,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         Configs::dataManager->groupsRepo->SetGroupsTabOrder(tabOrder);
         on_tabWidget_currentChanged(ui->tabWidget->tabBar()->currentIndex());
     });
+    // Главное окно перехватывает клики и двойные клики виджетов через MainWindow::eventFilter().
     ui->label_running->installEventFilter(this);
     ui->label_inbound->installEventFilter(this);
     ui->splitter->installEventFilter(this);
     ui->tabWidget->installEventFilter(this);
-    //
+    // Кнопка в углу вкладок показывает или скрывает поля фильтрации в пользовательском заголовке таблицы профилей.
     auto btnFilter = new QToolButton(this);
     btnFilter->setIcon(QIcon(":/icon/filter.png"));
     btnFilter->setToolTip(QString("%1\n%2").arg(tr("Enable Filter"), QKeySequence(QKeySequence::Find).toString(QKeySequence::NativeText)));
@@ -324,9 +342,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     btnFilter->setCheckable(true);
     connect(btnFilter, &QToolButton::toggled, static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::setFiltersVisible);
     ui->tabWidget->setCornerWidget(btnFilter, Qt::TopRightCorner);
-    //
+    // Регистрация глобальных системных горячих клавиш.
     RegisterHotkey(false);
-    //
+    // Дополнительное восстановление размера для старого формата настроек вида "ШxВ".
     auto last_size = Configs::dataManager->settingsRepo->mw_size.split("x");
     if (last_size.length() == 2) {
         auto w = last_size[0].toInt();
@@ -336,10 +354,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
     }
 
-    // software_name
+    // Идентификация приложения и подготовка служебных каталогов
     software_name = "Gryph";
     software_core_name = "sing-box";
-    //
+    //  Создание локальной страницы-заглушки при первом запуске.
     if (auto dashDir = QDir("dashboard"); !dashDir.exists() && QDir().mkdir("dashboard")) {
         if (auto dashFile = QFile(":/Gryph/dashboard-notice.html"); dashFile.exists() && dashFile.open(QIODevice::ReadOnly))
         {
@@ -352,29 +370,33 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             dashFile.close();
         }
     }
+    // Использование каталога icons для пользовательских иконок профилей.
     if (auto iconsDir = QDir("icons"); !iconsDir.exists()) {
         QDir().mkdir("icons") ? qDebug("created icons dir") : qDebug("Failed to create icons dir");
     }
 
-    // top bar
+    // Верхняя панель и меню.
     ui->toolButton_program->setMenu(ui->menu_program);
     ui->toolButton_preferences->setMenu(ui->menu_preferences);
     ui->toolButton_server->setMenu(ui->menu_server);
     ui->toolButton_routing->setMenu(ui->menuRouting_Menu);
     ui->menubar->setVisible(false);
+    // Проверка обновлений выполняется в новом потоке, так как содержит сетевой запрос к GitHub.
     connect(ui->toolButton_update, &QToolButton::clicked, this, [=,this] { runOnNewThread([=,this] { CheckUpdate(); }); });
     if (!QFile::exists(QApplication::applicationDirPath() + "/updater") && !QFile::exists(QApplication::applicationDirPath() + "/updater.exe"))
     {
         ui->toolButton_update->hide();
     }
 
-    // setup connection UI
+    // Таблица активных соединений и статистика.
     setupConnectionList();
+    // Возврат пользователя на последнюю открытую вкладку статистики.
     ui->stats_widget->tabBar()->setCurrentIndex(Configs::dataManager->settingsRepo->stats_tab);
     connect(ui->stats_widget->tabBar(), &QTabBar::currentChanged, this, [=,this](int index)
     {
         Configs::dataManager->settingsRepo->stats_tab = ui->stats_widget->tabBar()->currentIndex();
     });
+    // Изменение критерия сортировки активных соединений при нажатии на заголовок.
     connect(ui->connections->horizontalHeader(), &QHeaderView::sectionClicked, this, [=,this](int index)
     {
             Stats::ConnectionSort sortType;
@@ -392,15 +414,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             Stats::connection_lister->ForceUpdate();
     });
 
-    // setup Speed Chart
+    // График скорости
     speedChartWidget = new SpeedWidget(this);
     ui->graph_tab->layout()->addWidget(speedChartWidget);
 
-    // table UI: model-backed view with on-demand row data
+    // Модель и представление списка профилей
     profilesTableModel = new ProfilesTableModel(this);
     ui->profilesTableView->setModel(profilesTableModel);
+    // Callback вызывается пользовательским представлением после перетаскивания строк.
     ui->profilesTableView->rowsSwapped = [=,this](int row1, int row2)
     {
+        // Во время фильтрации видимые индексы не соответствуют исходному порядку группы, поэтому ручная перестановка запрещена.
         if (!addressFilterString.isEmpty() || !nameFilterString.isEmpty() || !typeFilterString.isEmpty() || !countryFilterString.isEmpty()) return;
         if (row1 == row2) return;
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
@@ -408,6 +432,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         profilesTableModel->emplaceProfiles(row1, row2);
         Configs::dataManager->groupsRepo->Save(group);
     };
+    // Сортировка профилей по нажатию на заголовок.
+    // Повторное нажатие на тот же столбец переключает направление.
     connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionClicked, this, [=, this](int logicalIndex) {
         GroupSortAction action;
         if (proxy_last_order == logicalIndex) {
@@ -429,6 +455,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         } else {
             return;
         }
+        // Выполнение сортировки и сохранения вне UI-потока.
         runOnNewThread([=, this] {
             auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
             if (currGroup == nullptr) return;
@@ -444,6 +471,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             });
         });
     });
+    // Пользовательская ширина каждого столбца сохраняется отдельно для текущей группы.
     connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionResized, this, [=, this](int, int, int) {
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
         if (Configs::dataManager->settingsRepo->refreshing_group || group == nullptr) return;
@@ -453,6 +481,9 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
         Configs::dataManager->groupsRepo->Save(Configs::dataManager->groupsRepo->CurrentGroup());
     });
+    // Контекстное меню заголовка:
+    //  столбец 3 — состав и сортировка результатов тестирования;
+    //  столбец 4 — способ сортировки трафика.
     ui->profilesTableView->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui->profilesTableView->horizontalHeader(), &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
         auto* header = ui->profilesTableView->horizontalHeader();
@@ -474,6 +505,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             actionShowSpeed->setChecked(group->test_items_to_show == Configs::testShowItems::all ||
                 group->test_items_to_show == Configs::testShowItems::speedOnly);
 
+            // Преобразование состояния двух независимых checkbox-действий в одно перечисление test_items_to_show.
             auto updateTestItemsToShow = [this, group, actionShowOutIP, actionShowSpeed] {
                     const bool ip = actionShowOutIP->isChecked();
                     const bool speed = actionShowSpeed->isChecked();
@@ -509,6 +541,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 act->setChecked(static_cast<int>(group->test_sort_by) == opt.value);
             }
 
+            // exec() показывает модальное контекстное меню и возвращает выбранное действие
             auto* chosen = menu.exec(header->mapToGlobal(pos));
             if (chosen == nullptr || !chosen->data().isValid()) return;
 
@@ -534,6 +567,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 });
             return;
         }
+        // Контекстное меню столбца накопленного трафика.
         if (columnIndex == 4) {
             QMenu menu(this);
             auto* sortByLabel = menu.addAction(tr("Sort By:"));
@@ -579,17 +613,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             return;
         }
     });
+    // Фиксированная высота строк 24 px для уменьшения затрат на перерасчёт геометрии большой таблицы.
     ui->profilesTableView->verticalHeader()->setStretchLastSection(false);
     ui->profilesTableView->verticalHeader()->setDefaultSectionSize(24);
     ui->profilesTableView->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
     ui->profilesTableView->setTabKeyNavigation(false);
     ui->profilesTableView->horizontalHeader()->setResizeContentsPrecision(0);
-
+    // Повторное уточнение автоматической ширины столбцов после прокрутки с учетом появившихся в viewport строк.
     connect(ui->profilesTableView->verticalScrollBar(), &QScrollBar::valueChanged, ui->profilesTableView, [=, this] {
         refresh_proxy_list_column_size();
     });
 
-    // search box
+    // Фильтры таблицы профилей.
     connect(static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::typeFilterChanged, this, [=,this](const QString& currentText)
     {
        typeFilterString = currentText;
@@ -611,10 +646,10 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
        refresh_proxy_list({}, true);
     });
 
-    // refresh
+    // Загрузка групп, создание вкладок и отображение текущей группы.
     this->refresh_groups();
 
-    // Setup Tray
+    // Системный трей.
     tray = new QSystemTrayIcon(nullptr);
     tray->setIcon(GetTrayIcon(Icon::NONE));
     QApplication::setWindowIcon(Icon::GetTrayIcon(Icon::NONE));
@@ -625,23 +660,26 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     trayMenu->addAction(ui->actionRemember_last_proxy);
     trayMenu->addAction(ui->actionAllow_LAN);
     trayMenu->addSeparator();
-    // Select Server submenu (dynamically populated with pagination)
+    
+    // Подменю выбора профиля создаётся заново при каждом открытии.
+    // Пагинация ограничивает размер меню пятнадцатью профилями.
     constexpr int PAGE_CAPACITY = 15;
     trayServerMenu = new QMenu(tr("Select Server"));
     trayMenu->addMenu(trayServerMenu);
     connect(trayServerMenu, &QMenu::aboutToShow, this, [=, this]() {
         trayServerMenu->clear();
-        // Stop action if a profile is running
+        // Остановка текущего профиля, если он запущен.
         if (running) {
             auto *stopAction = trayServerMenu->addAction(tr("Stop: %1").arg(running->name));
             connect(stopAction, &QAction::triggered, this, [=, this]() { profile_stop(false, false, true); });
             trayServerMenu->addSeparator();
         }
-        // Build flat list of profiles, starting from the group of the running profile or currentGroup
+        // Формирование плоского списка профилей. 
+        // Первой становится группа активного профиля либо текущая выбранная группа.
         int startGroupId = Configs::dataManager->settingsRepo->current_group;
         if (running) startGroupId = running->gid;
         auto groupIds = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
-        // Reorder groupIds so startGroupId comes first
+        // Циклическая перестановка групп, чтобы startGroupId находилась в начале списка.
         int startIdx = groupIds.indexOf(startGroupId);
         if (startIdx > 0) {
             QList<int> reordered = groupIds.mid(startIdx) + groupIds.mid(0, startIdx);
@@ -653,12 +691,12 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             allProfileIDs.append(group->Profiles());
         }
         int totalProfiles = allProfileIDs.size();
-        // Clamp page
+        // Ограничение номера страницы допустимым диапазоном после добавления или удаления профилей.
         int maxPage = qMax(0, (totalProfiles - 1) / PAGE_CAPACITY);
         trayServerPage = qBound(0, trayServerPage, maxPage);
         int offset = trayServerPage * PAGE_CAPACITY;
         int end = qMin(offset + PAGE_CAPACITY, totalProfiles);
-        // Show ↑ if not on first page
+        // На страницах после первой добавляем переход назад.
         if (trayServerPage > 0) {
             auto *upAction = trayServerMenu->addAction(QStringLiteral("\u2191"));
             connect(upAction, &QAction::triggered, this, [=, this]() {
@@ -666,7 +704,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 trayServerMenu->popup(trayServerMenu->pos());
             });
         }
-        // Show profiles for current page
+        // Загрузка из репозитория только ID и имен текущей страницы без создания полных объектов всех профилей.
         auto neededProfilesIDNames = Configs::dataManager->profilesRepo->GetProfileIDNameMappedBatch(allProfileIDs.sliced(offset, end - offset));
         for (const auto&[id, name] : neededProfilesIDNames) {
             auto *action = trayServerMenu->addAction(name);
@@ -674,7 +712,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             action->setChecked(running && running->id == id);
             connect(action, &QAction::triggered, this, [=, this]() { profile_start(id); });
         }
-        // Show ↓ if not on last page
+        // Если остались профили, добавляем переход на следующую страницу.
         if (trayServerPage < maxPage) {
             auto *downAction = trayServerMenu->addAction(QStringLiteral("\u2193"));
             connect(downAction, &QAction::triggered, this, [=, this]() {
@@ -684,7 +722,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
     });
     trayMenu->addSeparator();
-    // MacOS cannot reuse menus across different parents properly
+    
+    // macOS некорректно переиспользует один QMenu с разными родителями, поэтому для трея создаётся отдельное меню режимов.
     if (getOS() == Darwin) {
         auto* traySpmodeMenu = new QMenu(ui->menu_spmode->title(), trayMenu);
         traySpmodeMenu->addAction(ui->menu_spmode_system_proxy);
@@ -715,7 +754,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
     });
 
-    // Misc menu
+    // Общие команды и режимы работы.
     ui->actionRemember_last_proxy->setChecked(Configs::dataManager->settingsRepo->remember_enable);
     ui->actionStart_with_system->setChecked(AutoRun_IsEnabled());
     ui->actionAllow_LAN->setChecked(QStringList{"::", "0.0.0.0"}.contains(Configs::dataManager->settingsRepo->inbound_address));
@@ -723,6 +762,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->actionHide_window, &QAction::triggered, this, [=, this](){ HideWindow(this); });
     connect(ui->menu_open_config_folder, &QAction::triggered, this, [=,this] { QDesktopServices::openUrl(QUrl::fromLocalFile(QDir::currentPath())); });
     connect(ui->menu_add_from_clipboard2, &QAction::triggered, ui->menu_add_from_clipboard, &QAction::trigger);
+    // Перезапуск прокси фактически останавливает профиль и завершает ядро;
+    // дальнейшее восстановление выполняется общей логикой процесса.
     connect(ui->actionRestart_Proxy, &QAction::triggered, this, [=,this] {
         runOnThread([=, this] {
             profile_stop(true, true, true);
@@ -740,12 +781,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         AutoRun_SetEnabled(checked);
         ui->actionStart_with_system->setChecked(checked);
     });
+    // "::" открывает mixed-inbound на всех IPv6/IPv4-интерфейсах,
+    // "127.0.0.1" ограничивает доступ локальной машиной.
     connect(ui->actionAllow_LAN, &QAction::triggered, this, [=,this](bool checked) {
         Configs::dataManager->settingsRepo->inbound_address = checked ? "::" : "127.0.0.1";
         ui->actionAllow_LAN->setChecked(checked);
         MW_dialog_message(MwMessage::UpdateSettings, {});
     });
-    //
+    
+    // Переключатели VPN/TUN, системного прокси и системного DNS.
+    // Фактическая работа вынесена в set_spmode_*() и set_system_dns().
     connect(ui->checkBox_VPN, &QCheckBox::clicked, this, [=,this](bool checked) { set_spmode_vpn(checked); });
     connect(ui->checkBox_SystemProxy, &QCheckBox::clicked, this, [=,this](bool checked) { set_spmode_system_proxy(checked); });
     connect(ui->menu_spmode, &QMenu::aboutToShow, this, [=,this]() {
@@ -770,6 +815,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     if (Configs::dataManager->settingsRepo->show_system_dns) ui->system_dns->show();
     else ui->system_dns->hide();
 
+    // Включение действий, применимых к текущему состоянию и выделению перед показом меню сервера.
     connect(ui->menu_server, &QMenu::aboutToShow, this, [=,this](){
         if (running)
         {
@@ -798,27 +844,51 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             ui->menu_server->removeAction(ui->menu_stop_testing);
         }
     });
+    // Получение каталога удалённых профилей маршрутизации
+    auto getRemoteRouteProfiles = [=, this]
+        {
+            auto resp = NetworkRequestHelper::HttpGet(
+                "https://api.github.com/repos/netward/routeprofiles/contents/profiles?ref=main"
+            );
 
-    auto getRemoteRouteProfiles = [=,this]
-    {
-        auto resp = NetworkRequestHelper::HttpGet("https://api.github.com/repos/throneproj/routeprofiles/git/trees/profile");
-        if (resp.error.isEmpty()) {
-            QStringList newRemoteRouteProfiles;
-            QJsonObject release = QString2QJsonObject(resp.data);
-            for (const QJsonValue asset : release["tree"].toArray()) {
-                auto profile = asset["path"].toString();
-                if (profile.section('.', -1) == QString("json") && (profile.startsWith("bypass",Qt::CaseInsensitive) || profile.startsWith("proxy",Qt::CaseInsensitive))) {
-                    profile.chop(5);
-                    newRemoteRouteProfiles.push_back(profile);
-                }
+            if (!resp.error.isEmpty()) {
+                MW_show_log(
+                    "Failed to get remote route profiles: "
+                    + resp.error
+                    + "\n"
+                    + resp.data
+                );
+                return;
             }
-            mu_remoteRouteProfiles.lock();
+
+            QStringList newRemoteRouteProfiles;
+            const QJsonArray files = QString2QJsonArray(resp.data);
+
+            for (const QJsonValue& value : files) {
+                const QJsonObject fileObject = value.toObject();
+
+                if (fileObject["type"].toString() != "file")
+                    continue;
+
+                QString profile = fileObject["name"].toString();
+
+                if (!profile.endsWith(".json", Qt::CaseInsensitive))
+                    continue;
+
+                if (!profile.startsWith("bypass", Qt::CaseInsensitive) &&
+                    !profile.startsWith("proxy", Qt::CaseInsensitive))
+                    continue;
+
+                profile.chop(5); // удалить .json
+                newRemoteRouteProfiles.push_back(profile);
+            }
+
+            QMutexLocker locker(&mu_remoteRouteProfiles);
             remoteRouteProfiles = newRemoteRouteProfiles;
-            mu_remoteRouteProfiles.unlock();
-        }
     };
     runOnNewThread(getRemoteRouteProfiles);
 
+    // Сброс сохранённых ширин возвращает автоматический расчёт столбцов.
     connect(ui->actionRefresh_Column_Widths, &QAction::triggered, this, [=, this] {
         auto ent = Configs::dataManager->groupsRepo->CurrentGroup();
         ent->column_width.clear();
@@ -826,6 +896,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         show_group(ent->id);
     });
 
+    // Динамическое меню маршрутизации.
     connect(ui->menuRouting_Menu, &QMenu::aboutToShow, this, [=,this]()
     {
         if(remoteRouteProfiles.isEmpty())
@@ -833,6 +904,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         ui->menuRouting_Menu->clear();
         ui->menuRouting_Menu->addAction(ui->menu_routing_settings);
 
+        // Глобальный переключатель добавления правил AdBlock в генерируемую конфигурацию.
         auto* actionAdblock = new QAction(ui->menuRouting_Menu);
         actionAdblock->setText("Enable AdBlock");
         actionAdblock->setCheckable(true);
@@ -845,6 +917,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         });
         ui->menuRouting_Menu->addAction(actionAdblock);
 
+        // Глобальный переключатель маршрутизации через WARP.
         auto* actionWarp = new QAction(ui->menuRouting_Menu);
         actionWarp->setText("Enable Warp");
         actionWarp->setCheckable(true);
@@ -856,7 +929,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             if (Configs::dataManager->settingsRepo->started_id >= 0) profile_start(Configs::dataManager->settingsRepo->started_id);
         });
         ui->menuRouting_Menu->addAction(actionWarp);
-
+        
+        // Загрузка шаблонов удаленных профилей маршрутизации.
         mu_remoteRouteProfiles.lock();
         if(!remoteRouteProfiles.isEmpty()) {
             QMenu* profilesMenu = ui->menuRouting_Menu->addMenu(QObject::tr("Download Profiles"));
@@ -866,7 +940,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 action->setText(profile);
                 connect(action, &QAction::triggered, this, [=,this]()
                 {
-                    auto resp = NetworkRequestHelper::HttpGet(Configs::get_jsdelivr_link("https://raw.githubusercontent.com/throneproj/routeprofiles/profile/" + profile + ".json"));
+                    auto resp = NetworkRequestHelper::HttpGet(Configs::get_jsdelivr_link("https://raw.githubusercontent.com/netward/routeprofiles/main/profiles/" + profile + ".json"));
                     if (!resp.error.isEmpty()) {
                         runOnUiThread([=] {
                             MessageBoxWarning(QObject::tr("Download Profiles"), QObject::tr("Requesting profile error: %1").arg(resp.error + "\n" + resp.data));
@@ -882,6 +956,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                         });
                         return;
                     }
+                    // Создание локальной копии удалённого профиля, доступную для редактирования пользователем.
                     auto chain = Configs::dataManager->routesRepo->NewRouteProfile();
                     chain->name = QString(profile).replace('_', ' ');
                     chain->defaultOutboundID = profile.startsWith("bypass",Qt::CaseInsensitive) ? Configs::proxyID : Configs::directID;
@@ -894,6 +969,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
         mu_remoteRouteProfiles.unlock();
 
+        // Добавление сохраненных локальных профилей маршрутизации.
         ui->menuRouting_Menu->addSeparator();
         for (const auto& route : Configs::dataManager->routesRepo->GetAllRouteProfiles())
         {
@@ -913,6 +989,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             ui->menuRouting_Menu->addAction(action);
         }
     });
+    // Тестирование, экспорт и импорт профилей.
     connect(ui->actionClear_Test_Result, &QAction::triggered, this, [=, this]() {
         auto entIDs = get_now_selected_list();
         auto ents = Configs::dataManager->profilesRepo->GetProfileBatch(entIDs);
@@ -953,16 +1030,18 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         iptest_current_group(Configs::dataManager->groupsRepo->CurrentGroup()->Profiles());
     });
     connect(ui->menu_stop_testing, &QAction::triggered, this, [=,this]() { stopTests(); });
-    //
+    // Свойство selected_or_group сообщает общим обработчикам, к чему относится команда меню:
+    //  0 — ко всей группе;
+    //  1 — только к выделенным профилям;
+    //  2 — контекст не определён (меню скрыто).
     auto set_selected_or_group = [=,this](int mode) {
-        // 0=group 1=select 2=unknown(menu is hide)
         ui->menu_server->setProperty("selected_or_group", mode);
     };
     connect(ui->menu_server, &QMenu::aboutToHide, this, [=,this] {
         setTimeout([=,this] { set_selected_or_group(2); }, this, 200);
     });
     set_selected_or_group(2);
-    //
+    // Состав меню экспорта зависит от числа и типа выделенных профилей.
     connect(ui->menu_share_item, &QMenu::aboutToShow, this, [=,this] {
         QString name;
         auto selected = get_now_selected_list();
@@ -983,6 +1062,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         ui->menu_export_config->setVisible(true);
         if (profile->outbound->IsXray() || profile->type == "chain") ui->actionExport_Xray_config->setVisible(true);
     });
+    // Генерация конфигурации ядра для единственного выбранного профиля, предложение скопировать основной/тестовый вариант.
     connect(ui->actionExport_Xray_config, &QAction::triggered, this, [=,this]() {
         auto ents = get_now_selected_list();
         if (ents.count() != 1) return;
@@ -1015,6 +1095,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             QApplication::clipboard()->setText(config_core);
         }
     });
+    // Сборка непустых результатов тестирования в один текстовый блок.
+    // Ограничение в 1000 профилей защищает интерфейс от слишком тяжёлой операции.
     connect(ui->actionCopy_Test_Result, &QAction::triggered, this, [=,this]() {
         auto ents = get_now_selected_list();
         if (ents.count() == 0 || ents.count() > 1000) return;
@@ -1031,6 +1113,7 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         QApplication::clipboard()->setText(res);
         MW_show_log(QString::number(counter) + tr(" Test result(s) copied to clipboard!"));
     });
+    // Импорт подписки/списка профилей из локального файла.
     connect(ui->actionAdd_profile_from_File, &QAction::triggered, this, [=,this]()
     {
         auto path = QFileDialog::getOpenFileName();
@@ -1050,24 +1133,25 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         Subscription::groupUpdater->AsyncUpdate(contents);
     });
 
+    // Сохранение состояния и периодические таймеры.
     connect(qApp, &QGuiApplication::commitDataRequest, this, &MainWindow::on_commitDataRequest);
-
+    // Синхронизация индикаторов состояния с настройками каждые 2 секунды.
     auto t = new QTimer;
     connect(t, &QTimer::timeout, this, [=,this]() { refresh_status(); });
     t->start(2000);
-
+    // Счётчик журналов сбрасывается каждую секунду и используется для ограничения или расчёта частоты сообщений.
     t = new QTimer;
     connect(t, &QTimer::timeout, this, [&] { Configs_sys::logCounter.fetchAndStoreRelaxed(0); });
     t->start(1000);
 
-    // debounced refresh so font/theme/resize changes settle without manual interaction;
-    // mirrors what show_group does after a tab switch. Fired from changeEvent (FontChange/
-    // PaletteChange/StyleChange), resizeEvent, and ThemeManager::themeChanged.
+    // Отложенное обновление таблицы профилей.
+    // Множественные события изменения шрифта, темы или размера окна могут приходить подряд. 
+    // Одноразовый таймер объединяет их в одно обновление через 200 мс и предотвращает лишние перерасчёты таблицы.
     m_proxyListRefreshDebounce = new QTimer(this);
     m_proxyListRefreshDebounce->setSingleShot(true);
     connect(m_proxyListRefreshDebounce, &QTimer::timeout, this, [this] { refresh_proxy_list({}, false); });
 
-    // auto update timer
+    // Периодическое обновление подписок.
     TM_auto_update_subsctiption = new QTimer;
     TM_auto_update_subsctiption_Reset_Minute = [&](int m) {
         TM_auto_update_subsctiption->stop();
@@ -1076,11 +1160,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(TM_auto_update_subsctiption, &QTimer::timeout, this, [&] { UI_update_all_groups(true); });
     TM_auto_update_subsctiption_Reset_Minute(Configs::dataManager->settingsRepo->sub_auto_update);
 
+	// Отображение главного окна при отсутствии флага -tray.
+	// В противном случае окно остаётся скрытым, а управление доступно из трея.
     if (!Configs::dataManager->settingsRepo->flag_tray) show();
-
+    // HTML-представление статистики встраивается без собственного фона и рамки, чтобы совпадать с оформлением родительской панели.
     ui->data_view->setStyleSheet("background: transparent; border: none;");
 }
 
+// Обработка попытки закрытия главного окна Gryph.
 void MainWindow::closeEvent(QCloseEvent *event) {
     if (tray->isVisible()) {
         HideWindow(this);
@@ -1090,6 +1177,7 @@ void MainWindow::closeEvent(QCloseEvent *event) {
     }
 }
 
+// Настройка шрифта окна журнала.
 void MainWindow::applyLogBrowserFont() {
     QFont logFont = QFontDatabase::systemFont(QFontDatabase::FixedFont);
     int pt = qApp->font().pointSize();

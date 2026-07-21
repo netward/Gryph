@@ -55,13 +55,15 @@ list(APPEND NKR_EXTERNAL_TARGETS qhotkey)
 # Sources
 set(PROJECT_SOURCES
         ${PLATFORM_SOURCES}
-
+        
         src/main.cpp
         src/global/Configs.cpp
         src/global/Utils.cpp
         src/global/HTTPRequestHelper.cpp
         src/global/DeviceDetailsHelper.cpp
         src/global/CountryHelper.cpp
+
+        # Custom components
 
         3rdparty/qrcodegen.cpp
         3rdparty/QtExtKeySequenceEdit.cpp

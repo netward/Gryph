@@ -79,9 +79,9 @@
       <enum>QTabWidget::TabShape::Rounded</enum>
      </property>
      <property name="currentIndex">
-      <number>0</number>
+      <number>6</number>
      </property>
-     <widget class="QWidget" name="tab_1">
+     <widget class="QWidget" name="Tab1">
       <attribute name="title">
        <string>Common</string>
       </attribute>
@@ -604,9 +604,9 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="Logging">
+     <widget class="QWidget" name="Tab2">
       <attribute name="title">
-       <string>Logging</string>
+       <string>Journal</string>
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_6">
        <item>
@@ -822,7 +822,7 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="tab_2">
+     <widget class="QWidget" name="Tab3">
       <attribute name="title">
        <string>Style</string>
       </attribute>
@@ -1032,7 +1032,7 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="tab_3">
+     <widget class="QWidget" name="Tab4">
       <attribute name="title">
        <string>Subscription</string>
       </attribute>
@@ -1140,7 +1140,7 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="tab_4">
+     <widget class="QWidget" name="Tab5">
       <attribute name="title">
        <string>Core</string>
       </attribute>
@@ -1391,7 +1391,7 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="tab_backup">
+     <widget class="QWidget" name="Tab6">
       <attribute name="title">
        <string>Backup and Restore</string>
       </attribute>
@@ -1537,11 +1537,40 @@
        </item>
       </layout>
      </widget>
-     <widget class="QWidget" name="tab_5">
+     <widget class="QWidget" name="Tab7">
       <attribute name="title">
        <string>Security</string>
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_4">
+       <item>
+        <widget class="QCheckBox" name="checkBox">
+         <property name="text">
+          <string>CheckBox</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="ToggleSwitch" name="widget_4" native="true">
+         <property name="sizePolicy">
+          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+           <horstretch>0</horstretch>
+           <verstretch>0</verstretch>
+          </sizepolicy>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>44</width>
+           <height>24</height>
+          </size>
+         </property>
+         <property name="sizeIncrement">
+          <size>
+           <width>44</width>
+           <height>24</height>
+          </size>
+         </property>
+        </widget>
+       </item>
        <item>
         <widget class="QCheckBox" name="disable_priv_req">
          <property name="text">
@@ -1610,6 +1639,12 @@
    <class>MyLineEdit</class>
    <extends>QLineEdit</extends>
    <header>include/ui/utils/MyLineEdit.h</header>
+  </customwidget>
+  <customwidget>
+   <class>ToggleSwitch</class>
+   <extends>QWidget</extends>
+   <header>include/components/toggleswitch/toggleswitch.h</header>
+   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

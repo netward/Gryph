@@ -49,7 +49,7 @@ QTabBar::tab:hover:!selected {
 }</string>
      </property>
      <property name="currentIndex">
-      <number>4</number>
+      <number>2</number>
      </property>
      <widget class="QWidget" name="tab">
       <attribute name="title">
@@ -294,7 +294,7 @@ QTabBar::tab:hover:!selected {
      </widget>
      <widget class="QWidget" name="tab_5">
       <attribute name="title">
-       <string>Warp</string>
+       <string>WARP</string>
       </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_8">
        <item>
@@ -306,7 +306,7 @@ QTabBar::tab:hover:!selected {
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Enables the following config to be used as egress, useful for bypassing services restrciting non-warp VPNs&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
             <property name="text">
-             <string>Enable Warp</string>
+             <string>Enable WARP</string>
             </property>
            </widget>
           </item>
@@ -356,7 +356,7 @@ QTabBar::tab:hover:!selected {
              <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Gets a new config from cloudflare API&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
             </property>
             <property name="text">
-             <string>Generate Warp Config</string>
+             <string>Generate WARP Config</string>
             </property>
            </widget>
           </item>
