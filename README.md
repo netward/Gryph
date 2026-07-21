@@ -4,7 +4,7 @@ Qt based Desktop cross-platform GUI proxy utility, empowered by [Sing-box](https
 
 Supports Windows 11/10/8/7 / Linux / MacOS out of the box.
 
-<img width="1002" height="789" alt="image" src="https://github.com/user-attachments/assets/3c9bf428-e3bd-426b-8ca1-cc57ecbedd7e" />
+<img width="1002" height="789" alt="image" src="[https://github.com/netward/assets/blob/0ea4b6a34f1dddb86d5f2699ce2da68a61800755/Gryph/mainwindow.png]" />
 
 ### Note on MacOS releases
 Apple platforms have a very strict security policy and since Gryph does not have a signed certificate, you will have to remove the quarantine using `xattr -d com.apple.quarantine /path/to/Gryph.app`. Also to get the built-in privilege escalation to work, `Terminal` should have the `Full Disk` access.
