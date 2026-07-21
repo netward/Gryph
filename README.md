@@ -1,8 +1,8 @@
 # Gryph
 
-Основанная на Qt прокси-утилита с ядром, основанным на [Sing-box](https://github.com/SagerNet/sing-box).
-Поддерживает: Windows 11/10/8/7 
-Скоро будет: Linux, MacOS.
+Основанная на Qt прокси-утилита с ядром, основанным на [Sing-box](https://github.com/SagerNet/sing-box).<br/>
+Поддерживает: Windows 11/10/8/7.<br/> 
+Скоро будет: Linux, MacOS.<br/>
 
 <img width="1002" height="789" alt="image" src="https://github.com/netward/assets/blob/0ea4b6a34f1dddb86d5f2699ce2da68a61800755/Gryph/mainwindow.png" />
 
