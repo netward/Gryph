@@ -1,7 +1,7 @@
 #include <QThread>
 #include <core/server/gen/libcore.pb.h>
 #include <include/api/RPC.h>
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 #include <include/stats/connections/connectionLister.hpp>
 
 
@@ -82,8 +82,9 @@ namespace Stats
         if (sort == Default)
         {
             runOnUiThread([=,this] {
-                auto m = GetMainWindow();
-                m->UpdateConnectionList(toUpdate, toAdd);
+                MainWindowApi::UpdateConnectionList(
+                    toUpdate,
+                    toAdd);
             });
         } else
         {
@@ -128,8 +129,8 @@ namespace Stats
                     });
             }
             runOnUiThread([=,this] {
-                auto m = GetMainWindow();
-                m->UpdateConnectionListWithRecreate(sorted);
+                MainWindowApi::UpdateConnectionListWithRecreate(
+                    sorted);
             });
         }
     }

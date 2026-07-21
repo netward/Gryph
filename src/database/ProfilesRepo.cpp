@@ -5,7 +5,7 @@
 #include <map>
 
 #include "include/database/GroupsRepo.h"
-#include "include/ui/mainwindow.h"
+#include "include/ui/mainwindowapi.h"
 
 
 namespace Configs {
@@ -523,7 +523,9 @@ namespace Configs {
     bool ProfilesRepo::BatchDeleteProfiles(QList<int>& ids, bool stopRunningProfile) {
         QSet<int> groupIDs;
         if (ids.contains(dataManager->settingsRepo->started_id)) {
-            if (stopRunningProfile) GetMainWindow()->profile_stop(false, true, false);
+            if (stopRunningProfile) {
+                MainWindowApi::StopProfile(false, true, false);
+            }
             else ids.removeAll(dataManager->settingsRepo->started_id);
         }
         auto profiles = GetProfileBatch(ids);

@@ -26,7 +26,7 @@
 
 
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 
 #ifdef Q_OS_WIN
 #include "include/sys/windows/MiniDump.h"
@@ -69,8 +69,11 @@ protected:
 // Общий обработчик запроса на завершение приложения.
 // Просит главное окно сохранить состояние и корректно остановить подсистемы, после чего завершает цикл событий Qt.
 // Параметр signum сейчас не используется.
-void signal_handler(int signum) {
-    GetMainWindow()->prepare_exit();
+void signal_handler(int signum)
+{
+    Q_UNUSED(signum);
+
+    MainWindowApi::PrepareExit();
     qApp->quit();
 }
 
@@ -383,7 +386,7 @@ int main(int argc, char* argv[]) {
 
     // 14. Пользовательский интерфейс.
     //     Создаём и инициализируем главное окно.
-    UI_InitMainWindow();
+    MainWindowApi::Initialize();
 
     // Передаём deeplink, полученный при холодном запуске через argv.
     // После этого обрабатываем ссылки, которые могли прийти во время запуска до готовности главного окна.

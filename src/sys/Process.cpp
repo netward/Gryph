@@ -7,7 +7,7 @@
 
 
 
-#include "include/ui/mainwindow.h"
+#include "include/ui/mainwindowapi.h"
 
 namespace Configs_sys {
     CoreProcess::~CoreProcess() {
@@ -54,7 +54,7 @@ namespace Configs_sys {
 
                 MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
 
-                GetMainWindow()->profile_stop(true, true);
+                MainWindowApi::StopProfile(true, true);
 
                 // Retry rate limit
                 if (coreRestartTimer.isValid()) {

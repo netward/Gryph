@@ -55,15 +55,16 @@ list(APPEND NKR_EXTERNAL_TARGETS qhotkey)
 # Sources
 set(PROJECT_SOURCES
         ${PLATFORM_SOURCES}
-        
+        # Main window public API
+        include/ui/mainwindowapi.h
+        src/ui/mainwindowapi.cpp
+
         src/main.cpp
         src/global/Configs.cpp
         src/global/Utils.cpp
         src/global/HTTPRequestHelper.cpp
         src/global/DeviceDetailsHelper.cpp
         src/global/CountryHelper.cpp
-
-        # Custom components
 
         3rdparty/qrcodegen.cpp
         3rdparty/QtExtKeySequenceEdit.cpp
@@ -235,7 +236,6 @@ set(PROJECT_SOURCES
         src/sys/macos/MacOS.cpp
 
         src/sys/Process.cpp
-        include/ui/mainwindow_interface.h
         include/stats/connections/connectionLister.hpp
         src/stats/connectionLister/connectionLister.cpp
         include/sys/windows/eventHandler.h
@@ -367,15 +367,26 @@ qt_add_executable(Gryph
         ${PROJECT_SOURCES}
 )
 
-# Target
+target_include_directories(Gryph PRIVATE
+        "${CMAKE_SOURCE_DIR}"
+        "${CMAKE_SOURCE_DIR}/include"
+)
 
 set_property(TARGET Gryph PROPERTY AUTOUIC ON)
 set_property(TARGET Gryph PROPERTY AUTOMOC ON)
 set_property(TARGET Gryph PROPERTY AUTORCC ON)
 
+set_property(
+        TARGET Gryph
+        PROPERTY AUTOUIC_SEARCH_PATHS
+        "${CMAKE_SOURCE_DIR}/include/ui"
+        "${CMAKE_SOURCE_DIR}/include/ui/profile"
+        "${CMAKE_SOURCE_DIR}/include/ui/group"
+        "${CMAKE_SOURCE_DIR}/include/ui/setting"
+)
+
 
 # Target Source macOS
-
 set(MACOSX_ICON ${CMAKE_SOURCE_DIR}/res/Gryph.icns)
 if (APPLE)
     target_sources(Gryph PRIVATE ${MACOSX_ICON})
@@ -393,7 +404,6 @@ set_target_properties(Gryph PROPERTIES
 set_property(SOURCE "3rdparty/SQLiteCpp/src/sqlite3.c" PROPERTY SKIP_UNITY_BUILD_INCLUSION ON)
 
 # Target Source Translations
-
 set(TS_FILES
         res/translations/zh_CN.ts
         res/translations/fa_IR.ts
@@ -409,7 +419,6 @@ configure_file(res/translations/translations.qrc ${CMAKE_BINARY_DIR} COPYONLY)
 target_sources(Gryph PRIVATE ${CMAKE_BINARY_DIR}/translations.qrc)
 
 # Target Link
-
 target_link_libraries(Gryph PRIVATE
         Qt6::Widgets Qt6::Network Qt6::DBus
         Threads::Threads

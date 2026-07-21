@@ -14,8 +14,6 @@
 #include <QtDBus>
 #endif
 
-#ifndef MW_INTERFACE
-
 #include <QKeyEvent>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -35,9 +33,7 @@
 #include "include/global/GuiUtils.hpp"
 #include "include/ui/utils/DataViewHtmlGenerator.h"
 #include "include/ui/utils/ProfilesTableModel.h"
-#include "ui_mainwindow.h"
 
-#endif
 
 namespace Configs_sys {
     class CoreProcess;
@@ -104,8 +100,6 @@ public slots:
     void on_commitDataRequest();
 
     void on_menu_exit_triggered();
-
-#ifndef MW_INTERFACE
 
 private slots:
 
@@ -341,14 +335,7 @@ private:
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
 
-#endif // MW_INTERFACE
 };
-
-inline MainWindow *GetMainWindow() {
-    return (MainWindow *) mainwindow;
-}
-
-void UI_InitMainWindow();
 
 #ifdef Q_OS_LINUX
 /*

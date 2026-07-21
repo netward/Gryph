@@ -2,7 +2,7 @@
 
 
 #include "include/database/ProfilesRepo.h"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 #include "include/ui/profile/ProxyItem.h"
 
 EditChain::EditChain(QWidget *parent) : QWidget(parent), ui(new Ui::EditChain) {
@@ -59,10 +59,13 @@ bool EditChain::onEnd() {
 
 void EditChain::on_select_profile_clicked() {
     get_edit_dialog()->hide();
-    GetMainWindow()->start_select_mode(this, [=,this](int id) {
-        get_edit_dialog()->show();
-        AddProfileToListIfExist(id);
-    });
+    MainWindowApi::StartSelectMode(
+        this,
+        [this](int id)
+        {
+            get_edit_dialog()->show();
+            AddProfileToListIfExist(id);
+        });
 }
 
 void EditChain::AddProfileToListIfExist(int profileId) {
@@ -76,10 +79,13 @@ void EditChain::AddProfileToListIfExist(int profileId) {
         // change button
         connect(w->get_change_button(), &QPushButton::clicked, w, [=,this] {
             get_edit_dialog()->hide();
-            GetMainWindow()->start_select_mode(w, [=,this](int newId) {
-                get_edit_dialog()->show();
-                ReplaceProfile(w, newId);
-            });
+            MainWindowApi::StartSelectMode(
+                w,
+                [this, w](int newId)
+                {
+                    get_edit_dialog()->show();
+                    ReplaceProfile(w, newId);
+                });
         });
     }
 }

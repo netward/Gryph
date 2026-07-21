@@ -295,7 +295,7 @@ namespace Configs {
         return peer->address;
     }
 
-    void wireguard::SetPort(int newPort) {
+    void Configs::wireguard::SetServerPort(int newPort) {
         peer->port = newPort;
     }
 

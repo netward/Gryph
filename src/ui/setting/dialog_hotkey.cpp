@@ -2,7 +2,7 @@
 
 #include <include/global/GuiUtils.hpp>
 
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 #include <QAction>
 
 DialogHotkey::DialogHotkey(QWidget *parent, const QList<QAction*>& actions) : QDialog(parent), ui(new Ui::DialogHotkey) {
@@ -15,7 +15,7 @@ DialogHotkey::DialogHotkey(QWidget *parent, const QList<QAction*>& actions) : QD
 
     generateShortcutItems(actions);
 
-    GetMainWindow()->RegisterHotkey(true);
+    MainWindowApi::RegisterHotkey(true);
 }
 
 void DialogHotkey::generateShortcutItems(const QList<QAction*>& actions)
@@ -50,13 +50,13 @@ void DialogHotkey::accept()
 
     Configs::dataManager->settingsRepo->Save();
     MW_dialog_message(MwMessage::UpdateShortcuts, {});
-    GetMainWindow()->RegisterHotkey(false);
+    MainWindowApi::RegisterHotkey(false);
     QDialog::accept();
 }
 
 void DialogHotkey::reject()
 {
-    GetMainWindow()->RegisterHotkey(false);
+    MainWindowApi::RegisterHotkey(false);
     QDialog::reject();
 }
 

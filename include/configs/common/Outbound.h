@@ -46,7 +46,8 @@ namespace Configs
             return server;
         }
 
-        virtual void SetPort(int newPort) {
+        virtual void SetServerPort(int newPort)
+        {
             server_port = newPort;
         }
 

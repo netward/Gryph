@@ -61,7 +61,7 @@ namespace Configs
         QJsonObject ExportToJson() override;
         BuildResult Build() override;
 
-        void SetPort(int newPort) override;
+        void SetServerPort(int newPort) override;
         QString GetPort() override;
         void SetAddress(QString newAddr) override;
         QString GetAddress() override;

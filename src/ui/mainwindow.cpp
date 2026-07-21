@@ -13,6 +13,7 @@
 //  9. Проверка и установка обновлений.
 
 #include "include/ui/mainwindow.h"
+#include "ui_mainwindow.h"
 
 #include <QAbstractItemView>
 #include <QMenu>
@@ -93,9 +94,6 @@
 
 // Создание единственного экземпляра главного окна.
 // Вызывается из main.cpp после подготовки приложения, БД и рабочих потоков.
-void UI_InitMainWindow() {
-    mainwindow = new MainWindow;
-}
 
 // Проверяет, что подключившийся к IPC-серверу процесс действительно является запущенным GryphCore.
 // PID извлекается платформенным способом и сравнивается с PID объекта core_process. 
@@ -157,7 +155,6 @@ static bool themeUsesDarkLog(const QString &theme) {
 // Большинство connect() связывают действие пользователя или системное событие с методом MainWindow либо асинхронной задачей.
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     // Регистрация главного окна и глобальных UI-маршрутизаторов.
-    mainwindow = this;
     setAcceptDrops(true);
     MW_dialog_message = [=,this](MwMessage cmd, QStringList args) {
         runOnUiThread([=,this]

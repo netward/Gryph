@@ -1,7 +1,7 @@
 #include "include/stats/traffic/TrafficLooper.hpp"
 
 #include "include/api/RPC.h"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 
 #include <QThread>
 #include <QJsonDocument>
@@ -79,14 +79,12 @@ namespace Stats {
                 if (looping) {
                     looping = false;
                     runOnUiThread([=] {
-                        auto m = GetMainWindow();
-                        m->refresh_status("STOP");
+                        MainWindowApi::RefreshStatus("STOP");
                     });
                 }
                 runOnUiThread([=]
                 {
-                   auto m = GetMainWindow();
-                   m->update_traffic_graph(0, 0, 0, 0);
+                        MainWindowApi::UpdateTrafficGraph(0, 0, 0, 0);
                 });
                 continue;
             } else {
@@ -105,15 +103,26 @@ namespace Stats {
 
             // post to UI
             runOnUiThread([=,this] {
-                auto m = GetMainWindow();
                 if (proxy != nullptr) {
-                    m->refresh_status(QObject::tr("Proxy: %1\nDirect: %2").arg(DisplaySpeed(proxy), DisplaySpeed(direct)));
-                    m->update_traffic_graph(proxy->downlink_rate, proxy->uplink_rate, direct->downlink_rate, direct->uplink_rate);
+                    MainWindowApi::RefreshStatus(
+                        QObject::tr("Proxy: %1\nDirect: %2")
+                        .arg(
+                            DisplaySpeed(proxy),
+                            DisplaySpeed(direct)));
+
+                    MainWindowApi::UpdateTrafficGraph(
+                        proxy->downlink_rate,
+                        proxy->uplink_rate,
+                        direct->downlink_rate,
+                        direct->uplink_rate);
                 }
+
                 for (const auto& group : groups) {
                     for (const auto& profile : group.profiles) {
-                        m->refresh_proxy_list({profile->id});
-                        Configs::dataManager->profilesRepo->SaveTraffic(profile);
+                        MainWindowApi::RefreshProxyList({ profile->id });
+                        Configs::dataManager
+                            ->profilesRepo
+                            ->SaveTraffic(profile);
                     }
                 }
             });

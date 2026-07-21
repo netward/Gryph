@@ -1,6 +1,6 @@
 #include "include/ui/group/dialog_edit_group.h"
 
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 
 #include <QClipboard>
 #include <QHash>
@@ -13,7 +13,13 @@
 #include "include/database/ProfilesRepo.h"
 
 
-#define ADJUST_SIZE runOnThread([=,this] { adjustSize(); adjustPosition(mainwindow); }, this);
+#define ADJUST_SIZE \
+    runOnThread( \
+        [this] { \
+            adjustSize(); \
+            adjustPosition(MainWindowApi::Widget()); \
+        }, \
+        this);
 
 DialogEditGroup::DialogEditGroup(const std::shared_ptr<Configs::Group> &ent, QWidget *parent) : QDialog(parent), ui(new Ui::DialogEditGroup) {
     ui->setupUi(this);

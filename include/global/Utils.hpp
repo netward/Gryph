@@ -58,8 +58,7 @@ inline QString software_name;
 inline QString software_core_name;
 
 // MainWindow functions
-class QWidget;
-inline QWidget *mainwindow;
+
 inline std::function<void(QString)> MW_show_log;
 
 // Commands delivered to the main window from anywhere in the app via

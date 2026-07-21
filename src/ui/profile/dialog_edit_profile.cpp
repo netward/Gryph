@@ -1,5 +1,6 @@
 #include "include/ui/profile/dialog_edit_profile.h"
-
+#include "ui_dialog_edit_profile.h"
+#include "include/ui/mainwindowapi.h"
 #include "include/ui/profile/edit_http.h"
 #include "include/ui/profile/edit_shadowsocks.h"
 #include "include/ui/profile/edit_chain.h"
@@ -24,8 +25,6 @@
 #include "include/configs/common/xrayStreamSetting.h"
 #include "include/database/ProfilesRepo.h"
 
-
-
 #include "include/ui/profile/edit_advanced.h"
 #include "include/ui/profile/edit_direct.h"
 #include "include/ui/profile/edit_hysteria.h"
@@ -47,7 +46,7 @@ constexpr int kXrayXHTTPNetworkMinWidth = 760;
 void DialogEditProfile::queueRefreshDialogLayout() {
     runOnThread([=,this] {
         adjustSize();
-        adjustPosition(mainwindow);
+        adjustPosition(MainWindowApi::Widget());
     }, this);
 }
 
@@ -626,7 +625,7 @@ void DialogEditProfile::typeSelected(const QString &newType) {
     editor_cache_updated_impl();
     runOnThread([=,this] {
         adjustSize();
-        adjustPosition(mainwindow);
+        adjustPosition(MainWindowApi::Widget());
         if (isHidden()) show();
     }, this);
 }
@@ -672,8 +671,8 @@ bool DialogEditProfile::onEnd() {
     if (!validateXrayXHTTPSettings()) return false;
 
     ent->outbound->name = ui->name->text();
-    ent->outbound->SetAddress(ui->address->text().remove(' '));
-    ent->outbound->SetPort(ui->port->text().toInt());
+    ent->outbound->SetAddress(ui->address->text().remove(' '));    
+    ent->outbound->SetServerPort(ui->port->text().toInt());
 
     if (ent->outbound->HasTLS() || ent->outbound->HasTransport()) {
         auto tls = ent->outbound->GetTLS();

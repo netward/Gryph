@@ -1,4 +1,5 @@
 #include "include/ui/mainwindow.h"
+#include "ui_mainwindow.h"
 
 #include "include/stats/traffic/TrafficLooper.hpp"
 #include "include/api/RPC.h"

@@ -1550,28 +1550,6 @@
         </widget>
        </item>
        <item>
-        <widget class="ToggleSwitch" name="widget_4" native="true">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="minimumSize">
-          <size>
-           <width>44</width>
-           <height>24</height>
-          </size>
-         </property>
-         <property name="sizeIncrement">
-          <size>
-           <width>44</width>
-           <height>24</height>
-          </size>
-         </property>
-        </widget>
-       </item>
-       <item>
         <widget class="QCheckBox" name="disable_priv_req">
          <property name="text">
           <string>Disable Privilege request</string>
@@ -1639,12 +1617,6 @@
    <class>MyLineEdit</class>
    <extends>QLineEdit</extends>
    <header>include/ui/utils/MyLineEdit.h</header>
-  </customwidget>
-  <customwidget>
-   <class>ToggleSwitch</class>
-   <extends>QWidget</extends>
-   <header>include/components/toggleswitch/toggleswitch.h</header>
-   <container>1</container>
   </customwidget>
  </customwidgets>
  <resources/>

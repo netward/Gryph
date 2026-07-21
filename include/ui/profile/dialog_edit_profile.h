@@ -1,9 +1,9 @@
 #pragma once
-#include <QDialog>
-#include "profile_editor.h"
 
+#include <QDialog>
+
+#include "profile_editor.h"
 #include "include/ui/utils/FloatCheckBox.h"
-#include "ui_dialog_edit_profile.h"
 #include "include/database/entities/Profile.h"
 
 namespace Ui {

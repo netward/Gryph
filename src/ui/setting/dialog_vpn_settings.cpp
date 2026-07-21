@@ -2,7 +2,7 @@
 
 #include "include/global/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindow_interface.h"
+#include "include/ui/mainwindowapi.h"
 #ifdef Q_OS_WIN
 #include "include/sys/windows/WinVersion.h"
 #endif
@@ -11,7 +11,13 @@
 #include <QHostAddress>
 
 
-#define ADJUST_SIZE runOnThread([=,this] { adjustSize(); adjustPosition(mainwindow); }, this);
+#define ADJUST_SIZE \
+    runOnThread( \
+        [this] { \
+            adjustSize(); \
+            adjustPosition(MainWindowApi::Widget()); \
+        }, \
+        this);
 
 namespace {
     const QString kDefaultTunIPv4CIDR = "172.19.0.1/24";
@@ -118,6 +124,6 @@ void DialogVPNSettings::on_troubleshooting_clicked() {
 
     auto r = msg.exec() - 2;
     if (r == 0) {
-        GetMainWindow()->StopVPNProcess();
+        MainWindowApi::StopVpnProcess();
     }
 }

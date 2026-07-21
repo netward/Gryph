@@ -13,7 +13,7 @@
 
 
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindow.h"
+#include "include/ui/mainwindowapi.h"
 #include "include/global/DeviceDetailsHelper.hpp"
 
 namespace Configs_network {
@@ -148,8 +148,15 @@ namespace Configs_network {
         connect(_reply, &QNetworkReply::downloadProgress, _reply, [&](qint64 bytesReceived, qint64 bytesTotal)
         {
             runOnUiThread([=]{
-                GetMainWindow()->setDownloadReport(DownloadProgressReport{fileName, bytesReceived, bytesTotal}, true);
-                GetMainWindow()->UpdateDataView();
+                MainWindowApi::SetDownloadReport(
+                    Configs_network::DownloadProgressReport{
+                        fileName,
+                        bytesReceived,
+                        bytesTotal
+                    },
+                    true);
+
+                MainWindowApi::UpdateDataView();
             });
         });
         QEventLoop loop;
@@ -157,8 +164,8 @@ namespace Configs_network {
         loop.exec();
         runOnUiThread([=]
         {
-            GetMainWindow()->setDownloadReport({}, false);
-            GetMainWindow()->UpdateDataView(true);
+                MainWindowApi::SetDownloadReport({}, false);
+                MainWindowApi::UpdateDataView(true);
         });
         _reply->deleteLater();
         if(_reply->error() != QNetworkReply::NetworkError::NoError) {

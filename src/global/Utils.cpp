@@ -1,5 +1,5 @@
 #include "include/global/Utils.hpp"
-
+#include "include/ui/mainwindowapi.h"
 #include "3rdparty/QThreadCreateThread.hpp"
 
 #include <random>
@@ -267,13 +267,21 @@ QString DisplayTime(long long time, int formatType) {
     return QLocale().toString(t, QLocale::FormatType(formatType));
 }
 
-QWidget *GetMessageBoxParent() {
-    auto activeWindow = QApplication::activeWindow();
-    if (activeWindow == nullptr && mainwindow != nullptr) {
-        if (mainwindow->isVisible()) return mainwindow;
-        return nullptr;
+QWidget* GetMessageBoxParent()
+{
+    QWidget* activeWindow = QApplication::activeWindow();
+
+    if (activeWindow != nullptr) {
+        return activeWindow;
     }
-    return activeWindow;
+
+    QWidget* mainWindow = MainWindowApi::Widget();
+
+    if (mainWindow != nullptr && mainWindow->isVisible()) {
+        return mainWindow;
+    }
+
+    return nullptr;
 }
 
 int MessageBoxWarning(const QString &title, const QString &text) {
@@ -305,31 +313,54 @@ void HideWindow(QWidget *w) {
 #endif
 }
 
-void runOnUiThread(const std::function<void()> &callback, bool wait) {
-    // any thread
-    auto thread = mainwindow->thread();
-    if (thread == QThread::currentThread()) {
+void runOnUiThread(
+    const std::function<void()>& callback,
+    bool wait)
+{
+    QWidget* mainWindow = MainWindowApi::Widget();
+
+    // Главное окно ещё не создано.
+    if (mainWindow == nullptr) {
         callback();
         return;
     }
-    auto *timer = new QTimer();
-    timer->moveToThread(thread);
+
+    QThread* uiThread = mainWindow->thread();
+
+    if (uiThread == QThread::currentThread()) {
+        callback();
+        return;
+    }
+
+    auto* timer = new QTimer;
+    timer->moveToThread(uiThread);
     timer->setSingleShot(true);
 
     QEventLoop loop;
-    QObject::connect(timer, &QTimer::timeout, [=, &loop]() {
-        // main thread
-        callback();
-        timer->deleteLater();
 
-        if (wait)
+    QObject::connect(
+        timer,
+        &QTimer::timeout,
+        [callback, timer, wait, &loop]()
         {
-            QMetaObject::invokeMethod(&loop, "quit", Qt::QueuedConnection);
-        }
-    });
-    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
+            callback();
+            timer->deleteLater();
 
-    if (wait && QThread::currentThread() != thread) {
+            if (wait) {
+                QMetaObject::invokeMethod(
+                    &loop,
+                    "quit",
+                    Qt::QueuedConnection);
+            }
+        });
+
+    QMetaObject::invokeMethod(
+        timer,
+        "start",
+        Qt::QueuedConnection,
+        Q_ARG(int, 0));
+
+    if (wait && QThread::currentThread() != uiThread) {
         loop.exec();
     }
 }
