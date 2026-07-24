@@ -168,10 +168,6 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Logging</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Sing-box Log level</source>
         <translation type="unfinished"></translation>
     </message>
@@ -313,6 +309,10 @@
         <translation>فقط بارگذاری</translation>
     </message>
     <message>
+        <source>Journal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Xray Core</source>
         <translation type="unfinished"></translation>
     </message>
@@ -374,6 +374,10 @@
     </message>
     <message>
         <source>Restore from Backup...</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>CheckBox</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
@@ -1428,10 +1432,6 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Route</source>
-        <translation>مسیر</translation>
-    </message>
-    <message>
         <source>Routing Profiles</source>
         <translation>نمایه‌های مسیریابی</translation>
     </message>
@@ -1498,6 +1498,10 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     <message>
         <source>Redirect Settings</source>
         <translation>تنظیمات هدایت</translation>
+    </message>
+    <message>
+        <source>Profiles</source>
+        <translation type="unfinished">نمایه‌ها</translation>
     </message>
     <message>
         <source>Clone</source>
@@ -3196,10 +3200,6 @@ Auto update: %3</source>
         <translation>پروتکل</translation>
     </message>
     <message>
-        <source>Logs</source>
-        <translation>گزارش‌ها</translation>
-    </message>
-    <message>
         <source>Please give the core root privileges</source>
         <translation>لطفاً به هسته دسترسی ریشه بدهید</translation>
     </message>
@@ -3226,6 +3226,10 @@ Auto update: %3</source>
     <message>
         <source>Routing</source>
         <translation>مسیریابی</translation>
+    </message>
+    <message>
+        <source>Journal</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Destination (Domain)</source>

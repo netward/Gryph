@@ -456,8 +456,8 @@ void DialogBasicSettings::on_backup_create_clicked() {
     QString filePath = QFileDialog::getSaveFileName(
         this,
         tr("Create Backup"),
-        QDir::homePath() + "/Gryph-backup.thrbackup",
-        tr("Gryph Backup (*.thrbackup)")
+        QDir::homePath() + "/Gryph-backup.grbak",
+        tr("Gryph Backup (*.grbak)")
     );
     if (filePath.isEmpty()) return;
 
@@ -546,7 +546,7 @@ void DialogBasicSettings::on_backup_restore_clicked() {
         this,
         tr("Restore Backup"),
         QDir::homePath(),
-        tr("Gryph Backup (*.thrbackup)")
+        tr("Gryph Backup (*.grbak)")
     );
     if (filePath.isEmpty()) return;
 

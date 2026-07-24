@@ -120,6 +120,10 @@
         <translation>hwid=ваше_значение,os=ваша_система,osVersion=ваша_версия_ос,model=ваша_модель</translation>
     </message>
     <message>
+        <source>Journal</source>
+        <translation>Журнал</translation>
+    </message>
+    <message>
         <source>Core</source>
         <translation>Ядро</translation>
     </message>
@@ -208,6 +212,10 @@
         <translation>Безопасность</translation>
     </message>
     <message>
+        <source>CheckBox</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Skip TLS certificate authentication by default (allowInsecure)</source>
         <translation>Пропустить проверку подлинности TLS-сертификатов по умолчанию (allowInsecure)</translation>
     </message>
@@ -267,10 +275,6 @@
         <translation>Кол-во потоков</translation>
     </message>
     <message>
-        <source>Logging</source>
-        <translation type="unfinished">Журнал</translation>
-    </message>
-    <message>
         <source>Auto-scroll log</source>
         <translation type="unfinished">Авто-прокрутка журнала</translation>
     </message>
@@ -327,7 +331,7 @@
 																			&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Might
 																			Improve Ping and Performance&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;
 																		</source>
-        <translation type="unfinished"></translation>
+        <translation></translation>
     </message>
     <message>
         <source>Disable Traffic Stats</source>
@@ -1487,10 +1491,6 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation>Вместимость кэша</translation>
     </message>
     <message>
-        <source>Route</source>
-        <translation>Маршрут</translation>
-    </message>
-    <message>
         <source>Routing Profiles</source>
         <translation>Профили маршрутизации</translation>
     </message>
@@ -1557,6 +1557,10 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     <message>
         <source>Redirect Settings</source>
         <translation>Настройки перенаправления</translation>
+    </message>
+    <message>
+        <source>Profiles</source>
+        <translation type="unfinished">Профили</translation>
     </message>
     <message>
         <source>Clone</source>
@@ -2776,6 +2780,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>Добавить профиль из буфера обмена</translation>
     </message>
     <message>
+        <source>Journal</source>
+        <translation>Журнал</translation>
+    </message>
+    <message>
         <source>Delete</source>
         <translation>Удалить</translation>
     </message>
@@ -3217,10 +3225,6 @@ Auto update: %3</source>
     <message>
         <source>Protocol</source>
         <translation>Протокол</translation>
-    </message>
-    <message>
-        <source>Logs</source>
-        <translation type="unfinished">Журнал</translation>
     </message>
     <message>
         <source>Please give the core root privileges</source>

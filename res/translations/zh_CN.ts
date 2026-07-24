@@ -120,10 +120,6 @@
         <translation>并发数</translation>
     </message>
     <message>
-        <source>Logging</source>
-        <translation>日志</translation>
-    </message>
-    <message>
         <source>Max log lines</source>
         <translation>最多日志行数</translation>
     </message>
@@ -316,6 +312,10 @@
         <translation>仅上传</translation>
     </message>
     <message>
+        <source>Journal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Xray Core</source>
         <translation>Xray 核心</translation>
     </message>
@@ -378,6 +378,10 @@
     <message>
         <source>Restore from Backup...</source>
         <translation>从备份恢复...</translation>
+    </message>
+    <message>
+        <source>CheckBox</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Disable Privilege request</source>
@@ -1474,10 +1478,6 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Route</source>
-        <translation>路由</translation>
-    </message>
-    <message>
         <source>Routing Profiles</source>
         <translation>路由配置档</translation>
     </message>
@@ -1556,6 +1556,10 @@ For more information, see the document &quot;Configuration/DNS&quot;.</source>
     <message>
         <source>Redirect Settings</source>
         <translation>重定向设置</translation>
+    </message>
+    <message>
+        <source>Profiles</source>
+        <translation type="unfinished">配置档</translation>
     </message>
     <message>
         <source>Clone</source>
@@ -2727,6 +2731,10 @@ https://matsuridayo.github.io/n-configuration/#vpn-tun</translation>
         <translation>系统代理</translation>
     </message>
     <message>
+        <source>Journal</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Share</source>
         <translation>分享</translation>
     </message>
@@ -3192,10 +3200,6 @@ Auto update: %3</source>
     <message>
         <source>Protocol</source>
         <translation>协议</translation>
-    </message>
-    <message>
-        <source>Logs</source>
-        <translation>日志</translation>
     </message>
     <message>
         <source>Please give the core root privileges</source>
