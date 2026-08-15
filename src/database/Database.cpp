@@ -11,6 +11,8 @@ namespace Configs {
     }
 
     void Database::checkpointWal() {
+        std::lock_guard<std::recursive_mutex>
+            locker(db_mutex);
         try {
             db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
         } catch (std::exception& e) {
@@ -140,12 +142,16 @@ namespace Configs {
     }
 
     void Database::backupTo(const std::string& destPath) {
+        std::lock_guard<std::recursive_mutex>
+            locker(db_mutex);
         SQLite::Database destDb(destPath, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
         SQLite::Backup backup(destDb, db);
         backup.executeStep(-1);
     }
 
     void Database::restoreFrom(const std::string& srcPath) {
+        std::lock_guard<std::recursive_mutex>
+            locker(db_mutex);
         SQLite::Database srcDb(srcPath, SQLite::OPEN_READONLY);
         SQLite::Backup restore(db, srcDb);
         restore.executeStep(-1);
@@ -200,6 +206,8 @@ namespace Configs {
         // then strip the categories the user did not select. entity_ids is
         // always kept so profile/route IDs stay consistent on restore.
         {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
             SQLite::Database destDb(destPath, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE);
             SQLite::Backup backup(destDb, db);
             backup.executeStep(-1);
@@ -221,8 +229,9 @@ namespace Configs {
 
     void Database::restoreSelective(const std::string& srcPath, const BackupParts& parts) {
         if (!parts.anyDb()) return;
-
         {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
             SQLite::Statement attach(db, "ATTACH DATABASE ? AS bak");
             attach.bind(1, srcPath);
             attach.exec();
@@ -275,6 +284,9 @@ namespace Configs {
         }
 
         try {
+            std::lock_guard<std::recursive_mutex>
+                dbLocker(db_mutex);
+
             SQLite::Transaction transaction(
                 db,
                 SQLite::TransactionBehavior::IMMEDIATE

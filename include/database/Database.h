@@ -7,6 +7,8 @@
 #include <vector>
 #include <utility>
 #include <type_traits>
+#include <memory>
+#include <mutex>
 
 #include "include/global/Utils.hpp"
 
@@ -61,9 +63,106 @@ namespace Configs {
         });
     }
 
+    class DatabaseQuery
+    {
+    public:
+        DatabaseQuery() = default;
+
+
+        DatabaseQuery(
+            std::recursive_mutex& mutex,
+            SQLite::Database& database,
+            const std::string& sql)
+            :
+            lock_(mutex),
+            statement_(
+                std::make_unique<SQLite::Statement>(
+                    database,
+                    sql
+                )
+            )
+        {}
+
+
+        DatabaseQuery(
+            const DatabaseQuery&) = delete;
+
+        DatabaseQuery& operator=(
+            const DatabaseQuery&) = delete;
+
+
+        DatabaseQuery(
+            DatabaseQuery&&) noexcept = default;
+
+        DatabaseQuery& operator=(
+            DatabaseQuery&&) noexcept = default;
+
+
+        SQLite::Statement* operator->() noexcept
+        {
+            return statement_.get();
+        }
+
+
+        const SQLite::Statement* operator->() const noexcept
+        {
+            return statement_.get();
+        }
+
+
+        SQLite::Statement& operator*() noexcept
+        {
+            return *statement_;
+        }
+
+
+        const SQLite::Statement& operator*() const noexcept
+        {
+            return *statement_;
+        }
+
+
+        explicit operator bool() const noexcept
+        {
+            return statement_ != nullptr;
+        }
+
+
+        bool operator!() const noexcept
+        {
+            return statement_ == nullptr;
+        }
+
+
+    private:
+        // IMPORTANT:
+        //
+        // lock_ is declared BEFORE statement_.
+        //
+        // Members are destroyed in reverse order,
+        // therefore SQLite::Statement is destroyed
+        // before the database mutex is released.
+        std::unique_lock<std::recursive_mutex>
+            lock_;
+
+        std::unique_ptr<SQLite::Statement>
+            statement_;
+    };
+
     class Database {
+    private:
         SQLite::Database db;
-        std::atomic<int> writeCount{0};
+
+        // Serializes every operation on the single
+        // SQLite connection shared by all repositories.
+        //
+        // recursive_mutex is intentional:
+        // existing code may keep a DatabaseQuery alive
+        // and call db.exec() from the same thread.
+        mutable std::recursive_mutex db_mutex;
+
+        std::atomic<int> writeCount{ 0 };
+
         void maybeCheckpoint(int count);
 
         void execDeleteByIdInChunk(const std::string& table, const std::string& idColumn, const std::vector<int>& ids);
@@ -115,9 +214,24 @@ namespace Configs {
 
         // 2. The "PGX Style" Exec (No return value, e.g., UPDATE/INSERT)
         template<typename... Args>
-        void exec0(const std::string& sql, Args&&... args) {
-            SQLite::Statement query(db, sql);
-            bindArgs(query, 1, std::forward<Args>(args)...);
+        void exec0(
+            const std::string& sql,
+            Args&&... args)
+        {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
+
+            SQLite::Statement query(
+                db,
+                sql
+            );
+
+            bindArgs(
+                query,
+                1,
+                std::forward<Args>(args)...
+            );
+
             query.exec();
             maybeCheckpoint(1);
         }
@@ -128,14 +242,32 @@ namespace Configs {
         // 3. Helper for fetching a single row
         // Returns a Statement you can extract data from
         template<typename... Args>
-        std::unique_ptr<SQLite::Statement> query0(const std::string& sql, Args&&... args) {
-            auto query = std::make_unique<SQLite::Statement>(db, sql);
-            bindArgs(*query, 1, std::forward<Args>(args)...);
+        DatabaseQuery query0(
+            const std::string& sql,
+            Args&&... args)
+        {
+            // DatabaseQuery acquires db_mutex here
+            // and keeps it locked for its whole lifetime.
+            DatabaseQuery query(
+                db_mutex,
+                db,
+                sql
+            );
+
+            bindArgs(
+                *query,
+                1,
+                std::forward<Args>(args)...
+            );
+
             return query;
         }
 
         // 4. Execute DELETE FROM table WHERE idColumn IN (ids), chunked by BATCH_LIMIT
         void execDeleteByIdIn0(const std::string& table, const std::string& idColumn, const std::vector<int>& ids) {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
+
             for (size_t off = 0; off < ids.size(); off += BATCH_LIMIT_WRITE) {
                 size_t end = std::min(off + BATCH_LIMIT_WRITE, ids.size());
                 std::vector<int> chunk(ids.begin() + static_cast<std::ptrdiff_t>(off), ids.begin() + static_cast<std::ptrdiff_t>(end));
@@ -145,6 +277,8 @@ namespace Configs {
 
         // 5. Execute INSERT OR REPLACE INTO settings (key, value) VALUES ..., chunked (2 params per row -> BATCH_LIMIT/2 rows per chunk)
         void execBatchSettingsReplace0(const std::vector<std::pair<std::string, std::string>>& keyValues) {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
             const size_t chunkSize = BATCH_LIMIT_WRITE / 2;
             for (size_t off = 0; off < keyValues.size(); off += chunkSize) {
                 size_t end = std::min(off + chunkSize, keyValues.size());
@@ -157,6 +291,8 @@ namespace Configs {
         // 6. Execute INSERT INTO table (colA, colB) VALUES ..., chunked (2 params per pair -> BATCH_LIMIT/2 pairs per chunk)
         void execBatchInsertIntPairs0(const std::string& table, const std::string& colA, const std::string& colB,
                                      const std::vector<int>& pairs) {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
             if (pairs.size() < 2 || pairs.size() % 2 != 0) return;
             const size_t chunkPairs = BATCH_LIMIT_WRITE / 2;
             for (size_t off = 0; off < pairs.size() / 2; off += chunkPairs) {
@@ -173,18 +309,45 @@ namespace Configs {
         }
 
         // Chunked (12 params per row -> BATCH_LIMIT/12 rows per chunk)
-        void execBatchInsertProfiles0(const std::vector<ProfileInsertRow>& rows) {
-            const size_t chunkSize = BATCH_LIMIT_WRITE / 12;
-            for (size_t off = 0; off < rows.size(); off += chunkSize) {
-                size_t end = std::min(off + chunkSize, rows.size());
-                std::vector<ProfileInsertRow> chunk(rows.begin() + static_cast<std::ptrdiff_t>(off),
-                                                    rows.begin() + static_cast<std::ptrdiff_t>(end));
-                execBatchInsertProfilesChunk(chunk);
+        void execBatchInsertProfiles0(
+            const std::vector<ProfileInsertRow>& rows)
+        {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
+
+            const size_t chunkSize =
+                BATCH_LIMIT_WRITE / 12;
+
+            for (
+                size_t off = 0;
+                off < rows.size();
+                off += chunkSize)
+            {
+                const size_t end =
+                    std::min(
+                        off + chunkSize,
+                        rows.size()
+                    );
+
+                std::vector<ProfileInsertRow>
+                    chunk(
+                        rows.begin()
+                        + static_cast<std::ptrdiff_t>(off),
+
+                        rows.begin()
+                        + static_cast<std::ptrdiff_t>(end)
+                    );
+
+                execBatchInsertProfilesChunk(
+                    chunk
+                );
             }
         }
 
         // Same chunking as execBatchInsertProfiles; INSERT OR REPLACE for batch save/update
         void execBatchReplaceProfiles0(const std::vector<ProfileInsertRow>& rows) {
+            std::lock_guard<std::recursive_mutex>
+                locker(db_mutex);
             const size_t chunkSize = BATCH_LIMIT_WRITE / 12;
             for (size_t off = 0; off < rows.size(); off += chunkSize) {
                 size_t end = std::min(off + chunkSize, rows.size());
@@ -205,13 +368,24 @@ namespace Configs {
         }
 
         template<typename... Args>
-        std::unique_ptr<SQLite::Statement> query(const std::string& sql, Args&&... args) {
+        DatabaseQuery query(
+            const std::string& sql,
+            Args&&... args)
+        {
             try {
-                auto query = query0(sql, std::forward<Args>(args)...);
-                return query;
-            } catch (std::exception& e) {
-                NotifyError(sql, e);
-                return nullptr;
+                return query0(
+                    sql,
+                    std::forward<Args>(args)...
+                );
+            }
+            catch (std::exception& e) {
+
+                NotifyError(
+                    sql,
+                    e
+                );
+
+                return {};
             }
         }
 
