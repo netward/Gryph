@@ -325,58 +325,210 @@ namespace Configs {
         return std::make_shared<Profile>(outbound, type);
     }
 
-    bool ProfilesRepo::AddProfile(std::shared_ptr<Profile>& profile, int gid) {
-        if (profile->id >= 0) return false;
-        int newId = NewProfileID();
-        profile->id = newId;
-        profile->gid = gid < 0 ? Configs::dataManager->settingsRepo->current_group : gid;
-        QMutexLocker locker(&mutex);
-        identityMap[newId] = std::weak_ptr<Profile>(profile);
-        saveToDatabase(profile.get(), profile->id);
-        if (auto group = dataManager->groupsRepo->GetGroup(profile->gid)) {
-            group->AddProfile(profile->id);
-            dataManager->groupsRepo->Save(group);
-        } else {
+    bool ProfilesRepo::AddProfile(
+        std::shared_ptr<Profile>& profile,
+        int gid)
+    {
+        if (!profile ||
+            profile->id >= 0)
+        {
             return false;
         }
+
+        // -------------------------------------------------
+        // Resolve target group BEFORE ProfilesRepo::mutex
+        // -------------------------------------------------
+        const int targetGid =
+            gid < 0
+            ? Configs::dataManager
+            ->settingsRepo
+            ->current_group
+            : gid;
+
+        auto group =
+            dataManager
+            ->groupsRepo
+            ->GetGroup(targetGid);
+
+        if (!group) {
+
+            MW_show_log(
+                "Could not find group with id "
+                + Int2String(targetGid)
+            );
+
+            return false;
+        }
+
+        // -------------------------------------------------
+        // Reserve DB ID
+        // -------------------------------------------------
+        const int newId =
+            NewProfileID();
+
+        if (newId <= 0) {
+            return false;
+        }
+
+        profile->id = newId;
+        profile->gid = targetGid;
+
+        // -------------------------------------------------
+        // ProfilesRepo state + profile DB persistence
+        // -------------------------------------------------
+        {
+            QMutexLocker locker(&mutex);
+
+
+            identityMap[newId] =
+                std::weak_ptr<Profile>(
+                    profile
+                );
+
+            saveToDatabase(
+                profile.get(),
+                newId
+            );
+        }
+
+        // -------------------------------------------------
+        // IMPORTANT:
+        //
+        // ProfilesRepo::mutex has already been released.
+        // -------------------------------------------------
+        if (!group->AddProfile(newId)) {
+
+            // The group already contains this ID.
+            //
+            // Extremely unlikely for a newly allocated ID,
+            // but do not nest locks attempting recovery here.
+            return false;
+        }
+
+        // Group::AddProfile released Group::mutex
+        // before GroupsRepo::Save is called.
+        dataManager
+            ->groupsRepo
+            ->Save(group);
+
         return true;
     }
 
-    bool ProfilesRepo::AddProfileBatch(QList<std::shared_ptr<Profile>>& profiles, int gid) {
-        gid = gid < 0 ? Configs::dataManager->settingsRepo->current_group : gid;
-        auto group = dataManager->groupsRepo->GetGroup(gid);
-        if (!group) return false;
+    bool ProfilesRepo::AddProfileBatch(
+        QList<std::shared_ptr<Profile>>& profiles,
+        int gid)
+    {
+        const int targetGid =
+            gid < 0
+            ? Configs::dataManager
+            ->settingsRepo
+            ->current_group
+            : gid;
 
-        QList<std::shared_ptr<Profile>> toAdd;
-        for (auto& profile : profiles) {
-            if (profile->id < 0) toAdd.append(profile);
+        // -------------------------------------------------
+        // Resolve Group without ProfilesRepo::mutex
+        // -------------------------------------------------
+        auto group =
+            dataManager
+            ->groupsRepo
+            ->GetGroup(targetGid);
+
+        if (!group) {
+            return false;
         }
-        if (toAdd.isEmpty()) return true;
 
-        int n = toAdd.size();
-        int firstId = NewProfileIDRange(n);
+        QList<std::shared_ptr<Profile>>
+            toAdd;
 
-        QMutexLocker locker(&mutex);
-        for (int i = 0; i < n; ++i) {
-            int id = firstId + i;
-            toAdd[i]->id = id;
-            toAdd[i]->gid = gid;
-            identityMap[id] = std::weak_ptr<Profile>(toAdd[i]);
+        for (const auto& profile : profiles) {
+
+            if (profile &&
+                profile->id < 0)
+            {
+                toAdd.append(profile);
+            }
         }
 
-        std::vector<ProfileInsertRow> rows;
-        rows.reserve(n);
-        for (int i = 0; i < n; ++i) {
-            rows.push_back(profileToInsertRow(toAdd[i].get(), toAdd[i]->id, toAdd[i]->gid));
+        if (toAdd.isEmpty()) {
+            return true;
         }
-        db.execBatchInsertProfiles(rows);
+
+        // -------------------------------------------------
+        // Reserve IDs
+        // -------------------------------------------------
+        const int count =
+            toAdd.size();
+
+
+        const int firstId =
+            NewProfileIDRange(count);
+
+        if (firstId <= 0) {
+            return false;
+        }
+
+        std::vector<ProfileInsertRow>
+            rows;
+
+        rows.reserve(
+            static_cast<size_t>(count)
+        );
 
         QList<int> profileIDs;
-        for (const auto& profile : toAdd) {
-            profileIDs << profile->id;
+
+        profileIDs.reserve(count);
+        // -------------------------------------------------
+        // ProfilesRepo state + DB
+        // -------------------------------------------------
+        {
+            QMutexLocker locker(&mutex);
+
+
+            for (int i = 0;
+                i < count;
+                ++i)
+            {
+                const int id =
+                    firstId + i;
+
+                auto& profile =
+                    toAdd[i];
+
+                profile->id = id;
+                profile->gid = targetGid;
+
+                identityMap[id] =
+                    std::weak_ptr<Profile>(
+                        profile
+                    );
+
+                rows.push_back(
+                    profileToInsertRow(
+                        profile.get(),
+                        id,
+                        targetGid
+                    )
+                );
+
+                profileIDs.append(id);
+            }
+
+            db.execBatchInsertProfiles(
+                rows
+            );
         }
-        group->AddProfileBatch(profileIDs);
-        dataManager->groupsRepo->Save(group);
+
+        // -------------------------------------------------
+        // ProfilesRepo::mutex is released here.
+        // -------------------------------------------------
+        group->AddProfileBatch(
+            profileIDs
+        );
+
+        // Group mutex is also released before Save().
+        dataManager
+            ->groupsRepo
+            ->Save(group);
 
         return true;
     }

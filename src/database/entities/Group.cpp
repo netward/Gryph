@@ -5,11 +5,17 @@
 
 namespace Configs
 {
-    void Group::clearCalculatedColumnWidth() {
+    void Group::clearCalculatedColumnWidth()
+    {
+        QMutexLocker locker(&mutex);
+
         calculated_column_width.clear();
     }
 
-    QList<int> Group::Profiles() const {
+    QList<int> Group::Profiles() const
+    {
+        QMutexLocker locker(&mutex);
+
         return profiles;
     }
 
@@ -31,125 +37,435 @@ namespace Configs
         return 0.0;
     }
 
-    bool Group::SortProfiles(GroupSortAction sortAction) {
-        if (!mutex.tryLock()) {
+    bool Group::SortProfiles(
+        GroupSortAction sortAction)
+    {
+        QList<int> idsSnapshot;
+
+        // -------------------------------------------------
+        // Phase 1:
+        // snapshot Group state without touching ProfilesRepo
+        // -------------------------------------------------
+
+        {
+            QMutexLocker locker(&mutex);
+
+            idsSnapshot = profiles;
+        }
+
+        // No profile data is necessary for these modes.
+        if (sortAction.method == GroupSortMethod::Raw) {
+            return true;
+        }
+
+        if (sortAction.method == GroupSortMethod::ById) {
+
+            QMutexLocker locker(&mutex);
+
+            // Do not overwrite concurrent changes.
+            if (profiles != idsSnapshot) {
+                return false;
+            }
+
+            std::ranges::sort(
+                profiles,
+                [descending = sortAction.descending](
+                    const int a,
+                    const int b)
+                {
+                    return descending
+                        ? a > b
+                        : a < b;
+                }
+            );
+
+            return true;
+        }
+
+        // -------------------------------------------------
+        // Phase 2:
+        // access ProfilesRepo WITHOUT Group::mutex
+        // -------------------------------------------------
+
+        const auto loadedProfiles =
+            dataManager
+            ->profilesRepo
+            ->GetProfileBatch(
+                idsSnapshot
+            );
+
+        // Build local lookup.
+        //
+        // After this point SortProfiles does not need to
+        // call ProfilesRepo while holding Group::mutex.
+        QHash<
+            int,
+            std::shared_ptr<Profile>
+        > profileById;
+
+
+        profileById.reserve(
+            loadedProfiles.size()
+        );
+
+        for (const auto& profile :
+            loadedProfiles)
+        {
+            if (!profile ||
+                profile->id < 0)
+            {
+                continue;
+            }
+
+
+            profileById.insert(
+                profile->id,
+                profile
+            );
+        }
+
+        // -------------------------------------------------
+        // Phase 3:
+        // lock Group only after ProfilesRepo has finished
+        // -------------------------------------------------
+
+        QMutexLocker locker(&mutex);
+
+        // The group may have changed while ProfilesRepo
+        // was loading profiles.
+        //
+        // Never sort a stale snapshot over newer state.
+        if (profiles != idsSnapshot) {
             return false;
         }
-        auto allProfs = dataManager->profilesRepo->GetProfileBatch(profiles); // to warm up the cache
-        switch (sortAction.method) {
-            case GroupSortMethod::Raw: {
-                break;
+
+        const auto getProfile =
+            [&profileById](int id)
+            -> std::shared_ptr<Profile>
+            {
+                const auto it =
+                    profileById.constFind(id);
+
+                if (it == profileById.constEnd()) {
+                    return nullptr;
+                }
+
+                return it.value();
+            };
+
+        const auto latencyForSort =
+            [](const std::shared_ptr<Profile>& profile)
+            {
+                if (!profile) {
+                    return 100000;
+                }
+
+                int value = profile->latency;
+
+                if (value == 0) {
+                    value = 100000;
+                }
+
+                if (value < 0) {
+                    value = 99999;
+                }
+
+                return value;
+            };
+
+        std::ranges::sort(
+            profiles,
+            [&](const int a, const int b)
+            {
+                const auto profA =
+                    getProfile(a);
+
+                const auto profB =
+                    getProfile(b);
+
+                // Missing profile should not break the
+                // strict weak ordering of std::sort.
+                if (!profA || !profB) {
+
+                    return sortAction.descending
+                        ? a > b
+                        : a < b;
+                }
+
+                // -----------------------------------------
+                // Type
+                // -----------------------------------------
+                if (sortAction.method ==
+                    GroupSortMethod::ByType)
+                {
+                    const QString valueA =
+                        profA->outbound
+                        ? profA->outbound->DisplayType()
+                        : QString();
+
+                    const QString valueB =
+                        profB->outbound
+                        ? profB->outbound->DisplayType()
+                        : QString();
+
+
+                    return sortAction.descending
+                        ? valueA > valueB
+                        : valueA < valueB;
+                }
+
+                // -----------------------------------------
+                // Name
+                // -----------------------------------------
+                if (sortAction.method ==
+                    GroupSortMethod::ByName)
+                {
+                    const QString valueA =
+                        profA->outbound
+                        ? profA->outbound->name
+                        : QString();
+
+                    const QString valueB =
+                        profB->outbound
+                        ? profB->outbound->name
+                        : QString();
+
+
+                    return sortAction.descending
+                        ? valueA > valueB
+                        : valueA < valueB;
+                }
+
+                // -----------------------------------------
+                // Address
+                // -----------------------------------------
+                if (sortAction.method ==
+                    GroupSortMethod::ByAddress)
+                {
+                    const QString valueA =
+                        profA->outbound
+                        ? profA->outbound->DisplayAddress()
+                        : QString();
+
+                    const QString valueB =
+                        profB->outbound
+                        ? profB->outbound->DisplayAddress()
+                        : QString();
+
+
+                    return sortAction.descending
+                        ? valueA > valueB
+                        : valueA < valueB;
+                }
+
+                // -----------------------------------------
+                // Test result
+                // -----------------------------------------
+                if (sortAction.method ==
+                    GroupSortMethod::ByTestResult)
+                {
+                    if (test_sort_by ==
+                        testBy::latency)
+                    {
+                        const auto valueA =
+                            latencyForSort(profA);
+
+                        const auto valueB =
+                            latencyForSort(profB);
+
+
+                        return sortAction.descending
+                            ? valueA > valueB
+                            : valueA < valueB;
+                    }
+
+                    if (test_sort_by ==
+                        testBy::dlSpeed)
+                    {
+                        const auto valueA =
+                            bitrateToBps(
+                                profA->dl_speed
+                            );
+
+                        const auto valueB =
+                            bitrateToBps(
+                                profB->dl_speed
+                            );
+
+
+                        return sortAction.descending
+                            ? valueA > valueB
+                            : valueA < valueB;
+                    }
+
+                    if (test_sort_by ==
+                        testBy::ulSpeed)
+                    {
+                        const auto valueA =
+                            bitrateToBps(
+                                profA->ul_speed
+                            );
+
+                        const auto valueB =
+                            bitrateToBps(
+                                profB->ul_speed
+                            );
+
+
+                        return sortAction.descending
+                            ? valueA > valueB
+                            : valueA < valueB;
+                    }
+
+                    if (test_sort_by ==
+                        testBy::ipOut)
+                    {
+                        return sortAction.descending
+                            ? profA->ip_out > profB->ip_out
+                            : profA->ip_out < profB->ip_out;
+                    }
+                }
+
+                // -----------------------------------------
+                // Traffic
+                // -----------------------------------------
+                if (sortAction.method ==
+                    GroupSortMethod::ByTraffic)
+                {
+                    if (traffic_sort_by ==
+                        trafficBy::total)
+                    {
+                        const auto valueA =
+                            profA->traffic_downlink
+                            + profA->traffic_uplink;
+
+                        const auto valueB =
+                            profB->traffic_downlink
+                            + profB->traffic_uplink;
+
+
+                        return sortAction.descending
+                            ? valueA > valueB
+                            : valueA < valueB;
+                    }
+
+                    if (traffic_sort_by ==
+                        trafficBy::dl)
+                    {
+                        return sortAction.descending
+                            ? profA->traffic_downlink
+                            > profB->traffic_downlink
+                            : profA->traffic_downlink
+                            < profB->traffic_downlink;
+                    }
+
+                    if (traffic_sort_by ==
+                        trafficBy::ul)
+                    {
+                        return sortAction.descending
+                            ? profA->traffic_uplink
+                            > profB->traffic_uplink
+                            : profA->traffic_uplink
+                            < profB->traffic_uplink;
+                    }
+                }
+
+                // Stable deterministic fallback.
+                return sortAction.descending
+                    ? a > b
+                    : a < b;
             }
-            case GroupSortMethod::ById: {
-                break;
-            }
-            case GroupSortMethod::ByAddress:
-            case GroupSortMethod::ByName:
-            case GroupSortMethod::ByTestResult:
-            case GroupSortMethod::ByTraffic:
-            case GroupSortMethod::ByType: {
-                auto get_latency_for_sort = [](const std::shared_ptr<Profile>& prof) {
-                    auto i = prof->latency;
-                    if (i == 0) i = 100000;
-                    if (i < 0) i = 99999;
-                    return i;
-                };
-                std::ranges::sort(profiles,
-                                  [&](int a, int b) {
-                                      auto profA = dataManager->profilesRepo->GetProfile(a);
-                                      auto profB = dataManager->profilesRepo->GetProfile(b);
-                                      QString ms_a;
-                                      QString ms_b;
-                                      if (sortAction.method == GroupSortMethod::ByType) {
-                                          ms_a = profA->outbound->DisplayType();
-                                          ms_b = profB->outbound->DisplayType();
-                                      } else if (sortAction.method == GroupSortMethod::ByName) {
-                                          ms_a = profA->outbound->name;
-                                          ms_b = profB->outbound->name;
-                                      } else if (sortAction.method == GroupSortMethod::ByAddress) {
-                                          ms_a = profA->outbound->DisplayAddress();
-                                          ms_b = profB->outbound->DisplayAddress();
-                                      } else if (sortAction.method == GroupSortMethod::ByTestResult) {
-                                          if (test_sort_by == testBy::latency) {
-                                              return sortAction.descending ? get_latency_for_sort(profA) > get_latency_for_sort(profB) : get_latency_for_sort(profA) < get_latency_for_sort(profB);
-                                          }
-                                          if (test_sort_by == testBy::dlSpeed) {
-                                              return sortAction.descending ? bitrateToBps(profA->dl_speed) > bitrateToBps(profB->dl_speed) : bitrateToBps(profA->dl_speed) < bitrateToBps(profB->dl_speed);
-                                          }
-                                          if (test_sort_by == testBy::ulSpeed) {
-                                              return sortAction.descending ? bitrateToBps(profA->ul_speed) > bitrateToBps(profB->ul_speed) : bitrateToBps(profA->ul_speed) < bitrateToBps(profB->ul_speed);
-                                          }
-                                          if (test_sort_by == testBy::ipOut) {
-                                              return sortAction.descending ? profA->ip_out > profB->ip_out : profA->ip_out < profB->ip_out;
-                                          }
-                                      } else if (sortAction.method == GroupSortMethod::ByTraffic) {
-                                          if (traffic_sort_by == trafficBy::total) {
-                                              auto totalA = profA->traffic_downlink + profA->traffic_uplink;
-                                              auto totalB = profB->traffic_downlink + profB->traffic_uplink;
-                                              return sortAction.descending ? totalA > totalB  : totalA < totalB;
-                                          }
-                                          if (traffic_sort_by == trafficBy::dl) {
-                                              return sortAction.descending ? profA->traffic_downlink > profB->traffic_downlink : profA->traffic_downlink < profB->traffic_downlink;
-                                          }
-                                          if (traffic_sort_by == trafficBy::ul) {
-                                              return sortAction.descending ? profA->traffic_uplink > profB->traffic_uplink : profA->traffic_uplink < profB->traffic_uplink;
-                                          }
-                                      }
-                                      return sortAction.descending ? ms_a > ms_b : ms_a < ms_b;
-                                  });
-                break;
-            }
-        }
-        mutex.unlock();
+        );
+
         return true;
     }
 
     bool Group::AddProfile(int ID)
     {
         QMutexLocker locker(&mutex);
-        if (HasProfile(ID))
-        {
+
+        if (profiles.contains(ID)) {
             return false;
         }
+
         profiles.append(ID);
+
         return true;
     }
 
-    bool Group::AddProfileBatch(const QList<int>& IDs) {
+    bool Group::AddProfileBatch(
+        const QList<int>& IDs)
+    {
+        QMutexLocker locker(&mutex);
+
         QSet<int> currentProfiles;
-        for (const auto& profileID : profiles) {
+
+        currentProfiles.reserve(
+            profiles.size() + IDs.size()
+        );
+
+        for (const int profileID : profiles) {
             currentProfiles.insert(profileID);
         }
-        QMutexLocker locker(&mutex);
-        for (auto profileID : IDs) {
-            if (!currentProfiles.contains(profileID)) {
-                profiles.append(profileID);
+
+        for (const int profileID : IDs) {
+
+            if (currentProfiles.contains(profileID)) {
+                continue;
             }
+
+            profiles.append(profileID);
+
+            // Важно обновлять set сразу,
+            // чтобы дубликаты внутри IDs тоже
+            // не добавились.
+            currentProfiles.insert(profileID);
         }
+
         return true;
     }
 
     bool Group::RemoveProfile(int ID)
     {
         QMutexLocker locker(&mutex);
-        if (!HasProfile(ID)) return false;
+
+        if (!profiles.contains(ID)) {
+            return false;
+        }
+
         profiles.removeAll(ID);
+
         return true;
     }
 
-    bool Group::RemoveProfileBatch(const QList<int>& IDs) {
-        QSet<int> toDel;
-        for (auto ID : IDs) {
-            toDel.insert(ID);
-        }
-        QList<int> newIDs;
+    bool Group::RemoveProfileBatch(
+        const QList<int>& IDs)
+    {
+        const QSet<int> toDelete(
+            IDs.begin(),
+            IDs.end()
+        );
+
         QMutexLocker locker(&mutex);
-        for (auto inID : profiles) {
-            if (!toDel.contains(inID)) {
-                newIDs.append(inID);
+
+        QList<int> newProfiles;
+
+        newProfiles.reserve(
+            profiles.size()
+        );
+
+        for (const int profileID : profiles) {
+
+            if (!toDelete.contains(profileID)) {
+
+                newProfiles.append(
+                    profileID
+                );
             }
         }
-        profiles = newIDs;
+
+        profiles = std::move(newProfiles);
+
         return true;
     }
 
@@ -173,6 +489,8 @@ namespace Configs
 
     bool Group::HasProfile(int ID) const
     {
+        QMutexLocker locker(&mutex);
+
         return profiles.contains(ID);
     }
 }
