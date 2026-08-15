@@ -9,6 +9,7 @@
 #include <type_traits>
 #include <memory>
 #include <mutex>
+#include <algorithm>
 
 #include "include/global/Utils.hpp"
 
@@ -94,33 +95,58 @@ namespace Configs {
         DatabaseQuery(
             DatabaseQuery&&) noexcept = default;
 
-        DatabaseQuery& operator=(
-            DatabaseQuery&&) noexcept = default;
+        DatabaseQuery&
+            operator=(
+                DatabaseQuery&& other)
+            noexcept
+        {
+            if (this == &other) {
+                return *this;
+            }
 
+            // Destroy the current Statement while
+            // its current DB lock is still held.
+            statement_.reset();
+
+            // Transfer ownership of the lock.
+            //
+            // If this object currently owns another lock,
+            // unique_lock will release it here only AFTER
+            // its Statement was destroyed above.
+            lock_ =
+                std::move(
+                    other.lock_
+                );
+
+            // The source Statement remains protected:
+            // its mutex ownership has just moved into *this.
+            statement_ =
+                std::move(
+                    other.statement_
+                );
+
+            return *this;
+        }
 
         SQLite::Statement* operator->() noexcept
         {
             return statement_.get();
         }
 
-
         const SQLite::Statement* operator->() const noexcept
         {
             return statement_.get();
         }
-
 
         SQLite::Statement& operator*() noexcept
         {
             return *statement_;
         }
 
-
         const SQLite::Statement& operator*() const noexcept
         {
             return *statement_;
         }
-
 
         explicit operator bool() const noexcept
         {

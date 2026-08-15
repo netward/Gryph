@@ -489,14 +489,39 @@ namespace Configs {
         return result;
     }
 
-    std::shared_ptr<Profile> ProfilesRepo::GetProfileByName(const QString& name) {
-        // Query by name using the index
-        auto query = db.query("SELECT id FROM profiles WHERE name = ? LIMIT 1", name.toStdString());
-        if (!query || !query->executeStep()) {
-            return nullptr;
+    std::shared_ptr<Profile>
+        ProfilesRepo::GetProfileByName(
+            const QString& name)
+    {
+        int id = -1;
+
+        // DB query has its own scope.
+        //
+        // DatabaseQuery must be destroyed BEFORE
+        // GetProfile() acquires ProfilesRepo::mutex.
+        {
+            auto query =
+                db.query(
+                    "SELECT id "
+                    "FROM profiles "
+                    "WHERE name = ? "
+                    "LIMIT 1",
+                    name.toStdString()
+                );
+
+            if (!query ||
+                !query->executeStep())
+            {
+                return nullptr;
+            }
+
+            id =
+                query
+                ->getColumn(0)
+                .getInt();
         }
-        
-        int id = query->getColumn(0).getInt();
+
+        // db_mutex has already been released here.
         return GetProfile(id);
     }
 

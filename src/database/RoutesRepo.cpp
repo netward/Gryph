@@ -468,36 +468,111 @@ namespace Configs {
         db.exec("DELETE FROM route_profiles WHERE id = ?", id);
     }
 
-    void RoutesRepo::UpdateRouteProfiles(const QList<std::shared_ptr<RouteProfile>>& routeProfiles) {
+    void RoutesRepo::UpdateRouteProfiles(
+        const QList<
+        std::shared_ptr<RouteProfile>
+        >& routeProfiles)
+    {
         QSet<int> existingIds;
-        auto query = db.query("SELECT id FROM route_profiles");
-        if (query) {
-            while (query->executeStep()) {
-                existingIds.insert(query->getColumn(0).getInt());
+
+        // -------------------------------------------------
+        // Read DB first, then RELEASE db_mutex
+        // -------------------------------------------------
+        {
+            auto query =
+                db.query(
+                    "SELECT id "
+                    "FROM route_profiles"
+                );
+
+            if (query) {
+
+                while (
+                    query->executeStep())
+                {
+                    existingIds.insert(
+                        query
+                        ->getColumn(0)
+                        .getInt()
+                    );
+                }
             }
         }
 
-        QMutexLocker locker(&mutex);
+        // -------------------------------------------------
+        // Only now acquire repository mutex
+        // -------------------------------------------------
+
+        QMutexLocker locker(
+            &mutex
+        );
+
         QSet<int> newIds;
-        for (const auto& routeProfile : routeProfiles) {
-            newIds.insert(routeProfile->id);
-            if (routeProfile->id < 0) {
-                routeProfile->id = NewRouteProfileID();
+
+        for (const auto& routeProfile :
+            routeProfiles)
+        {
+            if (!routeProfile) {
+                continue;
             }
-            saveToDatabase(routeProfile.get(), routeProfile->id);
+
+            if (routeProfile->id < 0) {
+
+                routeProfile->id =
+                    NewRouteProfileID();
+            }
+
+            newIds.insert(
+                routeProfile->id
+            );
+
+            saveToDatabase(
+                routeProfile.get(),
+                routeProfile->id
+            );
         }
 
         std::vector<int> toDelete;
+
         for (int id : existingIds) {
-            if (!newIds.contains(id)) toDelete.push_back(id);
+
+            if (!newIds.contains(id)) {
+
+                toDelete.push_back(
+                    id
+                );
+            }
         }
 
-        for (const auto& routeProfile : routeProfiles) {
-            identityMap[routeProfile->id] = std::weak_ptr<RouteProfile>(routeProfile);
+        for (const auto& routeProfile :
+            routeProfiles)
+        {
+            if (!routeProfile ||
+                routeProfile->id < 0)
+            {
+                continue;
+            }
+
+            identityMap[
+                routeProfile->id
+            ] =
+                std::weak_ptr<RouteProfile>(
+                    routeProfile
+                );
         }
-        for (int id : toDelete) identityMap.erase(id);
+
+        for (int id : toDelete) {
+
+            identityMap.erase(id);
+        }
+
         if (!toDelete.empty()) {
-            db.execDeleteByIdIn("route_profiles", "id", toDelete);
+
+            db.execDeleteByIdIn(
+                "route_profiles",
+                "id",
+                toDelete
+            );
         }
     }
 
@@ -512,50 +587,150 @@ namespace Configs {
         return ids;
     }
 
-    QList<std::shared_ptr<RouteProfile>> RoutesRepo::GetAllRouteProfiles() const {
-        QList<std::shared_ptr<RouteProfile>> routeProfiles;
-        std::map<int, std::shared_ptr<RouteProfile>> byId;
+    QList<std::shared_ptr<RouteProfile>>
+        RoutesRepo::GetAllRouteProfiles() const
+    {
+        QList<std::shared_ptr<RouteProfile>>
+            routeProfiles;
+
+        std::map<
+            int,
+            std::shared_ptr<RouteProfile>
+        > byId;
+
         QList<int> idsInOrder;
+
         QSet<int> cachedProfiles;
 
-        auto profileQuery = db.query("SELECT id, name, default_outbound_id FROM route_profiles ORDER BY id");
-        if (!profileQuery) return routeProfiles;
+        // Global lock order:
+        //
+        // repository mutex
+        //       ↓
+        // Database db_mutex
+        QMutexLocker locker(
+            &mutex
+        );
 
-        QMutexLocker locker(&mutex);
-        while (profileQuery->executeStep()) {
-            int id = profileQuery->getColumn(0).getInt();
-            std::shared_ptr<RouteProfile> profile;
-            auto it = identityMap.find(id);
-            if (it != identityMap.end()) {
-                if (auto shared = it->second.lock()) {
-                    byId[id] = shared;
-                    idsInOrder.append(id);
-                    cachedProfiles.insert(id);
+        auto profileQuery =
+            db.query(
+                "SELECT id, name, "
+                "default_outbound_id "
+                "FROM route_profiles "
+                "ORDER BY id"
+            );
+
+        if (!profileQuery) {
+            return routeProfiles;
+        }
+
+        while (
+            profileQuery->executeStep())
+        {
+            const int id =
+                profileQuery
+                ->getColumn(0)
+                .getInt();
+
+            auto it =
+                identityMap.find(id);
+
+            if (it !=
+                identityMap.end())
+            {
+                if (auto shared =
+                    it->second.lock())
+                {
+                    byId[id] =
+                        shared;
+
+                    idsInOrder.append(
+                        id
+                    );
+
+                    cachedProfiles.insert(
+                        id
+                    );
+
                     continue;
                 }
-                identityMap.erase(it);
+
+                identityMap.erase(
+                    it
+                );
             }
-            profile = routeProfileFromProfileRow(*profileQuery);
-            byId[id] = profile;
-            idsInOrder.append(id);
-            identityMap[id] = std::weak_ptr<RouteProfile>(profile);
+
+            auto profile =
+                routeProfileFromProfileRow(
+                    *profileQuery
+                );
+
+            byId[id] =
+                profile;
+
+            idsInOrder.append(
+                id
+            );
+
+            identityMap[id] =
+                std::weak_ptr<RouteProfile>(
+                    profile
+                );
         }
 
-        if (byId.empty()) return routeProfiles;
+        // Release the large SELECT statement before
+        // starting subsequent queries.
+        profileQuery = {};
 
-        for (int off = 0; off < idsInOrder.size(); off += Configs::BATCH_LIMIT_READ) {
-            int end = std::min(off + Configs::BATCH_LIMIT_READ, static_cast<int>(idsInOrder.size()));
+        if (byId.empty()) {
+            return routeProfiles;
+        }
+
+        for (
+            int off = 0;
+            off < idsInOrder.size();
+            off += Configs::BATCH_LIMIT_READ)
+        {
+            const int end =
+                std::min(
+                    off
+                    + Configs::BATCH_LIMIT_READ,
+                    static_cast<int>(
+                        idsInOrder.size()
+                        )
+                );
+
             QList<int> chunk;
-            for (int i = off; i < end; ++i) {
-                if (!cachedProfiles.contains(idsInOrder[i])) chunk.append(idsInOrder[i]);
+
+            for (int i = off;
+                i < end;
+                ++i)
+            {
+                if (!cachedProfiles.contains(
+                    idsInOrder[i]))
+                {
+                    chunk.append(
+                        idsInOrder[i]
+                    );
+                }
             }
-            if (chunk.isEmpty()) continue;
-            loadRulesForProfileIdsChunk(chunk, byId);
+
+            if (chunk.isEmpty()) {
+                continue;
+            }
+
+            loadRulesForProfileIdsChunk(
+                chunk,
+                byId
+            );
         }
-        
+
         for (int id : idsInOrder) {
-            routeProfiles.append(byId[id]);
+
+            routeProfiles.append(
+                byId[id]
+            );
         }
+
         return routeProfiles;
     }
 

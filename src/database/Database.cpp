@@ -3,9 +3,24 @@
 #include <set>
 
 namespace Configs {
-    void Database::maybeCheckpoint(int count) {
-        if (writeCount.fetch_add(count) >= WAL_CHECKPOINT_AFTER_WRITES) {
-            writeCount = 0;
+    void Database::maybeCheckpoint(
+        int count)
+    {
+        const int newCount =
+            writeCount.fetch_add(
+                count,
+                std::memory_order_relaxed
+            )
+            + count;
+
+        if (newCount >=
+            WAL_CHECKPOINT_AFTER_WRITES)
+        {
+            writeCount.store(
+                0,
+                std::memory_order_relaxed
+            );
+
             checkpointWal();
         }
     }
@@ -227,52 +242,201 @@ namespace Configs {
         try { dest.exec("VACUUM"); } catch (...) {}
     }
 
-    void Database::restoreSelective(const std::string& srcPath, const BackupParts& parts) {
-        if (!parts.anyDb()) return;
+    void Database::restoreSelective(
+        const std::string& srcPath,
+        const BackupParts& parts)
+    {
+        if (!parts.anyDb()) {
+            return;
+        }
+
+        // The whole restore operation must be atomic
+        // relative to all other users of this Database.
+        std::lock_guard<std::recursive_mutex>
+            locker(db_mutex);
+
+        // -------------------------------------------------
+        // Attach backup database
+        // -------------------------------------------------
+
         {
-            std::lock_guard<std::recursive_mutex>
-                locker(db_mutex);
-            SQLite::Statement attach(db, "ATTACH DATABASE ? AS bak");
-            attach.bind(1, srcPath);
+            SQLite::Statement attach(
+                db,
+                "ATTACH DATABASE ? AS bak"
+            );
+
+            attach.bind(
+                1,
+                srcPath
+            );
+
             attach.exec();
         }
 
         try {
-            // foreign_keys must be toggled outside a transaction to take effect.
-            db.exec("PRAGMA foreign_keys = OFF");
-            db.exec("BEGIN IMMEDIATE");
 
-            if (parts.profiles) for (const auto& t : kProfileTables) copyTable(db, t);
-            if (parts.routes) for (const auto& t : kRouteTables) copyTable(db, t);
-            if (parts.settings) for (const auto& t : kSettingsTables) copyTable(db, t);
+            // foreign_keys must be changed outside
+            // the transaction.
+            db.exec(
+                "PRAGMA foreign_keys = OFF"
+            );
 
-            // Keep the ID counters ahead of any restored data so freshly created
-            // profiles/groups/routes never collide with restored ones.
-            if (parts.profiles || parts.routes) {
-                const bool bakIds = tableExists(db, "bak", "entity_ids");
-                db.exec(
-                    "UPDATE entity_ids SET "
-                    "profile_last_id = MAX(profile_last_id,"
-                    "(SELECT COALESCE(MAX(id),0) FROM profiles)" +
-                    std::string(bakIds ? ",(SELECT COALESCE(MAX(profile_last_id),0) FROM bak.entity_ids)" : "") + "),"
-                    "group_last_id = MAX(group_last_id,"
-                    "(SELECT COALESCE(MAX(id),0) FROM groups)" +
-                    std::string(bakIds ? ",(SELECT COALESCE(MAX(group_last_id),0) FROM bak.entity_ids)" : "") + "),"
-                    "route_profile_last_id = MAX(route_profile_last_id,"
-                    "(SELECT COALESCE(MAX(id),0) FROM route_profiles)" +
-                    std::string(bakIds ? ",(SELECT COALESCE(MAX(route_profile_last_id),0) FROM bak.entity_ids)" : "") + ")");
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+            // -------------------------------------------------
+            // Restore selected tables
+            // -------------------------------------------------
+
+            if (parts.profiles) {
+
+                for (const auto& table :
+                    kProfileTables)
+                {
+                    copyTable(
+                        db,
+                        table
+                    );
+                }
             }
 
-            db.exec("COMMIT");
-        } catch (...) {
-            try { db.exec("ROLLBACK"); } catch (...) {}
-            try { db.exec("PRAGMA foreign_keys = ON"); } catch (...) {}
-            try { db.exec("DETACH DATABASE bak"); } catch (...) {}
+            if (parts.routes) {
+
+                for (const auto& table :
+                    kRouteTables)
+                {
+                    copyTable(
+                        db,
+                        table
+                    );
+                }
+            }
+
+            if (parts.settings) {
+
+                for (const auto& table :
+                    kSettingsTables)
+                {
+                    copyTable(
+                        db,
+                        table
+                    );
+                }
+            }
+
+            // -------------------------------------------------
+            // Repair ID counters
+            // -------------------------------------------------
+
+            if (parts.profiles ||
+                parts.routes)
+            {
+                const bool bakIds =
+                    tableExists(
+                        db,
+                        "bak",
+                        "entity_ids"
+                    );
+
+                db.exec(
+                    "UPDATE entity_ids SET "
+
+                    "profile_last_id = MAX("
+                    "profile_last_id,"
+                    "(SELECT COALESCE(MAX(id),0) "
+                    "FROM profiles)"
+                    +
+
+                    std::string(
+                        bakIds
+                        ? ",(SELECT COALESCE("
+                        "MAX(profile_last_id),0) "
+                        "FROM bak.entity_ids)"
+                        : ""
+                    )
+
+                    + "),"
+
+                    "group_last_id = MAX("
+                    "group_last_id,"
+                    "(SELECT COALESCE(MAX(id),0) "
+                    "FROM groups)"
+                    +
+
+                    std::string(
+                        bakIds
+                        ? ",(SELECT COALESCE("
+                        "MAX(group_last_id),0) "
+                        "FROM bak.entity_ids)"
+                        : ""
+                    )
+
+                    + "),"
+
+                    "route_profile_last_id = MAX("
+                    "route_profile_last_id,"
+                    "(SELECT COALESCE(MAX(id),0) "
+                    "FROM route_profiles)"
+                    +
+
+                    std::string(
+                        bakIds
+                        ? ",(SELECT COALESCE("
+                        "MAX(route_profile_last_id),0) "
+                        "FROM bak.entity_ids)"
+                        : ""
+                    )
+
+                    + ")"
+                );
+            }
+
+            db.exec(
+                "COMMIT"
+            );
+        }
+        catch (...) {
+
+            try {
+                db.exec(
+                    "ROLLBACK"
+                );
+            }
+            catch (...) {
+            }
+
+            try {
+                db.exec(
+                    "PRAGMA foreign_keys = ON"
+                );
+            }
+            catch (...) {
+            }
+
+            try {
+                db.exec(
+                    "DETACH DATABASE bak"
+                );
+            }
+            catch (...) {
+            }
+
             throw;
         }
 
-        db.exec("PRAGMA foreign_keys = ON");
-        db.exec("DETACH DATABASE bak");
+        // -------------------------------------------------
+        // Cleanup
+        // -------------------------------------------------
+
+        db.exec(
+            "PRAGMA foreign_keys = ON"
+        );
+
+        db.exec(
+            "DETACH DATABASE bak"
+        );
+
         checkpointWal();
     }
 
