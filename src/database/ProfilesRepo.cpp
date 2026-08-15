@@ -597,12 +597,24 @@ namespace Configs {
         if (!profile || profile->id < 0) {
             return false;
         }
+
         const int id = profile->id;
-        const long long dl = static_cast<long long>(profile->traffic_downlink);
-        const long long up = static_cast<long long>(profile->traffic_uplink);
-        runOnNewThread([=, this] {
-            db.exec("UPDATE profiles SET traffic_dl = ?, traffic_up = ? WHERE id = ?", dl, up, id);
-        });
+        const long long dl =
+            static_cast<long long>(profile->traffic_downlink);
+        const long long up =
+            static_cast<long long>(profile->traffic_uplink);
+
+        QMutexLocker locker(&mutex);
+
+        db.exec(
+            "UPDATE profiles "
+            "SET traffic_dl = ?, traffic_up = ? "
+            "WHERE id = ?",
+            dl,
+            up,
+            id
+        );
+
         return true;
     }
 

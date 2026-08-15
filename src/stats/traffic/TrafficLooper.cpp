@@ -102,28 +102,51 @@ namespace Stats {
             loop_mutex.unlock();
 
             // post to UI
-            runOnUiThread([=,this] {
+            // Снимок профилей, обновлённых на текущем tick.
+            QList<std::shared_ptr<Configs::Profile>> profilesToSave;
+            QList<int> profileIds;
+
+            for (const auto& group : groups) {
+                for (const auto& profile : group.profiles) {
+                    if (!profile || profile->id < 0) {
+                        continue;
+                    }
+
+                    profilesToSave.append(profile);
+                    profileIds.append(profile->id);
+                }
+            }
+
+            // DB
+            // Всё ещё в потоке TrafficLooper.
+            for (const auto& profile : profilesToSave) {
+                Configs::dataManager
+                    ->profilesRepo
+                    ->SaveTraffic(profile);
+            }
+
+            // UI
+            // Только UI-операции передаются главному потоку.
+            runOnUiThread([=, this] {
                 if (proxy != nullptr) {
                     MainWindowApi::RefreshStatus(
                         QObject::tr("Proxy: %1\nDirect: %2")
                         .arg(
                             DisplaySpeed(proxy),
-                            DisplaySpeed(direct)));
+                            DisplaySpeed(direct)
+                        )
+                    );
 
                     MainWindowApi::UpdateTrafficGraph(
                         proxy->downlink_rate,
                         proxy->uplink_rate,
                         direct->downlink_rate,
-                        direct->uplink_rate);
+                        direct->uplink_rate
+                    );
                 }
 
-                for (const auto& group : groups) {
-                    for (const auto& profile : group.profiles) {
-                        MainWindowApi::RefreshProxyList({ profile->id });
-                        Configs::dataManager
-                            ->profilesRepo
-                            ->SaveTraffic(profile);
-                    }
+                if (!profileIds.isEmpty()) {
+                    MainWindowApi::RefreshProxyList(profileIds);
                 }
             });
         }
