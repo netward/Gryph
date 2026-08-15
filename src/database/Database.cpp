@@ -267,7 +267,7 @@ namespace Configs {
         checkpointWal();
     }
 
-    void Configs::Database::execBatchUpdateProfileTraffic(
+    void Database::execBatchUpdateProfileTraffic(
         const std::vector<ProfileTrafficRow>& rows)
     {
         if (rows.empty()) {
@@ -280,6 +280,7 @@ namespace Configs {
                 SQLite::TransactionBehavior::IMMEDIATE
             );
 
+
             SQLite::Statement stmt(
                 db,
                 "UPDATE profiles "
@@ -287,15 +288,29 @@ namespace Configs {
                 "WHERE id = ?"
             );
 
+
+            int updatedRows = 0;
+
+
             for (const auto& row : rows) {
+
+                if (row.id < 0) {
+                    continue;
+                }
+
+
                 stmt.bind(
                     1,
-                    static_cast<int64_t>(row.traffic_dl)
+                    static_cast<int64_t>(
+                        row.traffic_dl
+                        )
                 );
 
                 stmt.bind(
                     2,
-                    static_cast<int64_t>(row.traffic_up)
+                    static_cast<int64_t>(
+                        row.traffic_up
+                        )
                 );
 
                 stmt.bind(
@@ -303,17 +318,27 @@ namespace Configs {
                     row.id
                 );
 
+
                 stmt.exec();
+
                 stmt.reset();
+
+                ++updatedRows;
             }
+
 
             transaction.commit();
 
-            maybeCheckpoint(
-                static_cast<int>(rows.size())
-            );
+
+            if (updatedRows > 0) {
+
+                maybeCheckpoint(
+                    updatedRows
+                );
+            }
         }
         catch (std::exception& e) {
+
             NotifyError(
                 "execBatchUpdateProfileTraffic",
                 e

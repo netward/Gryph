@@ -27,7 +27,7 @@ namespace Configs {
     };
     
     struct ProfileTrafficRow {
-        int id;
+        int id = -1;
         long long traffic_dl = 0;
         long long traffic_up = 0;
     };

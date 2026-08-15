@@ -759,8 +759,14 @@ void MainWindow::profile_start(int _id) {
             return false;
         }
         //
-        Stats::trafficLooper->SetChainGroups(result->chainGroups);
-        Stats::trafficLooper->loop_enabled = true;
+        Stats::trafficLooper->SetChainGroups(
+            result->chainGroups
+        );
+
+        Stats::trafficLooper->loop_enabled.store(
+            true,
+            std::memory_order_release
+        );
         Stats::connection_lister->suspend = false;
 
         Configs::dataManager->settingsRepo->UpdateStartedId(ent->id);
@@ -873,38 +879,15 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual) {
     UpdateConnectionListWithRecreate({});
 
     runOnNewThread([=, this] {
-
+        
         // -------------------------------------------------
-        // Final traffic update before stopping
+        // Final traffic flush
         // -------------------------------------------------
-        //
-        // Сначала забираем последний накопленный traffic
-        // из core, а затем, НЕ отпуская loop_mutex,
-        // переводим TrafficLooper в состояние STOP.
-        //
-        // Благодаря этому TrafficLooper не сможет между
-        // UpdateAll() и loop_enabled=false выполнить
-        // ещё один обычный tick.
-        {
-            QMutexLocker locker(
-                &Stats::trafficLooper->loop_mutex
-            );
 
-            // Последний запрос статистики,
-            // пока core ещё работает.
-            Stats::trafficLooper->UpdateAll();
+        Stats::trafficLooper
+            ->StopAndFlushTraffic();
 
-            // После этого новых обычных UpdateAll()
-            // TrafficLooper выполнять уже не должен.
-            Stats::trafficLooper->loop_enabled.store(
-                false,
-                std::memory_order_release
-            );
-        }
-
-        // Останавливаем обновление списка соединений.
         Stats::connection_lister->suspend = true;
-
 
         // -------------------------------------------------
         // Restart warning

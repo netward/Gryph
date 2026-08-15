@@ -9,6 +9,7 @@
 
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "include/database/ProfilesRepo.h"
 
@@ -209,11 +210,16 @@ namespace Stats {
 
         while (true) {
 
+            // UI/statistics sampling interval.
             QThread::msleep(1000);
 
 
-            QList<std::shared_ptr<Configs::Profile>>
-                profilesToSave;
+            // -------------------------------------------------
+            // Immutable snapshots for this tick
+            // -------------------------------------------------
+
+            std::vector<Configs::ProfileTrafficRow>
+                trafficRows;
 
             QList<int> profileIds;
 
@@ -229,10 +235,7 @@ namespace Stats {
             double directUp = 0;
 
 
-            bool stopTransition = false;
-            bool statisticsUpdated = false;
             bool shouldSaveTraffic = false;
-            bool enabled = false;
 
 
             {
@@ -240,229 +243,161 @@ namespace Stats {
 
 
                 // -------------------------------------------------
-                // Read state while holding the same mutex that
-                // protects groups / UpdateAll / SetChainGroups.
+                // Profile is not running
                 // -------------------------------------------------
 
-                enabled =
-                    loop_enabled.load(
-                        std::memory_order_acquire
-                    );
-
-
-                // -------------------------------------------------
-                // Stopped
-                // -------------------------------------------------
-
-                if (!enabled) {
-
-                    // Execute stop transition only once.
-                    if (looping) {
-
-                        looping = false;
-                        stopTransition = true;
-
-
-                        QSet<int> seenIds;
-
-                        for (const auto& group : groups) {
-
-                            for (const auto& profile :
-                                group.profiles)
-                            {
-                                if (!profile ||
-                                    profile->id < 0)
-                                {
-                                    continue;
-                                }
-
-
-                                if (seenIds.contains(
-                                    profile->id))
-                                {
-                                    continue;
-                                }
-
-
-                                seenIds.insert(
-                                    profile->id
-                                );
-
-
-                                profilesToSave.append(
-                                    profile
-                                );
-                            }
-                        }
-
-
-                        lastTrafficSave =
-                            elapsedTimer.elapsed();
-                    }
+                if (!loop_enabled.load(
+                    std::memory_order_acquire))
+                {
+                    continue;
                 }
 
+
                 // -------------------------------------------------
-                // Running
+                // Running state
                 // -------------------------------------------------
 
-                else {
-
-                    if (!looping) {
-                        looping = true;
-                    }
+                if (!looping) {
+                    looping = true;
+                }
 
 
-                    if (!Configs::dataManager
-                        ->settingsRepo
-                        ->disable_traffic_stats)
+                // -------------------------------------------------
+                // Traffic statistics disabled
+                // -------------------------------------------------
+
+                if (Configs::dataManager
+                    ->settingsRepo
+                    ->disable_traffic_stats)
+                {
+                    continue;
+                }
+
+
+                // -------------------------------------------------
+                // Query current traffic
+                // -------------------------------------------------
+
+                UpdateAll();
+
+
+                // -------------------------------------------------
+                // Create immutable traffic snapshot
+                //
+                // IMPORTANT:
+                // Profile objects are read only while loop_mutex
+                // is held.
+                // -------------------------------------------------
+
+                QSet<int> seenIds;
+
+
+                for (const auto& group : groups) {
+
+                    for (const auto& profile :
+                        group.profiles)
                     {
-                        // -----------------------------------------
-                        // Query and account traffic
-                        // -----------------------------------------
-
-                        UpdateAll();
-
-
-                        // -----------------------------------------
-                        // Build one unique profile snapshot
-                        // -----------------------------------------
-
-                        QSet<int> seenIds;
-
-
-                        for (const auto& group : groups) {
-
-                            for (const auto& profile :
-                                group.profiles)
-                            {
-                                if (!profile ||
-                                    profile->id < 0)
-                                {
-                                    continue;
-                                }
-
-
-                                if (seenIds.contains(
-                                    profile->id))
-                                {
-                                    continue;
-                                }
-
-
-                                seenIds.insert(
-                                    profile->id
-                                );
-
-
-                                profilesToSave.append(
-                                    profile
-                                );
-
-
-                                profileIds.append(
-                                    profile->id
-                                );
-                            }
-                        }
-
-
-                        // -----------------------------------------
-                        // UI value snapshot
-                        // -----------------------------------------
-
-                        if (proxy) {
-
-                            proxySpeed =
-                                DisplaySpeed(proxy);
-
-                            proxyDown =
-                                proxy->downlink_rate;
-
-                            proxyUp =
-                                proxy->uplink_rate;
-                        }
-
-
-                        if (direct) {
-
-                            directSpeed =
-                                DisplaySpeed(direct);
-
-                            directDown =
-                                direct->downlink_rate;
-
-                            directUp =
-                                direct->uplink_rate;
-                        }
-
-
-                        statisticsUpdated = true;
-
-
-                        // -----------------------------------------
-                        // DB interval
-                        // -----------------------------------------
-
-                        const qint64 now =
-                            elapsedTimer.elapsed();
-
-
-                        if (!profilesToSave.isEmpty() &&
-                            (now - lastTrafficSave) >=
-                            TRAFFIC_SAVE_INTERVAL_MS)
+                        if (!profile ||
+                            profile->id < 0)
                         {
-                            shouldSaveTraffic = true;
-
-                            lastTrafficSave = now;
+                            continue;
                         }
+
+
+                        if (seenIds.contains(
+                            profile->id))
+                        {
+                            continue;
+                        }
+
+
+                        seenIds.insert(
+                            profile->id
+                        );
+
+
+                        Configs::ProfileTrafficRow row;
+
+                        row.id =
+                            profile->id;
+
+                        row.traffic_dl =
+                            static_cast<long long>(
+                                profile->traffic_downlink
+                                );
+
+                        row.traffic_up =
+                            static_cast<long long>(
+                                profile->traffic_uplink
+                                );
+
+
+                        trafficRows.push_back(
+                            row
+                        );
+
+
+                        profileIds.append(
+                            profile->id
+                        );
                     }
+                }
+
+
+                // -------------------------------------------------
+                // UI snapshot
+                // -------------------------------------------------
+
+                if (proxy) {
+
+                    proxySpeed =
+                        DisplaySpeed(proxy);
+
+                    proxyDown =
+                        proxy->downlink_rate;
+
+                    proxyUp =
+                        proxy->uplink_rate;
+                }
+
+
+                if (direct) {
+
+                    directSpeed =
+                        DisplaySpeed(direct);
+
+                    directDown =
+                        direct->downlink_rate;
+
+                    directUp =
+                        direct->uplink_rate;
+                }
+
+
+                // -------------------------------------------------
+                // DB interval
+                // -------------------------------------------------
+
+                const qint64 now =
+                    elapsedTimer.elapsed();
+
+
+                if (!trafficRows.empty() &&
+                    (now - lastTrafficSave) >=
+                    TRAFFIC_SAVE_INTERVAL_MS)
+                {
+                    shouldSaveTraffic = true;
+
+                    lastTrafficSave = now;
                 }
             }
 
 
             // -------------------------------------------------
-            // Stopped
+            // loop_mutex is NOT held below this point.
+            //
+            // trafficRows contains copied primitive values only.
             // -------------------------------------------------
-
-            if (!enabled) {
-
-                if (stopTransition) {
-
-                    // Final persistence of accumulated traffic.
-                    if (!profilesToSave.isEmpty()) {
-
-                        Configs::dataManager
-                            ->profilesRepo
-                            ->SaveTrafficBatch(
-                                profilesToSave
-                            );
-                    }
-
-
-                    runOnUiThread([] {
-
-                        MainWindowApi::RefreshStatus(
-                            "STOP"
-                        );
-
-                        MainWindowApi::UpdateTrafficGraph(
-                            0,
-                            0,
-                            0,
-                            0
-                        );
-                        });
-                }
-
-
-                continue;
-            }
-
-
-            // Traffic statistics are disabled.
-            if (!statisticsUpdated) {
-                continue;
-            }
 
 
             // -------------------------------------------------
@@ -474,13 +409,13 @@ namespace Stats {
                 Configs::dataManager
                     ->profilesRepo
                     ->SaveTrafficBatch(
-                        profilesToSave
+                        trafficRows
                     );
             }
 
 
             // -------------------------------------------------
-            // UI update
+            // UI
             // -------------------------------------------------
 
             runOnUiThread(
@@ -530,6 +465,145 @@ namespace Stats {
                 }
                     );
         }
+    }
+
+    void TrafficLooper::StopAndFlushTraffic()
+    {
+        std::vector<Configs::ProfileTrafficRow>
+            trafficRows;
+
+
+        {
+            QMutexLocker locker(&loop_mutex);
+
+
+            const bool wasEnabled =
+                loop_enabled.load(
+                    std::memory_order_acquire
+                );
+
+
+            // -------------------------------------------------
+            // Final QueryStats
+            // -------------------------------------------------
+            //
+            // Core is still alive here.
+            //
+            // Therefore the final traffic delta is collected
+            // before we publish loop_enabled = false.
+
+            if (wasEnabled) {
+                UpdateAll();
+            }
+
+
+            // -------------------------------------------------
+            // Freeze final Profile values
+            // -------------------------------------------------
+
+            QSet<int> seenIds;
+
+
+            for (const auto& group : groups) {
+
+                for (const auto& profile :
+                    group.profiles)
+                {
+                    if (!profile ||
+                        profile->id < 0)
+                    {
+                        continue;
+                    }
+
+
+                    if (seenIds.contains(
+                        profile->id))
+                    {
+                        continue;
+                    }
+
+
+                    seenIds.insert(
+                        profile->id
+                    );
+
+
+                    Configs::ProfileTrafficRow row;
+
+                    row.id =
+                        profile->id;
+
+                    row.traffic_dl =
+                        static_cast<long long>(
+                            profile->traffic_downlink
+                            );
+
+                    row.traffic_up =
+                        static_cast<long long>(
+                            profile->traffic_uplink
+                            );
+
+
+                    trafficRows.push_back(
+                        row
+                    );
+                }
+            }
+
+
+            // -------------------------------------------------
+            // Publish stopped state
+            // -------------------------------------------------
+
+            loop_enabled.store(
+                false,
+                std::memory_order_release
+            );
+
+
+            looping = false;
+
+
+            lastTrafficSave =
+                elapsedTimer.isValid()
+                ? elapsedTimer.elapsed()
+                : 0;
+        }
+
+
+        // -------------------------------------------------
+        // Guaranteed final DB flush
+        //
+        // loop_mutex is deliberately NOT held here.
+        // -------------------------------------------------
+
+        if (!trafficRows.empty()) {
+
+            Configs::dataManager
+                ->profilesRepo
+                ->SaveTrafficBatch(
+                    trafficRows
+                );
+        }
+
+
+        // -------------------------------------------------
+        // UI
+        // -------------------------------------------------
+
+        runOnUiThread([] {
+
+            MainWindowApi::RefreshStatus(
+                "STOP"
+            );
+
+            MainWindowApi::UpdateTrafficGraph(
+                0,
+                0,
+                0,
+                0
+            );
+            });
     }
 
     void TrafficLooper::SetChainGroups(

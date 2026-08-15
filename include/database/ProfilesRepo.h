@@ -8,6 +8,7 @@
 #include <map>
 #include <QString>
 #include <QJsonObject>
+#include <vector>
 
 namespace Configs {
     class ProfilesRepo {
@@ -85,7 +86,7 @@ namespace Configs {
         bool SaveTraffic(const std::shared_ptr<Profile>& profile);
 
         void SaveTrafficBatch(
-            const QList<std::shared_ptr<Profile>>& profiles);
+            const std::vector<ProfileTrafficRow>& rows);
 
         // Batch save: runs on a new thread, filters to non-null and id >= 0, then batch replace (same chunking as AddProfileBatch).
         void SaveBatch(const QList<std::shared_ptr<Profile>>& profiles);

@@ -75,6 +75,8 @@ namespace Stats {
 
         void Loop();
 
+        void StopAndFlushTraffic();
+
         void SetChainGroups(
             const QList<Configs::TrafficChainGroup>& configGroups
         );
