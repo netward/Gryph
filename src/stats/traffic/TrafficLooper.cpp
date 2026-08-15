@@ -4,175 +4,597 @@
 #include "include/ui/mainwindowapi.h"
 
 #include <QThread>
-#include <QJsonDocument>
 #include <QElapsedTimer>
+#include <QSet>
+
+#include <string>
+#include <utility>
 
 #include "include/database/ProfilesRepo.h"
 
 
 namespace Stats {
 
-    TrafficLooper *trafficLooper = new TrafficLooper;
+    TrafficLooper* trafficLooper = new TrafficLooper;
     QElapsedTimer elapsedTimer;
 
-    void TrafficLooper::UpdateAll() {
-        if (Configs::dataManager->settingsRepo->disable_traffic_stats) {
+
+    void TrafficLooper::UpdateAll()
+    {
+        // Traffic statistics are disabled by user settings.
+        if (Configs::dataManager
+            ->settingsRepo
+            ->disable_traffic_stats)
+        {
             return;
         }
 
-        auto resp = API::defaultClient->QueryStats();
-        const auto now = elapsedTimer.elapsed();
+        // Runtime traffic entries must already be initialized
+        // by SetChainGroups().
+        if (!proxy || !direct) {
+            return;
+        }
 
+        // Query traffic deltas from the core.
+        auto resp = API::defaultClient->QueryStats();
+
+        const qint64 now =
+            elapsedTimer.elapsed();
+
+
+        // -------------------------------------------------
+        // Proxy traffic
+        // -------------------------------------------------
+
+        // Aggregate proxy rate is recalculated from scratch
+        // on every tick.
         proxy->uplink_rate = 0;
         proxy->downlink_rate = 0;
 
-        // For each chain group, read the matched-outbound's delta-since-last-query
-        // and credit it to every user-visible profile in the chain. Aggregate
-        // rates from all groups into the proxy entry for the status bar.
+
         for (auto& group : groups) {
-            const auto tagKey = group.watchTag.toStdString();
-            if (!resp.ups.contains(tagKey)) continue;
-            const auto interval = now - group.last_update;
+
+            const std::string tagKey =
+                group.watchTag.toStdString();
+
+
+            // Core may theoretically return only one direction,
+            // so check upload and download independently.
+            const bool hasUp =
+                resp.ups.contains(tagKey);
+
+            const bool hasDown =
+                resp.downs.contains(tagKey);
+
+
+            // Calculate interval before replacing last_update.
+            const qint64 interval =
+                now - group.last_update;
+
+            // Update timestamp on every tick, even when
+            // there was no traffic for this tag.
             group.last_update = now;
-            if (interval <= 0) continue;
-            const auto up = resp.ups.at(tagKey);
-            const auto down = resp.downs.at(tagKey);
+
+
+            // Reset group rate for the current tick.
+            group.uplink_rate = 0;
+            group.downlink_rate = 0;
+
+
+            // Invalid/zero interval cannot be used
+            // for rate calculation.
+            if (interval <= 0) {
+                continue;
+            }
+
+
+            // No traffic for this group during this tick.
+            if (!hasUp && !hasDown) {
+                continue;
+            }
+
+
+            // Missing direction is treated as zero.
+            const auto up =
+                hasUp
+                ? resp.ups.at(tagKey)
+                : 0;
+
+            const auto down =
+                hasDown
+                ? resp.downs.at(tagKey)
+                : 0;
+
+
+            // Credit traffic delta to every user-visible
+            // profile participating in this chain.
             for (auto& profile : group.profiles) {
+
+                if (!profile) {
+                    continue;
+                }
+
                 profile->traffic_uplink += up;
                 profile->traffic_downlink += down;
             }
-            group.uplink_rate = static_cast<double>(up) * 1000.0 / static_cast<double>(interval);
-            group.downlink_rate = static_cast<double>(down) * 1000.0 / static_cast<double>(interval);
-            proxy->uplink_rate += group.uplink_rate;
-            proxy->downlink_rate += group.downlink_rate;
+
+
+            // Convert delta accumulated during interval
+            // to bytes per second.
+            group.uplink_rate =
+                static_cast<double>(up)
+                * 1000.0
+                / static_cast<double>(interval);
+
+            group.downlink_rate =
+                static_cast<double>(down)
+                * 1000.0
+                / static_cast<double>(interval);
+
+
+            // Aggregate all chain groups into the
+            // single proxy status entry.
+            proxy->uplink_rate +=
+                group.uplink_rate;
+
+            proxy->downlink_rate +=
+                group.downlink_rate;
         }
 
-        // direct: not part of any chain group, tracked on its own for the
-        // status-bar split.
+
+        // -------------------------------------------------
+        // Direct traffic
+        // -------------------------------------------------
+
         direct->uplink_rate = 0;
         direct->downlink_rate = 0;
-        const std::string directTag = "direct";
-        if (resp.ups.contains(directTag)) {
-            const auto interval = now - direct_last_update;
-            direct_last_update = now;
-            if (interval > 0) {
-                const auto up = resp.ups.at(directTag);
-                const auto down = resp.downs.at(directTag);
-                direct->uplink_rate = static_cast<double>(up) * 1000.0 / static_cast<double>(interval);
-                direct->downlink_rate = static_cast<double>(down) * 1000.0 / static_cast<double>(interval);
-            }
+
+
+        const std::string directTag =
+            "direct";
+
+
+        const bool hasDirectUp =
+            resp.ups.contains(directTag);
+
+        const bool hasDirectDown =
+            resp.downs.contains(directTag);
+
+
+        const qint64 directInterval =
+            now - direct_last_update;
+
+
+        // Same principle as chain groups:
+        // advance timestamp every tick.
+        direct_last_update = now;
+
+
+        if (directInterval <= 0) {
+            return;
         }
+
+
+        // No direct traffic during this tick.
+        if (!hasDirectUp && !hasDirectDown) {
+            return;
+        }
+
+
+        const auto directUp =
+            hasDirectUp
+            ? resp.ups.at(directTag)
+            : 0;
+
+        const auto directDown =
+            hasDirectDown
+            ? resp.downs.at(directTag)
+            : 0;
+
+
+        direct->uplink_rate =
+            static_cast<double>(directUp)
+            * 1000.0
+            / static_cast<double>(directInterval);
+
+        direct->downlink_rate =
+            static_cast<double>(directDown)
+            * 1000.0
+            / static_cast<double>(directInterval);
     }
 
-    void TrafficLooper::Loop() {
+    void TrafficLooper::Loop()
+    {
         elapsedTimer.start();
+
         while (true) {
-            QThread::msleep(1000); // refresh every one second
 
-            if (Configs::dataManager->settingsRepo->disable_traffic_stats) {
-                continue;
-            }
+            QThread::msleep(1000);
 
-            // profile start and stop
-            if (!loop_enabled) {
-                // 停止
-                if (looping) {
-                    looping = false;
-                    runOnUiThread([=] {
-                        MainWindowApi::RefreshStatus("STOP");
-                    });
-                }
-                runOnUiThread([=]
-                {
-                        MainWindowApi::UpdateTrafficGraph(0, 0, 0, 0);
-                });
-                continue;
-            } else {
-                // 开始
-                if (!looping) {
-                    looping = true;
-                }
-            }
 
-            // do update
-            loop_mutex.lock();
+            QList<std::shared_ptr<Configs::Profile>>
+                profilesToSave;
 
-            UpdateAll();
-
-            loop_mutex.unlock();
-
-            // post to UI
-            // Снимок профилей, обновлённых на текущем tick.
-            QList<std::shared_ptr<Configs::Profile>> profilesToSave;
             QList<int> profileIds;
 
-            for (const auto& group : groups) {
-                for (const auto& profile : group.profiles) {
-                    if (!profile || profile->id < 0) {
-                        continue;
+
+            QString proxySpeed;
+            QString directSpeed;
+
+
+            double proxyDown = 0;
+            double proxyUp = 0;
+
+            double directDown = 0;
+            double directUp = 0;
+
+
+            bool stopTransition = false;
+            bool statisticsUpdated = false;
+            bool shouldSaveTraffic = false;
+            bool enabled = false;
+
+
+            {
+                QMutexLocker locker(&loop_mutex);
+
+
+                // -------------------------------------------------
+                // Read state while holding the same mutex that
+                // protects groups / UpdateAll / SetChainGroups.
+                // -------------------------------------------------
+
+                enabled =
+                    loop_enabled.load(
+                        std::memory_order_acquire
+                    );
+
+
+                // -------------------------------------------------
+                // Stopped
+                // -------------------------------------------------
+
+                if (!enabled) {
+
+                    // Execute stop transition only once.
+                    if (looping) {
+
+                        looping = false;
+                        stopTransition = true;
+
+
+                        QSet<int> seenIds;
+
+                        for (const auto& group : groups) {
+
+                            for (const auto& profile :
+                                group.profiles)
+                            {
+                                if (!profile ||
+                                    profile->id < 0)
+                                {
+                                    continue;
+                                }
+
+
+                                if (seenIds.contains(
+                                    profile->id))
+                                {
+                                    continue;
+                                }
+
+
+                                seenIds.insert(
+                                    profile->id
+                                );
+
+
+                                profilesToSave.append(
+                                    profile
+                                );
+                            }
+                        }
+
+
+                        lastTrafficSave =
+                            elapsedTimer.elapsed();
+                    }
+                }
+
+                // -------------------------------------------------
+                // Running
+                // -------------------------------------------------
+
+                else {
+
+                    if (!looping) {
+                        looping = true;
                     }
 
-                    profilesToSave.append(profile);
-                    profileIds.append(profile->id);
+
+                    if (!Configs::dataManager
+                        ->settingsRepo
+                        ->disable_traffic_stats)
+                    {
+                        // -----------------------------------------
+                        // Query and account traffic
+                        // -----------------------------------------
+
+                        UpdateAll();
+
+
+                        // -----------------------------------------
+                        // Build one unique profile snapshot
+                        // -----------------------------------------
+
+                        QSet<int> seenIds;
+
+
+                        for (const auto& group : groups) {
+
+                            for (const auto& profile :
+                                group.profiles)
+                            {
+                                if (!profile ||
+                                    profile->id < 0)
+                                {
+                                    continue;
+                                }
+
+
+                                if (seenIds.contains(
+                                    profile->id))
+                                {
+                                    continue;
+                                }
+
+
+                                seenIds.insert(
+                                    profile->id
+                                );
+
+
+                                profilesToSave.append(
+                                    profile
+                                );
+
+
+                                profileIds.append(
+                                    profile->id
+                                );
+                            }
+                        }
+
+
+                        // -----------------------------------------
+                        // UI value snapshot
+                        // -----------------------------------------
+
+                        if (proxy) {
+
+                            proxySpeed =
+                                DisplaySpeed(proxy);
+
+                            proxyDown =
+                                proxy->downlink_rate;
+
+                            proxyUp =
+                                proxy->uplink_rate;
+                        }
+
+
+                        if (direct) {
+
+                            directSpeed =
+                                DisplaySpeed(direct);
+
+                            directDown =
+                                direct->downlink_rate;
+
+                            directUp =
+                                direct->uplink_rate;
+                        }
+
+
+                        statisticsUpdated = true;
+
+
+                        // -----------------------------------------
+                        // DB interval
+                        // -----------------------------------------
+
+                        const qint64 now =
+                            elapsedTimer.elapsed();
+
+
+                        if (!profilesToSave.isEmpty() &&
+                            (now - lastTrafficSave) >=
+                            TRAFFIC_SAVE_INTERVAL_MS)
+                        {
+                            shouldSaveTraffic = true;
+
+                            lastTrafficSave = now;
+                        }
+                    }
                 }
             }
 
-            // DB
-            // Всё ещё в потоке TrafficLooper.
-            for (const auto& profile : profilesToSave) {
-                Configs::dataManager
-                    ->profilesRepo
-                    ->SaveTraffic(profile);
+
+            // -------------------------------------------------
+            // Stopped
+            // -------------------------------------------------
+
+            if (!enabled) {
+
+                if (stopTransition) {
+
+                    // Final persistence of accumulated traffic.
+                    if (!profilesToSave.isEmpty()) {
+
+                        Configs::dataManager
+                            ->profilesRepo
+                            ->SaveTrafficBatch(
+                                profilesToSave
+                            );
+                    }
+
+
+                    runOnUiThread([] {
+
+                        MainWindowApi::RefreshStatus(
+                            "STOP"
+                        );
+
+                        MainWindowApi::UpdateTrafficGraph(
+                            0,
+                            0,
+                            0,
+                            0
+                        );
+                        });
+                }
+
+
+                continue;
             }
 
-            // UI
-            // Только UI-операции передаются главному потоку.
-            runOnUiThread([=, this] {
-                if (proxy != nullptr) {
+
+            // Traffic statistics are disabled.
+            if (!statisticsUpdated) {
+                continue;
+            }
+
+
+            // -------------------------------------------------
+            // Periodic DB persistence
+            // -------------------------------------------------
+
+            if (shouldSaveTraffic) {
+
+                Configs::dataManager
+                    ->profilesRepo
+                    ->SaveTrafficBatch(
+                        profilesToSave
+                    );
+            }
+
+
+            // -------------------------------------------------
+            // UI update
+            // -------------------------------------------------
+
+            runOnUiThread(
+                [
+                    proxySpeed,
+                    directSpeed,
+                    proxyDown,
+                    proxyUp,
+                    directDown,
+                    directUp,
+                    profileIds
+                ]
+                {
                     MainWindowApi::RefreshStatus(
-                        QObject::tr("Proxy: %1\nDirect: %2")
+                        QObject::tr(
+                            "Proxy: %1\nDirect: %2"
+                        )
                         .arg(
-                            DisplaySpeed(proxy),
-                            DisplaySpeed(direct)
+                            proxySpeed,
+                            directSpeed
                         )
                     );
 
-                    MainWindowApi::UpdateTrafficGraph(
-                        proxy->downlink_rate,
-                        proxy->uplink_rate,
-                        direct->downlink_rate,
-                        direct->uplink_rate
-                    );
-                }
 
-                if (!profileIds.isEmpty()) {
-                    MainWindowApi::RefreshProxyList(profileIds);
+                    MainWindowApi::UpdateTrafficGraph(
+                        static_cast<int>(
+                            proxyDown
+                            ),
+                        static_cast<int>(
+                            proxyUp
+                            ),
+                        static_cast<int>(
+                            directDown
+                            ),
+                        static_cast<int>(
+                            directUp
+                            )
+                    );
+
+
+                    if (!profileIds.isEmpty()) {
+
+                        MainWindowApi::RefreshProxyList(
+                            profileIds
+                        );
+                    }
                 }
-            });
+                    );
         }
     }
 
-    void TrafficLooper::SetChainGroups(const QList<Configs::TrafficChainGroup>& configGroups) {
-        proxy = std::make_shared<TrafficLooperEntry>();
+    void TrafficLooper::SetChainGroups(
+        const QList<Configs::TrafficChainGroup>&
+        configGroups)
+    {
+        QMutexLocker locker(&loop_mutex);
+
+
+        proxy =
+            std::make_shared<
+            TrafficLooperEntry>();
+
         proxy->tag = "proxy";
-        direct = std::make_shared<TrafficLooperEntry>();
+
+
+        direct =
+            std::make_shared<
+            TrafficLooperEntry>();
+
         direct->tag = "direct";
 
-        // Seed last_update to "now" so the first delta lands against the next
-        // tick rather than against time zero — otherwise the first rate sample
-        // gets divided by however long the app has been up.
-        const auto now = elapsedTimer.isValid() ? elapsedTimer.elapsed() : 0;
+
+        // Seed last_update to current time.
+        const auto now =
+            elapsedTimer.isValid()
+            ? elapsedTimer.elapsed()
+            : 0;
+
 
         groups.clear();
-        for (const auto& configGroup : configGroups) {
-            if (configGroup.watchTag.isEmpty() || configGroup.profiles.isEmpty()) continue;
-            TrafficLooperGroup g;
-            g.watchTag = configGroup.watchTag;
-            g.profiles = configGroup.profiles;
-            g.last_update = now;
-            groups.append(g);
-        }
-        direct_last_update = now;
-    }
 
+
+        for (const auto& configGroup :
+            configGroups)
+        {
+            if (
+                configGroup.watchTag.isEmpty()
+                ||
+                configGroup.profiles.isEmpty()
+                )
+            {
+                continue;
+            }
+
+
+            TrafficLooperGroup group;
+
+            group.watchTag =
+                configGroup.watchTag;
+
+            group.profiles =
+                configGroup.profiles;
+
+            group.last_update =
+                now;
+
+
+            groups.append(
+                std::move(group)
+            );
+        }
+
+
+        direct_last_update = now;
+        lastTrafficSave = now;
+    }
 } // namespace Stats

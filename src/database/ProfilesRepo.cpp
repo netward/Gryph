@@ -637,4 +637,45 @@ namespace Configs {
             }
         });
     }
+
+    void ProfilesRepo::SaveTrafficBatch(
+        const QList<std::shared_ptr<Profile>>& profiles)
+    {
+        if (profiles.isEmpty()) {
+            return;
+        }
+
+        std::vector<ProfileTrafficRow> rows;
+        rows.reserve(
+            static_cast<size_t>(profiles.size())
+        );
+
+        for (const auto& profile : profiles) {
+            if (!profile || profile->id < 0) {
+                continue;
+            }
+
+            ProfileTrafficRow row;
+
+            row.id = profile->id;
+
+            row.traffic_dl =
+                static_cast<long long>(
+                    profile->traffic_downlink
+                    );
+
+            row.traffic_up =
+                static_cast<long long>(
+                    profile->traffic_uplink
+                    );
+
+            rows.push_back(row);
+        }
+
+        if (rows.empty()) {
+            return;
+        }
+
+        db.execBatchUpdateProfileTraffic(rows);
+    }
 }

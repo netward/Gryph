@@ -25,6 +25,12 @@ namespace Configs {
         long long traffic_dl = 0;
         long long traffic_up = 0;
     };
+    
+    struct ProfileTrafficRow {
+        int id;
+        long long traffic_dl = 0;
+        long long traffic_up = 0;
+    };
     // Which logical categories a backup contains / a restore should apply.
     // profiles -> groups, groups_order, profiles tables
     // routes   -> route_profiles, route_rules tables
@@ -67,6 +73,9 @@ namespace Configs {
         void execBatchInsertProfilesChunk(const std::vector<ProfileInsertRow>& rows);
         void execBatchReplaceProfilesChunk(const std::vector<ProfileInsertRow>& rows);
     public:
+        void execBatchUpdateProfileTraffic(
+            const std::vector<ProfileTrafficRow>& rows);
+
         Database(const std::string& path)
             : db(path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE) {
             db.exec("PRAGMA foreign_keys = ON");

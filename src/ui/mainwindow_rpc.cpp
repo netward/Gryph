@@ -873,39 +873,152 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual) {
     UpdateConnectionListWithRecreate({});
 
     runOnNewThread([=, this] {
-        Stats::trafficLooper->loop_enabled = false;
-        Stats::connection_lister->suspend = true;
-        Stats::trafficLooper->loop_mutex.lock();
-        Stats::trafficLooper->UpdateAll();
-        Stats::trafficLooper->loop_mutex.unlock();
 
-        QMessageBox* restartMsgbox;
-        MessageBoxTimer* restartMsgboxTimer;
-        runOnUiThread([=, this, &restartMsgbox, &restartMsgboxTimer] {
-            restartMsgbox = new QMessageBox(QMessageBox::Question, software_name, tr("If there is no response for a long time, it is recommended to restart the software."),
-                             QMessageBox::Yes | QMessageBox::No, this);
-            connect(restartMsgbox, &QMessageBox::accepted, this, [=] { MW_dialog_message(MwMessage::RestartProgram, {}); });
-            restartMsgboxTimer = new MessageBoxTimer(this, restartMsgbox, 5000);
-        }, true);
+        // -------------------------------------------------
+        // Final traffic update before stopping
+        // -------------------------------------------------
+        //
+        // Сначала забираем последний накопленный traffic
+        // из core, а затем, НЕ отпуская loop_mutex,
+        // переводим TrafficLooper в состояние STOP.
+        //
+        // Благодаря этому TrafficLooper не сможет между
+        // UpdateAll() и loop_enabled=false выполнить
+        // ещё один обычный tick.
+        {
+            QMutexLocker locker(
+                &Stats::trafficLooper->loop_mutex
+            );
 
-        // do stop
-        MW_show_log(">>>>>>>> " + tr("Stopping profile %1").arg(running->outbound->DisplayTypeAndName()));
-        if (!profile_stop_stage2()) {
-            MW_show_log("<<<<<<<< " + tr("Failed to stop, please restart the program."));
+            // Последний запрос статистики,
+            // пока core ещё работает.
+            Stats::trafficLooper->UpdateAll();
+
+            // После этого новых обычных UpdateAll()
+            // TrafficLooper выполнять уже не должен.
+            Stats::trafficLooper->loop_enabled.store(
+                false,
+                std::memory_order_release
+            );
         }
 
-        if (manual) Configs::dataManager->settingsRepo->UpdateStartedId(-1919);
+        // Останавливаем обновление списка соединений.
+        Stats::connection_lister->suspend = true;
+
+
+        // -------------------------------------------------
+        // Restart warning
+        // -------------------------------------------------
+
+        QMessageBox* restartMsgbox = nullptr;
+        MessageBoxTimer* restartMsgboxTimer = nullptr;
+
+        runOnUiThread(
+            [this, &restartMsgbox, &restartMsgboxTimer] {
+
+                restartMsgbox = new QMessageBox(
+                    QMessageBox::Question,
+                    software_name,
+                    tr(
+                        "If there is no response for a long time, "
+                        "it is recommended to restart the software."
+                    ),
+                    QMessageBox::Yes | QMessageBox::No,
+                    this
+                );
+
+                connect(
+                    restartMsgbox,
+                    &QMessageBox::accepted,
+                    this,
+                    [this] {
+                        MW_dialog_message(
+                            MwMessage::RestartProgram,
+                            {}
+                        );
+                    }
+                );
+
+                restartMsgboxTimer =
+                    new MessageBoxTimer(
+                        this,
+                        restartMsgbox,
+                        5000
+                    );
+            },
+            true
+        );
+
+
+        // -------------------------------------------------
+        // Stop profile
+        // -------------------------------------------------
+
+        MW_show_log(
+            ">>>>>>>> "
+            + tr("Stopping profile %1")
+            .arg(
+                running->outbound
+                ->DisplayTypeAndName()
+            )
+        );
+
+        if (!profile_stop_stage2()) {
+
+            MW_show_log(
+                "<<<<<<<< "
+                + tr(
+                    "Failed to stop, "
+                    "please restart the program."
+                )
+            );
+        }
+
+
+        // -------------------------------------------------
+        // Persist running state
+        // -------------------------------------------------
+
+        if (manual) {
+            Configs::dataManager
+                ->settingsRepo
+                ->UpdateStartedId(-1919);
+        }
+
         running = nullptr;
 
-        runOnUiThread([=, this, &restartMsgboxTimer, &restartMsgbox] {
-            restartMsgboxTimer->cancel();
-            restartMsgboxTimer->deleteLater();
-            restartMsgbox->deleteLater();
 
-            refresh_status();
-            refresh_proxy_list({id});
+        // -------------------------------------------------
+        // UI cleanup
+        // -------------------------------------------------
 
-            mu_stopping.unlock();
-        }, true);
-    }, block);
+        runOnUiThread(
+            [
+                this,
+                id,
+                &restartMsgboxTimer,
+                &restartMsgbox
+            ] {
+
+                if (restartMsgboxTimer) {
+                    restartMsgboxTimer->cancel();
+                    restartMsgboxTimer->deleteLater();
+                }
+
+                if (restartMsgbox) {
+                    restartMsgbox->deleteLater();
+                }
+
+                refresh_status();
+
+                refresh_proxy_list(
+                    { id }
+                );
+
+                mu_stopping.unlock();
+            },
+            true
+        );
+
+        }, block);
 }

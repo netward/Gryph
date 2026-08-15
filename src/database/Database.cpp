@@ -266,4 +266,58 @@ namespace Configs {
         db.exec("DETACH DATABASE bak");
         checkpointWal();
     }
+
+    void Configs::Database::execBatchUpdateProfileTraffic(
+        const std::vector<ProfileTrafficRow>& rows)
+    {
+        if (rows.empty()) {
+            return;
+        }
+
+        try {
+            SQLite::Transaction transaction(
+                db,
+                SQLite::TransactionBehavior::IMMEDIATE
+            );
+
+            SQLite::Statement stmt(
+                db,
+                "UPDATE profiles "
+                "SET traffic_dl = ?, traffic_up = ? "
+                "WHERE id = ?"
+            );
+
+            for (const auto& row : rows) {
+                stmt.bind(
+                    1,
+                    static_cast<int64_t>(row.traffic_dl)
+                );
+
+                stmt.bind(
+                    2,
+                    static_cast<int64_t>(row.traffic_up)
+                );
+
+                stmt.bind(
+                    3,
+                    row.id
+                );
+
+                stmt.exec();
+                stmt.reset();
+            }
+
+            transaction.commit();
+
+            maybeCheckpoint(
+                static_cast<int>(rows.size())
+            );
+        }
+        catch (std::exception& e) {
+            NotifyError(
+                "execBatchUpdateProfileTraffic",
+                e
+            );
+        }
+    }
 }
