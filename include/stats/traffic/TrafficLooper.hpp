@@ -86,6 +86,16 @@ namespace Stats {
 
         QList<TrafficLooperGroup> groups;
 
+        // Protects ordering of traffic persistence operations.
+        //
+        // Lock order must always be:
+        //
+        // traffic_persistence_mutex
+        //          ↓
+        // loop_mutex
+        //
+        // Never acquire them in the opposite order.
+        QMutex traffic_persistence_mutex;
 
         // Timestamp of the last direct-traffic sample.
         qint64 direct_last_update = 0;

@@ -210,7 +210,6 @@ namespace Stats {
 
         while (true) {
 
-            // UI/statistics sampling interval.
             QThread::msleep(1000);
 
 
@@ -236,181 +235,215 @@ namespace Stats {
 
 
             bool shouldSaveTraffic = false;
+            bool skipTick = false;
 
+
+            // -------------------------------------------------
+            // Persistence ordering
+            // -------------------------------------------------
+            //
+            // IMPORTANT:
+            //
+            // This mutex is acquired BEFORE loop_mutex.
+            //
+            // Therefore a periodic snapshot cannot be created,
+            // released, and then written after a newer final
+            // snapshot.
+            // -------------------------------------------------
 
             {
-                QMutexLocker locker(&loop_mutex);
+                QMutexLocker persistenceLocker(
+                    &traffic_persistence_mutex
+                );
 
 
-                // -------------------------------------------------
-                // Profile is not running
-                // -------------------------------------------------
-
-                if (!loop_enabled.load(
-                    std::memory_order_acquire))
                 {
-                    continue;
-                }
+                    QMutexLocker stateLocker(
+                        &loop_mutex
+                    );
 
 
-                // -------------------------------------------------
-                // Running state
-                // -------------------------------------------------
+                    // -----------------------------------------
+                    // Profile is not running
+                    // -----------------------------------------
 
-                if (!looping) {
-                    looping = true;
-                }
-
-
-                // -------------------------------------------------
-                // Traffic statistics disabled
-                // -------------------------------------------------
-
-                if (Configs::dataManager
-                    ->settingsRepo
-                    ->disable_traffic_stats)
-                {
-                    continue;
-                }
-
-
-                // -------------------------------------------------
-                // Query current traffic
-                // -------------------------------------------------
-
-                UpdateAll();
-
-
-                // -------------------------------------------------
-                // Create immutable traffic snapshot
-                //
-                // IMPORTANT:
-                // Profile objects are read only while loop_mutex
-                // is held.
-                // -------------------------------------------------
-
-                QSet<int> seenIds;
-
-
-                for (const auto& group : groups) {
-
-                    for (const auto& profile :
-                        group.profiles)
+                    if (!loop_enabled.load(
+                        std::memory_order_acquire))
                     {
-                        if (!profile ||
-                            profile->id < 0)
-                        {
-                            continue;
+                        skipTick = true;
+                    }
+
+
+                    // -----------------------------------------
+                    // Profile is running
+                    // -----------------------------------------
+
+                    else {
+
+                        if (!looping) {
+                            looping = true;
                         }
 
 
-                        if (seenIds.contains(
-                            profile->id))
+                        // -------------------------------------
+                        // Statistics disabled
+                        // -------------------------------------
+
+                        if (Configs::dataManager
+                            ->settingsRepo
+                            ->disable_traffic_stats)
                         {
-                            continue;
+                            skipTick = true;
                         }
 
 
-                        seenIds.insert(
-                            profile->id
-                        );
+                        else {
+
+                            // ---------------------------------
+                            // Query traffic from core
+                            // ---------------------------------
+
+                            UpdateAll();
 
 
-                        Configs::ProfileTrafficRow row;
+                            // ---------------------------------
+                            // Immutable traffic snapshot
+                            // ---------------------------------
 
-                        row.id =
-                            profile->id;
-
-                        row.traffic_dl =
-                            static_cast<long long>(
-                                profile->traffic_downlink
-                                );
-
-                        row.traffic_up =
-                            static_cast<long long>(
-                                profile->traffic_uplink
-                                );
+                            QSet<int> seenIds;
 
 
-                        trafficRows.push_back(
-                            row
-                        );
+                            for (const auto& group : groups) {
+
+                                for (const auto& profile :
+                                    group.profiles)
+                                {
+                                    if (!profile ||
+                                        profile->id < 0)
+                                    {
+                                        continue;
+                                    }
 
 
-                        profileIds.append(
-                            profile->id
-                        );
+                                    if (seenIds.contains(
+                                        profile->id))
+                                    {
+                                        continue;
+                                    }
+
+
+                                    seenIds.insert(
+                                        profile->id
+                                    );
+
+
+                                    Configs::ProfileTrafficRow row;
+
+                                    row.id =
+                                        profile->id;
+
+                                    row.traffic_dl =
+                                        static_cast<long long>(
+                                            profile->traffic_downlink
+                                            );
+
+                                    row.traffic_up =
+                                        static_cast<long long>(
+                                            profile->traffic_uplink
+                                            );
+
+
+                                    trafficRows.push_back(
+                                        row
+                                    );
+
+
+                                    profileIds.append(
+                                        profile->id
+                                    );
+                                }
+                            }
+
+
+                            // ---------------------------------
+                            // UI snapshot
+                            // ---------------------------------
+
+                            if (proxy) {
+
+                                proxySpeed =
+                                    DisplaySpeed(proxy);
+
+                                proxyDown =
+                                    proxy->downlink_rate;
+
+                                proxyUp =
+                                    proxy->uplink_rate;
+                            }
+
+
+                            if (direct) {
+
+                                directSpeed =
+                                    DisplaySpeed(direct);
+
+                                directDown =
+                                    direct->downlink_rate;
+
+                                directUp =
+                                    direct->uplink_rate;
+                            }
+
+
+                            // ---------------------------------
+                            // Decide whether DB save is due
+                            // ---------------------------------
+
+                            const qint64 now =
+                                elapsedTimer.elapsed();
+
+
+                            if (!trafficRows.empty() &&
+                                (now - lastTrafficSave) >=
+                                TRAFFIC_SAVE_INTERVAL_MS)
+                            {
+                                shouldSaveTraffic = true;
+
+                                lastTrafficSave = now;
+                            }
+                        }
                     }
                 }
 
 
                 // -------------------------------------------------
-                // UI snapshot
+                // loop_mutex has been released here.
+                //
+                // But traffic_persistence_mutex is STILL held.
+                //
+                // Therefore nobody can perform final persistence
+                // between creating this snapshot and writing it.
                 // -------------------------------------------------
 
-                if (proxy) {
-
-                    proxySpeed =
-                        DisplaySpeed(proxy);
-
-                    proxyDown =
-                        proxy->downlink_rate;
-
-                    proxyUp =
-                        proxy->uplink_rate;
-                }
-
-
-                if (direct) {
-
-                    directSpeed =
-                        DisplaySpeed(direct);
-
-                    directDown =
-                        direct->downlink_rate;
-
-                    directUp =
-                        direct->uplink_rate;
-                }
-
-
-                // -------------------------------------------------
-                // DB interval
-                // -------------------------------------------------
-
-                const qint64 now =
-                    elapsedTimer.elapsed();
-
-
-                if (!trafficRows.empty() &&
-                    (now - lastTrafficSave) >=
-                    TRAFFIC_SAVE_INTERVAL_MS)
+                if (!skipTick &&
+                    shouldSaveTraffic &&
+                    !trafficRows.empty())
                 {
-                    shouldSaveTraffic = true;
-
-                    lastTrafficSave = now;
+                    Configs::dataManager
+                        ->profilesRepo
+                        ->SaveTrafficBatch(
+                            trafficRows
+                        );
                 }
             }
 
 
             // -------------------------------------------------
-            // loop_mutex is NOT held below this point.
-            //
-            // trafficRows contains copied primitive values only.
+            // Both mutexes are released here.
             // -------------------------------------------------
 
-
-            // -------------------------------------------------
-            // Periodic DB persistence
-            // -------------------------------------------------
-
-            if (shouldSaveTraffic) {
-
-                Configs::dataManager
-                    ->profilesRepo
-                    ->SaveTrafficBatch(
-                        trafficRows
-                    );
+            if (skipTick) {
+                continue;
             }
 
 
@@ -473,122 +506,146 @@ namespace Stats {
             trafficRows;
 
 
+        // -------------------------------------------------
+        // Serialize against periodic DB persistence
+        // -------------------------------------------------
+        //
+        // Lock order:
+        //
+        // traffic_persistence_mutex
+        //          ↓
+        // loop_mutex
+        //
+        // Same order as in Loop().
+        // -------------------------------------------------
+
         {
-            QMutexLocker locker(&loop_mutex);
-
-
-            const bool wasEnabled =
-                loop_enabled.load(
-                    std::memory_order_acquire
-                );
-
-
-            // -------------------------------------------------
-            // Final QueryStats
-            // -------------------------------------------------
-            //
-            // Core is still alive here.
-            //
-            // Therefore the final traffic delta is collected
-            // before we publish loop_enabled = false.
-
-            if (wasEnabled) {
-                UpdateAll();
-            }
-
-
-            // -------------------------------------------------
-            // Freeze final Profile values
-            // -------------------------------------------------
-
-            QSet<int> seenIds;
-
-
-            for (const auto& group : groups) {
-
-                for (const auto& profile :
-                    group.profiles)
-                {
-                    if (!profile ||
-                        profile->id < 0)
-                    {
-                        continue;
-                    }
-
-
-                    if (seenIds.contains(
-                        profile->id))
-                    {
-                        continue;
-                    }
-
-
-                    seenIds.insert(
-                        profile->id
-                    );
-
-
-                    Configs::ProfileTrafficRow row;
-
-                    row.id =
-                        profile->id;
-
-                    row.traffic_dl =
-                        static_cast<long long>(
-                            profile->traffic_downlink
-                            );
-
-                    row.traffic_up =
-                        static_cast<long long>(
-                            profile->traffic_uplink
-                            );
-
-
-                    trafficRows.push_back(
-                        row
-                    );
-                }
-            }
-
-
-            // -------------------------------------------------
-            // Publish stopped state
-            // -------------------------------------------------
-
-            loop_enabled.store(
-                false,
-                std::memory_order_release
+            QMutexLocker persistenceLocker(
+                &traffic_persistence_mutex
             );
 
 
-            looping = false;
-
-
-            lastTrafficSave =
-                elapsedTimer.isValid()
-                ? elapsedTimer.elapsed()
-                : 0;
-        }
-
-
-        // -------------------------------------------------
-        // Guaranteed final DB flush
-        //
-        // loop_mutex is deliberately NOT held here.
-        // -------------------------------------------------
-
-        if (!trafficRows.empty()) {
-
-            Configs::dataManager
-                ->profilesRepo
-                ->SaveTrafficBatch(
-                    trafficRows
+            {
+                QMutexLocker stateLocker(
+                    &loop_mutex
                 );
+
+
+                const bool wasEnabled =
+                    loop_enabled.load(
+                        std::memory_order_acquire
+                    );
+
+
+                // ---------------------------------------------
+                // Final QueryStats
+                // ---------------------------------------------
+                //
+                // Core is still running here.
+                // Therefore this is the last opportunity to
+                // collect its traffic counters.
+
+                if (wasEnabled) {
+                    UpdateAll();
+                }
+
+
+                // ---------------------------------------------
+                // Freeze final traffic state
+                // ---------------------------------------------
+
+                QSet<int> seenIds;
+
+
+                for (const auto& group : groups) {
+
+                    for (const auto& profile :
+                        group.profiles)
+                    {
+                        if (!profile ||
+                            profile->id < 0)
+                        {
+                            continue;
+                        }
+
+
+                        if (seenIds.contains(
+                            profile->id))
+                        {
+                            continue;
+                        }
+
+
+                        seenIds.insert(
+                            profile->id
+                        );
+
+
+                        Configs::ProfileTrafficRow row;
+
+                        row.id =
+                            profile->id;
+
+                        row.traffic_dl =
+                            static_cast<long long>(
+                                profile->traffic_downlink
+                                );
+
+                        row.traffic_up =
+                            static_cast<long long>(
+                                profile->traffic_uplink
+                                );
+
+
+                        trafficRows.push_back(
+                            row
+                        );
+                    }
+                }
+
+
+                // ---------------------------------------------
+                // Publish STOP state
+                // ---------------------------------------------
+
+                loop_enabled.store(
+                    false,
+                    std::memory_order_release
+                );
+
+
+                looping = false;
+
+
+                lastTrafficSave =
+                    elapsedTimer.isValid()
+                    ? elapsedTimer.elapsed()
+                    : 0;
+            }
+
+
+            // -------------------------------------------------
+            // loop_mutex released.
+            //
+            // persistence mutex remains locked.
+            //
+            // This guarantees that no older periodic snapshot
+            // can be written after this final snapshot.
+            // -------------------------------------------------
+
+            if (!trafficRows.empty()) {
+
+                Configs::dataManager
+                    ->profilesRepo
+                    ->SaveTrafficBatch(
+                        trafficRows
+                    );
+            }
         }
 
 
         // -------------------------------------------------
-        // UI
+        // Final UI state
         // -------------------------------------------------
 
         runOnUiThread([] {
