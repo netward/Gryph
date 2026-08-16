@@ -8,6 +8,7 @@
 
 #include <QDateTime>
 #include <QSet>
+#include <QHash>
 #include <QInputDialog>
 #include <QUrlQuery>
 #include <QJsonDocument>
@@ -741,299 +742,1312 @@ namespace Subscription {
         });
     }
 
-    void GroupUpdater::Update(const QString &_str, int _sub_gid, bool _not_sub_as_url) {
-        // Create rawUpdater
-        Configs::dataManager->settingsRepo->imported_count = 0;
-        auto rawUpdater = std::make_unique<RawUpdater>();
-        rawUpdater->gid_add_to = _sub_gid;
+    void GroupUpdater::Update(
+        const QString& _str,
+        int _sub_gid,
+        bool _not_sub_as_url)
+    {
+        auto* const settings =
+            Configs::dataManager
+            ->settingsRepo
+            .get();
 
-        // Preparation
-        QString sub_user_info;
-        bool asURL = _sub_gid >= 0 || _not_sub_as_url; // 把 _str 当作 url 处理（下载内容）
-        auto content = _str.trimmed();
-        auto group =
+        auto* const profilesRepo =
+            Configs::dataManager
+            ->profilesRepo
+            .get();
+
+        auto* const groupsRepo =
             Configs::dataManager
             ->groupsRepo
-            ->GetGroup(_sub_gid);
+            .get();
 
-        Configs::GroupSnapshot groupSnapshot;
 
-        if (group) {
+        if (!settings ||
+            !profilesRepo ||
+            !groupsRepo)
+        {
+            MW_show_log(
+                "GroupUpdater: repositories "
+                "are not initialized"
+            );
 
-            groupSnapshot =
+            return;
+        }
+
+
+        settings->imported_count = 0;
+
+
+        // =====================================================
+        // Raw parser
+        // =====================================================
+
+        auto rawUpdater =
+            std::make_unique<RawUpdater>();
+
+        rawUpdater->gid_add_to =
+            _sub_gid;
+
+
+        QString content =
+            _str.trimmed();
+
+        QString subUserInfo;
+
+
+        const bool asURL =
+            _sub_gid >= 0
+            ||
+            _not_sub_as_url;
+
+
+        // =====================================================
+        // Resolve target group
+        // =====================================================
+
+        auto group =
+            groupsRepo->GetGroup(
+                _sub_gid
+            );
+
+
+        Configs::GroupSnapshot
+            initialGroupSnapshot;
+
+
+        if (_sub_gid >= 0 &&
+            !group)
+        {
+            MW_show_log(
+                QString(
+                    "GroupUpdater: group %1 "
+                    "does not exist"
+                )
+                .arg(_sub_gid)
+            );
+
+            return;
+        }
+
+
+        if (group)
+        {
+            initialGroupSnapshot =
                 group->Snapshot();
 
-            if (groupSnapshot.archive) {
+
+            if (initialGroupSnapshot.archive)
+            {
                 return;
             }
         }
 
-        // Network Request
-        if (asURL) {
+
+        // =====================================================
+        // Download subscription
+        //
+        // IMPORTANT:
+        // No Profile/Group data has been changed yet.
+        // =====================================================
+
+        if (asURL)
+        {
             const QString groupName =
                 group
-                ? groupSnapshot.name
+                ? initialGroupSnapshot.name
                 : content;
-            MW_show_log(">>>>>>>> " + QObject::tr("Requesting subscription: %1").arg(groupName));
 
-            auto resp = NetworkRequestHelper::HttpGet(content, Configs::dataManager->settingsRepo->sub_send_hwid);
-            if (!resp.error.isEmpty()) {
-                MW_show_log("<<<<<<<< " + QObject::tr("Requesting subscription %1 error: %2").arg(groupName, resp.error + "\n" + resp.data));
+
+            MW_show_log(
+                ">>>>>>>> "
+                +
+                QObject::tr(
+                    "Requesting subscription: %1"
+                )
+                .arg(groupName)
+            );
+
+
+            const auto resp =
+                NetworkRequestHelper::HttpGet(
+                    content,
+                    settings->sub_send_hwid
+                );
+
+
+            if (!resp.error.isEmpty())
+            {
+                MW_show_log(
+                    "<<<<<<<< "
+                    +
+                    QObject::tr(
+                        "Requesting subscription "
+                        "%1 error: %2"
+                    )
+                    .arg(
+                        groupName,
+                        resp.error
+                        + "\n"
+                        + resp.data
+                    )
+                );
+
+                // IMPORTANT:
+                // Old group is completely untouched.
                 return;
             }
 
-            content = resp.data;
-            sub_user_info = NetworkRequestHelper::GetHeader(resp.header, "Subscription-UserInfo");
 
-            MW_show_log("<<<<<<<< " + QObject::tr("Subscription request fininshed: %1").arg(groupName));
-        }
-
-        QList<std::shared_ptr<Configs::Profile>> 
-            in;
-
-        if (group != nullptr) {
-            group->UpdateSubscriptionState(
-                QDateTime::currentMSecsSinceEpoch()
-                / 1000,
-                sub_user_info
-            );
-
-            Configs::dataManager
-                ->groupsRepo
-                ->Save(group);
-            //
-            auto profilesToDelete =
-                group->Profiles();
-
-            if (!Configs::dataManager
-                ->profilesRepo
-                ->BatchDeleteProfiles(
-                    profilesToDelete,
-                    Configs::dataManager
-                    ->settingsRepo
-                    ->allow_stopping_active_profile))
-            {
-                runOnUiThread([=] {
-
-                    MessageBoxWarning(
-                        "Internal Error",
-                        "DB Error when deleting profiles, "
-                        "Please try again."
-                    );
-                    });
-
-                return;
-            }
-        }
-
-        MW_show_log(">>>>>>>> " + QObject::tr("Processing subscription data..."));
-        rawUpdater->update(content);
-        content.clear();
-        Configs::dataManager
-            ->profilesRepo
-            ->AddProfileBatch(
-                rawUpdater->updated_order, 
-                rawUpdater->gid_add_to);
-        QList<int> subscriptionOrder;
-
-        subscriptionOrder.reserve(
-            rawUpdater
-            ->updated_order
-            .size()
-        );
+            content =
+                resp.data;
 
 
-        for (const auto& profile :
-            rawUpdater->updated_order)
-        {
-            if (!profile ||
-                profile->Id() < 0)
-            {
-                continue;
-            }
-
-
-            subscriptionOrder.append(
-                profile->Id()
-            );
-        }
-
-        MW_show_log(">>>>>>>> " + QObject::tr("Process complete, applying..."));
-
-        if (group != nullptr) {
-            const auto currentProfileIds =
-                group->Profiles();
-            QList<std::shared_ptr<Configs::Profile>> out_all;
-            out_all = Configs::dataManager->profilesRepo->GetProfileBatch(group->Profiles());;
-
-            QString change_text;
-
-            if (Configs::dataManager
-                ->settingsRepo
-                ->sub_clear) 
-            {
-                group->ReplaceProfilesFromSubscription(
-                    subscriptionOrder
+            subUserInfo =
+                NetworkRequestHelper::GetHeader(
+                    resp.header,
+                    "Subscription-UserInfo"
                 );
 
-                Configs::dataManager
-                    ->groupsRepo
-                    ->Save(group);
-                // all is new profile
-                if (out_all.size() >= 1000) {
-                    change_text += "[+] " + Int2String(out_all.size()) + " profiles\n";
-                } else {
-                    for (const auto &ent: out_all) {
-                        change_text += "[+] " + ent->OutboundSnapshot()->DisplayTypeAndName() + "\n";
-                    }
-                }
-            } else {
-                QList<std::shared_ptr<Configs::Profile>> update_keep;
-                QList<std::shared_ptr<Configs::Profile>> update_del;
-                QList<std::shared_ptr<Configs::Profile>> only_out;
-                QList<std::shared_ptr<Configs::Profile>> only_in;
-                QList<std::shared_ptr<Configs::Profile>> out;
-                // find and delete not updated profile by ProfileFilter
-                Configs::ProfileFilter::OnlyInSrc_ByPointer(out_all, in, out);
-                Configs::ProfileFilter::OnlyInSrc(in, out, only_in, false);
-                Configs::ProfileFilter::OnlyInSrc(out, in, only_out, false);
-                Configs::ProfileFilter::Common(in, out, update_keep, update_del, false);
-                QString notice_added;
-                QString notice_deleted;
-                if (only_out.size() < 1000)
-                {
-                    for (const auto &ent: only_out) {
-                        notice_added += "[+] " + ent->OutboundSnapshot()->DisplayTypeAndName() + "\n";
-                    }
-                } else
-                {
-                    notice_added += QString("[+] ") + "added " + Int2String(only_out.size()) + "\n";
-                }
-                if (only_in.size() < 1000)
-                {
-                    for (const auto &ent: only_in) {
-                        notice_deleted += "[-] " + ent->OutboundSnapshot()->DisplayTypeAndName() + "\n";
-                    }
-                } else
-                {
-                    notice_deleted += QString("[-] ") + "deleted " + Int2String(only_in.size()) + "\n";
-                }
-
-
-                // sort according to order in remote
-                QList<int> newProfileOrder;
-
-                newProfileOrder.reserve(
-                    rawUpdater
-                    ->updated_order
-                    .size()
-                );
-
-                for (const auto& ent :
-                    rawUpdater->updated_order)
-                {
-                    if (!ent) {
-                        continue;
-                    }
-
-                    const auto deletedIndex =
-                        update_del.indexOf(ent);
-
-                    if (deletedIndex >= 0) {
-
-                        if (deletedIndex >=
-                            update_keep.count())
-                        {
-                            continue;
-                        }
-
-
-                        const auto& keptProfile =
-                            update_keep[
-                                deletedIndex
-                            ];
-
-
-                        if (keptProfile) {
-
-                            newProfileOrder.append(
-                                keptProfile->Id()
-                            );
-                        }
-                    }
-
-                    else {
-
-                        newProfileOrder.append(
-                            ent->Id()
-                        );
-                    }
-                }
-
-                // One atomic replacement under Group::mutex.
-                group->ReplaceProfilesFromSubscription(
-                    newProfileOrder
-                );
-
-                Configs::dataManager
-                    ->groupsRepo
-                    ->Save(group);
-
-                // cleanup
-                const QSet<int> finalProfileIds(
-                    newProfileOrder.begin(),
-                    newProfileOrder.end()
-                );
-
-                QList<int> del_ids;
-
-                for (const auto& ent : out_all) {
-                    if (!ent) {
-                        continue;
-                    }
-
-                    if (!finalProfileIds.contains(
-                        ent->Id()))
-                    {
-                        del_ids.append(
-                            ent->Id()
-                        );
-                    }
-                }
-                if (!Configs::dataManager->profilesRepo->BatchDeleteProfiles(del_ids, Configs::dataManager->settingsRepo->allow_stopping_active_profile)) {
-                    runOnUiThread([=] {
-                       MessageBoxWarning("Internal error", "DB Error when deleting profiles, data may be corrupted");
-                    });
-                }
-
-                change_text = "\n" + QObject::tr("Added %1 profiles:\n%2\nDeleted %3 Profiles:\n%4")
-                                         .arg(only_out.length())
-                                         .arg(notice_added)
-                                         .arg(only_in.length())
-                                         .arg(notice_deleted);
-                if (only_out.length() + only_in.length() == 0) change_text = QObject::tr("Nothing");
-            }
-
-            const auto finalGroupSnapshot =
-                group->Snapshot();
 
             MW_show_log(
                 "<<<<<<<< "
-                + QObject::tr(
-                    "Change of %1:"
+                +
+                QObject::tr(
+                    "Subscription request finished: %1"
+                )
+                .arg(groupName)
+            );
+        }
+
+
+        // =====================================================
+        // Parse subscription FIRST
+        //
+        // RawUpdater creates detached/unpublished Profiles.
+        // Nothing is written to ProfilesRepo yet.
+        // =====================================================
+
+        MW_show_log(
+            ">>>>>>>> "
+            +
+            QObject::tr(
+                "Processing subscription data..."
+            )
+        );
+
+
+        rawUpdater->update(
+            content
+        );
+
+
+        content.clear();
+
+
+        auto& parsedProfiles =
+            rawUpdater->updated_order;
+
+
+        // =====================================================
+        // Safety barrier
+        // =====================================================
+        //
+        // RawUpdater currently returns void, so an empty list
+        // cannot distinguish:
+        //
+        //   - invalid/broken subscription
+        //   - unsupported format
+        //   - intentionally empty subscription
+        //
+        // For an existing subscription group the safest policy
+        // is NOT to destroy the previous profiles.
+        // =====================================================
+
+        if (group &&
+            parsedProfiles.isEmpty())
+        {
+            MW_show_log(
+                "<<<<<<<< "
+                +
+                QObject::tr(
+                    "Subscription contains no valid profiles. "
+                    "The existing profiles were preserved."
+                )
+            );
+
+
+            runOnUiThread(
+                []
+                {
+                    MessageBoxWarning(
+                        QObject::tr(
+                            "Subscription update failed"
+                        ),
+
+                        QObject::tr(
+                            "No valid profiles were found "
+                            "in the subscription. "
+                            "The existing profiles were preserved."
+                        )
+                    );
+                }
+            );
+
+
+            return;
+        }
+
+
+        // =====================================================
+        // Simple import, not subscription replacement
+        // =====================================================
+
+        if (!group)
+        {
+            if (!parsedProfiles.isEmpty())
+            {
+                const bool added =
+                    profilesRepo->AddProfileBatch(
+                        parsedProfiles,
+                        rawUpdater->gid_add_to
+                    );
+
+
+                if (!added)
+                {
+                    MW_show_log(
+                        "GroupUpdater: failed to "
+                        "add imported profiles"
+                    );
+
+
+                    runOnUiThread(
+                        []
+                        {
+                            MessageBoxWarning(
+                                "Internal Error",
+                                "DB Error when adding profiles. "
+                                "Please try again."
+                            );
+                        }
+                    );
+
+
+                    return;
+                }
+            }
+
+
+            settings->imported_count =
+                parsedProfiles.count();
+
+
+            MW_dialog_message(
+                MwMessage::SubscriptionFinished,
+                {}
+            );
+
+
+            return;
+        }
+
+
+        // =====================================================
+        // Existing subscription group
+        //
+        // Snapshot OLD state only AFTER network + parsing.
+        // This keeps the race window much smaller.
+        // =====================================================
+
+        const QList<int> oldProfileIds =
+            group->Profiles();
+
+
+        const QList<
+            std::shared_ptr<Configs::Profile>
+        > oldProfiles =
+            profilesRepo->GetProfileBatch(
+                oldProfileIds
+            );
+
+
+        // =====================================================
+        // Small safe display helper
+        // =====================================================
+
+        const auto profileDisplayName =
+            [](
+                const std::shared_ptr<
+                Configs::Profile
+                >& profile) -> QString
+            {
+                if (!profile)
+                {
+                    return {};
+                }
+
+
+                const auto outbound =
+                    profile->OutboundSnapshot();
+
+
+                if (!outbound)
+                {
+                    return profile->Name();
+                }
+
+
+                return outbound
+                    ->DisplayTypeAndName();
+            };
+
+
+        // =====================================================
+        // State prepared before committing anything
+        // =====================================================
+
+        QList<
+            std::shared_ptr<Configs::Profile>
+        > profilesToAdd;
+
+
+        QList<int> profilesToDelete;
+
+
+        QList<int> finalProfileOrder;
+
+
+        QString changeText;
+
+
+        const bool clearEverything =
+            settings->sub_clear;
+
+
+        // =====================================================
+        // MODE 1:
+        // sub_clear == true
+        //
+        // Completely recreate subscription profiles.
+        //
+        // Old profiles are NOT deleted yet.
+        // =====================================================
+
+        if (clearEverything)
+        {
+            profilesToAdd =
+                parsedProfiles;
+
+
+            profilesToDelete =
+                oldProfileIds;
+
+
+            // -------------------------------------------------
+            // Add NEW profiles first.
+            //
+            // This guarantees that an AddProfileBatch failure
+            // cannot destroy the previous subscription.
+            // -------------------------------------------------
+
+            if (!profilesToAdd.isEmpty())
+            {
+                const bool added =
+                    profilesRepo
+                    ->AddProfileBatch(
+                        profilesToAdd,
+                        _sub_gid
+                    );
+
+
+                if (!added)
+                {
+                    MW_show_log(
+                        "GroupUpdater: AddProfileBatch "
+                        "failed while replacing subscription"
+                    );
+
+
+                    runOnUiThread(
+                        []
+                        {
+                            MessageBoxWarning(
+                                "Internal Error",
+
+                                "DB Error when adding new "
+                                "subscription profiles. "
+                                "The previous profiles "
+                                "were preserved."
+                            );
+                        }
+                    );
+
+
+                    return;
+                }
+            }
+
+
+            // -------------------------------------------------
+            // Validate AddProfileBatch result
+            //
+            // At this point every parsed Profile MUST have ID.
+            // -------------------------------------------------
+
+            bool allAssigned =
+                true;
+
+
+            for (const auto& profile :
+                profilesToAdd)
+            {
+                if (!profile ||
+                    profile->Id() < 0)
+                {
+                    allAssigned =
+                        false;
+
+                    break;
+                }
+            }
+
+
+            if (!allAssigned)
+            {
+                // ---------------------------------------------
+                // Roll back newly assigned profiles.
+                // Old profiles are still untouched.
+                // ---------------------------------------------
+
+                QList<int> rollbackIds;
+
+
+                for (const auto& profile :
+                    profilesToAdd)
+                {
+                    if (!profile)
+                    {
+                        continue;
+                    }
+
+
+                    const int id =
+                        profile->Id();
+
+
+                    if (id >= 0)
+                    {
+                        rollbackIds.append(
+                            id
+                        );
+                    }
+                }
+
+
+                if (!rollbackIds.isEmpty())
+                {
+                    profilesRepo
+                        ->BatchDeleteProfiles(
+                            rollbackIds,
+                            false
+                        );
+                }
+
+
+                group->ReplaceProfiles(
+                    oldProfileIds
+                );
+
+
+                groupsRepo->Save(
+                    group
+                );
+
+
+                MW_show_log(
+                    "GroupUpdater: incomplete batch "
+                    "insert; rolled back new profiles"
+                );
+
+
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Exact order from remote subscription.
+            // -------------------------------------------------
+
+            finalProfileOrder.reserve(
+                parsedProfiles.size()
+            );
+
+
+            for (const auto& profile :
+                parsedProfiles)
+            {
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                const int id =
+                    profile->Id();
+
+
+                if (id >= 0)
+                {
+                    finalProfileOrder.append(
+                        id
+                    );
+                }
+            }
+
+
+            // -------------------------------------------------
+            // Change description
+            // -------------------------------------------------
+
+            if (parsedProfiles.size() >= 1000)
+            {
+                changeText +=
+                    "[+] "
+                    +
+                    Int2String(
+                        parsedProfiles.size()
+                    )
+                    +
+                    " profiles\n";
+            }
+            else
+            {
+                for (const auto& profile :
+                    parsedProfiles)
+                {
+                    changeText +=
+                        "[+] "
+                        +
+                        profileDisplayName(
+                            profile
+                        )
+                        +
+                        "\n";
+                }
+            }
+        }
+
+
+        // =====================================================
+        // MODE 2:
+        // sub_clear == false
+        //
+        // Reuse unchanged OLD Profiles.
+        //
+        // This preserves:
+        //   - Profile ID
+        //   - traffic counters
+        //   - latency/test data
+        //   - runtime identity
+        //
+        // Only genuinely new profiles are inserted.
+        // =====================================================
+
+        else
+        {
+            QList<
+                std::shared_ptr<Configs::Profile>
+            > oldCommon;
+
+
+            QList<
+                std::shared_ptr<Configs::Profile>
+            > newCommon;
+
+
+            QList<
+                std::shared_ptr<Configs::Profile>
+            > onlyOld;
+
+
+            QList<
+                std::shared_ptr<Configs::Profile>
+            > onlyNew;
+
+
+            // -------------------------------------------------
+            // OLD ∩ NEW
+            //
+            // ProfileFilter::Common preserves alignment:
+            //
+            // oldCommon[i] corresponds to newCommon[i].
+            // -------------------------------------------------
+
+            Configs::ProfileFilter::Common(
+                oldProfiles,
+                parsedProfiles,
+                oldCommon,
+                newCommon,
+                false
+            );
+
+
+            // OLD - NEW
+            Configs::ProfileFilter::OnlyInSrc(
+                oldProfiles,
+                parsedProfiles,
+                onlyOld,
+                false
+            );
+
+
+            // NEW - OLD
+            Configs::ProfileFilter::OnlyInSrc(
+                parsedProfiles,
+                oldProfiles,
+                onlyNew,
+                false
+            );
+
+
+            // Only genuinely NEW profiles need DB IDs.
+            profilesToAdd =
+                onlyNew;
+
+
+            // Only disappeared OLD profiles need deletion.
+            profilesToDelete.reserve(
+                onlyOld.size()
+            );
+
+
+            for (const auto& profile :
+                onlyOld)
+            {
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                const int id =
+                    profile->Id();
+
+
+                if (id >= 0)
+                {
+                    profilesToDelete.append(
+                        id
+                    );
+                }
+            }
+
+
+            // -------------------------------------------------
+            // Map:
+            //
+            // parsed new Profile pointer
+            //          ↓
+            // existing old Profile ID
+            //
+            // This allows us to reproduce remote order while
+            // keeping old Profile objects for unchanged nodes.
+            // -------------------------------------------------
+
+            QHash<
+                const Configs::Profile*,
+                int
+            > reusedProfileIds;
+
+
+            const int commonCount =
+                std::min(
+                    oldCommon.size(),
+                    newCommon.size()
+                );
+
+
+            reusedProfileIds.reserve(
+                commonCount
+            );
+
+
+            for (int i = 0;
+                i < commonCount;
+                ++i)
+            {
+                const auto& oldProfile =
+                    oldCommon[i];
+
+                const auto& newProfile =
+                    newCommon[i];
+
+
+                if (!oldProfile ||
+                    !newProfile)
+                {
+                    continue;
+                }
+
+
+                const int oldId =
+                    oldProfile->Id();
+
+
+                if (oldId < 0)
+                {
+                    continue;
+                }
+
+
+                reusedProfileIds.insert(
+                    newProfile.get(),
+                    oldId
+                );
+            }
+
+
+            // -------------------------------------------------
+            // Persist only NEW profiles.
+            // -------------------------------------------------
+
+            if (!profilesToAdd.isEmpty())
+            {
+                const bool added =
+                    profilesRepo
+                    ->AddProfileBatch(
+                        profilesToAdd,
+                        _sub_gid
+                    );
+
+
+                if (!added)
+                {
+                    MW_show_log(
+                        "GroupUpdater: failed to add "
+                        "new profiles during merge"
+                    );
+
+
+                    runOnUiThread(
+                        []
+                        {
+                            MessageBoxWarning(
+                                "Internal Error",
+
+                                "DB Error when adding "
+                                "new subscription profiles. "
+                                "The previous subscription "
+                                "was preserved."
+                            );
+                        }
+                    );
+
+
+                    return;
+                }
+            }
+
+
+            // -------------------------------------------------
+            // Validate that every genuinely new profile
+            // received an ID.
+            // -------------------------------------------------
+
+            bool allAssigned =
+                true;
+
+
+            for (const auto& profile :
+                profilesToAdd)
+            {
+                if (!profile ||
+                    profile->Id() < 0)
+                {
+                    allAssigned =
+                        false;
+
+                    break;
+                }
+            }
+
+
+            if (!allAssigned)
+            {
+                QList<int> rollbackIds;
+
+
+                for (const auto& profile :
+                    profilesToAdd)
+                {
+                    if (!profile)
+                    {
+                        continue;
+                    }
+
+
+                    const int id =
+                        profile->Id();
+
+
+                    if (id >= 0)
+                    {
+                        rollbackIds.append(
+                            id
+                        );
+                    }
+                }
+
+
+                if (!rollbackIds.isEmpty())
+                {
+                    profilesRepo
+                        ->BatchDeleteProfiles(
+                            rollbackIds,
+                            false
+                        );
+                }
+
+
+                group->ReplaceProfiles(
+                    oldProfileIds
+                );
+
+
+                groupsRepo->Save(
+                    group
+                );
+
+
+                MW_show_log(
+                    "GroupUpdater: incomplete batch "
+                    "insert during subscription merge"
+                );
+
+
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Rebuild exact remote order.
+            //
+            // If remote profile is unchanged:
+            //      use OLD ID.
+            //
+            // If remote profile is new:
+            //      use newly assigned ID.
+            // -------------------------------------------------
+
+            finalProfileOrder.reserve(
+                parsedProfiles.size()
+            );
+
+
+            for (const auto& parsedProfile :
+                parsedProfiles)
+            {
+                if (!parsedProfile)
+                {
+                    continue;
+                }
+
+
+                const auto reusedIt =
+                    reusedProfileIds.constFind(
+                        parsedProfile.get()
+                    );
+
+
+                if (reusedIt !=
+                    reusedProfileIds.constEnd())
+                {
+                    finalProfileOrder.append(
+                        reusedIt.value()
+                    );
+
+                    continue;
+                }
+
+
+                const int newId =
+                    parsedProfile->Id();
+
+
+                if (newId < 0)
+                {
+                    MW_show_log(
+                        "GroupUpdater: new profile "
+                        "does not have an ID"
+                    );
+
+
+                    continue;
+                }
+
+
+                finalProfileOrder.append(
+                    newId
+                );
+            }
+
+
+            // -------------------------------------------------
+            // Added/deleted profile description
+            // -------------------------------------------------
+
+            QString noticeAdded;
+            QString noticeDeleted;
+
+
+            if (onlyNew.size() < 1000)
+            {
+                for (const auto& profile :
+                    onlyNew)
+                {
+                    noticeAdded +=
+                        "[+] "
+                        +
+                        profileDisplayName(
+                            profile
+                        )
+                        +
+                        "\n";
+                }
+            }
+            else
+            {
+                noticeAdded +=
+                    "[+] added "
+                    +
+                    Int2String(
+                        onlyNew.size()
+                    )
+                    +
+                    "\n";
+            }
+
+
+            if (onlyOld.size() < 1000)
+            {
+                for (const auto& profile :
+                    onlyOld)
+                {
+                    noticeDeleted +=
+                        "[-] "
+                        +
+                        profileDisplayName(
+                            profile
+                        )
+                        +
+                        "\n";
+                }
+            }
+            else
+            {
+                noticeDeleted +=
+                    "[-] deleted "
+                    +
+                    Int2String(
+                        onlyOld.size()
+                    )
+                    +
+                    "\n";
+            }
+
+
+            changeText =
+                "\n"
+                +
+                QObject::tr(
+                    "Added %1 profiles:\n"
+                    "%2\n"
+                    "Deleted %3 Profiles:\n"
+                    "%4"
                 )
                 .arg(
-                    finalGroupSnapshot.name
+                    onlyNew.length()
                 )
-                + "\n"
-                + change_text
-            );
-            MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
-        } else {
-            Configs::dataManager->settingsRepo->imported_count = rawUpdater->updated_order.count();
-            MW_dialog_message(MwMessage::SubscriptionFinished, {});
+                .arg(
+                    noticeAdded
+                )
+                .arg(
+                    onlyOld.length()
+                )
+                .arg(
+                    noticeDeleted
+                );
+
+
+            if (onlyNew.isEmpty() &&
+                onlyOld.isEmpty())
+            {
+                changeText =
+                    QObject::tr(
+                        "Nothing"
+                    );
+            }
         }
+
+
+        // =====================================================
+        // Sanity check before publishing
+        // =====================================================
+
+        if (finalProfileOrder.isEmpty())
+        {
+            // parsedProfiles was non-empty, therefore reaching
+            // an empty final order means an internal failure.
+            //
+            // Never replace existing subscription with empty
+            // state in this situation.
+
+            QList<int> rollbackIds;
+
+
+            for (const auto& profile :
+                profilesToAdd)
+            {
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                const int id =
+                    profile->Id();
+
+
+                if (id >= 0)
+                {
+                    rollbackIds.append(
+                        id
+                    );
+                }
+            }
+
+
+            if (!rollbackIds.isEmpty())
+            {
+                profilesRepo
+                    ->BatchDeleteProfiles(
+                        rollbackIds,
+                        false
+                    );
+            }
+
+
+            group->ReplaceProfiles(
+                oldProfileIds
+            );
+
+
+            groupsRepo->Save(
+                group
+            );
+
+
+            MW_show_log(
+                "GroupUpdater: refusing to replace "
+                "subscription with empty final order"
+            );
+
+
+            return;
+        }
+
+
+        // =====================================================
+        // Publish NEW group order
+        //
+        // Important:
+        // New profiles already exist in DB.
+        // Old profiles have NOT been deleted yet.
+        //
+        // Therefore there is no moment where the group loses
+        // all valid profiles because parsing/insertion failed.
+        // =====================================================
+
+        group->ReplaceProfilesFromSubscription(
+            finalProfileOrder
+        );
+
+
+        if (!groupsRepo->Save(
+            group))
+        {
+            MW_show_log(
+                "GroupUpdater: failed to save "
+                "new subscription order"
+            );
+
+
+            // Try to restore previous group order.
+            group->ReplaceProfiles(
+                oldProfileIds
+            );
+
+
+            groupsRepo->Save(
+                group
+            );
+
+
+            // Remove only profiles created during this attempt.
+            QList<int> rollbackIds;
+
+
+            for (const auto& profile :
+                profilesToAdd)
+            {
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                const int id =
+                    profile->Id();
+
+
+                if (id >= 0)
+                {
+                    rollbackIds.append(
+                        id
+                    );
+                }
+            }
+
+
+            if (!rollbackIds.isEmpty())
+            {
+                profilesRepo
+                    ->BatchDeleteProfiles(
+                        rollbackIds,
+                        false
+                    );
+            }
+
+
+            runOnUiThread(
+                []
+                {
+                    MessageBoxWarning(
+                        "Internal Error",
+
+                        "Failed to save the updated "
+                        "subscription order. "
+                        "The previous order was restored."
+                    );
+                }
+            );
+
+
+            return;
+        }
+
+
+        // =====================================================
+        // Delete obsolete OLD profiles LAST
+        //
+        // This is the key fix.
+        // =====================================================
+
+        if (!profilesToDelete.isEmpty())
+        {
+            QList<int> deleteIds =
+                profilesToDelete;
+
+
+            const bool deleted =
+                profilesRepo
+                ->BatchDeleteProfiles(
+                    deleteIds,
+                    settings
+                    ->allow_stopping_active_profile
+                );
+
+
+            if (!deleted)
+            {
+                // The new subscription itself is already valid
+                // and published.
+                //
+                // Failure here means stale DB rows may remain,
+                // but we DO NOT destroy the valid new state.
+
+                MW_show_log(
+                    "GroupUpdater: failed to remove "
+                    "some obsolete subscription profiles"
+                );
+
+
+                runOnUiThread(
+                    []
+                    {
+                        MessageBoxWarning(
+                            "Internal Error",
+
+                            "The subscription was updated, "
+                            "but some obsolete profiles "
+                            "could not be removed."
+                        );
+                    }
+                );
+            }
+        }
+
+
+        // =====================================================
+        // Mark subscription update successful ONLY NOW
+        // =====================================================
+
+        group->UpdateSubscriptionState(
+            QDateTime::currentMSecsSinceEpoch()
+            / 1000,
+
+            subUserInfo
+        );
+
+
+        groupsRepo->Save(
+            group
+        );
+
+
+        // =====================================================
+        // Completion log
+        // =====================================================
+
+        const auto finalGroupSnapshot =
+            group->Snapshot();
+
+
+        MW_show_log(
+            "<<<<<<<< "
+            +
+            QObject::tr(
+                "Change of %1:"
+            )
+            .arg(
+                finalGroupSnapshot.name
+            )
+            +
+            "\n"
+            +
+            changeText
+        );
+
+
+        MW_dialog_message(
+            MwMessage::SubscriptionFinished,
+            {
+                MwArg::Quiet
+            }
+        );
     }
+
 } // namespace Subscription
 
 std::atomic_bool
