@@ -14,6 +14,8 @@
 #include <QtDBus>
 #endif
 
+#include <atomic>
+
 #include <QKeyEvent>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -168,9 +170,17 @@ private:
     QShortcut *shortcut_esc = new QShortcut(QKeySequence::Cancel, this);
     //
     QThreadPool *parallelCoreCallPool = new QThreadPool(this);
-    std::atomic<bool> stopSpeedtest = false;
-    QMutex speedtestRunning;
-    std::atomic<bool> currentUnderTest = false;
+    std::atomic_bool stopSpeedtest{
+    false
+    };
+
+    std::atomic_bool speedtestRunning{
+        false
+    };
+
+    std::atomic_bool currentUnderTest{
+        false
+    };
     //
     Configs_sys::CoreProcess *core_process = nullptr;
     QMutex coreProcessMutex; // serializes core_process init (DS_cores) vs IPC newConnection (UI)

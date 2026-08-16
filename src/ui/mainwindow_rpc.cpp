@@ -26,6 +26,69 @@
 
 using namespace API;
 
+namespace
+{
+    class AtomicFlagResetGuard final
+    {
+    public:
+        explicit AtomicFlagResetGuard(
+            std::atomic_bool& flag)
+            :
+            flag_(flag)
+        {}
+
+
+        ~AtomicFlagResetGuard()
+        {
+            flag_.store(
+                false,
+                std::memory_order_release
+            );
+        }
+
+
+        AtomicFlagResetGuard(
+            const AtomicFlagResetGuard&) = delete;
+
+        AtomicFlagResetGuard&
+            operator=(
+                const AtomicFlagResetGuard&) = delete;
+
+
+    private:
+        std::atomic_bool& flag_;
+    };
+
+
+    class SemaphoreReleaseGuard final
+    {
+    public:
+        explicit SemaphoreReleaseGuard(
+            QSemaphore& semaphore)
+            :
+            semaphore_(semaphore)
+        {}
+
+
+        ~SemaphoreReleaseGuard()
+        {
+            semaphore_.release();
+        }
+
+
+        SemaphoreReleaseGuard(
+            const SemaphoreReleaseGuard&) = delete;
+
+        SemaphoreReleaseGuard&
+            operator=(
+                const SemaphoreReleaseGuard&) = delete;
+
+
+    private:
+        QSemaphore& semaphore_;
+    };
+}
+
 void MainWindow::setup_rpc(QLocalSocket *socket) {
     // The Client is long-lived and never recreated; on core restart we only
     // swap the underlying connection so worker threads holding `defaultClient`
@@ -355,80 +418,327 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
     }
 }
 
-void MainWindow::urltest_current_group(const QList<int>& profileIDs) {
+void MainWindow::urltest_current_group(
+    const QList<int>& profileIDs)
+{
     if (profileIDs.isEmpty()) {
         return;
     }
-    if (!speedtestRunning.tryLock()) {
-        MessageBoxWarning(software_name, tr("The last url test did not exit completely, please wait. If it persists, please restart the program."));
+
+    // -------------------------------------------------
+    // Global test guard.
+    //
+    // Atomic test-and-set:
+    // false -> true means we successfully acquired it.
+    // -------------------------------------------------
+    if (speedtestRunning.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
+        MessageBoxWarning(
+            software_name,
+            tr(
+                "The last url test did not exit "
+                "completely, please wait. "
+                "If it persists, please restart "
+                "the program."
+            )
+        );
+
         return;
     }
 
-    runOnNewThread([this, profileIDs]() {
-        stopSpeedtest.store(false);
-        dataViewHtmlGenerator_.seedLatencyTest(DataViewHtmlGenerator::LatencyTestPanelState::Kind::Url, profileIDs.size());
-        UpdateDataView(true);
-        auto speedTestFunc = [=, this](const QList<std::shared_ptr<Configs::Profile>>& profileSlice, const QList<int>& ids) {
-            auto buildObject = Configs::BuildTestConfig(profileSlice);
-            if (!buildObject->error.isEmpty()) {
-                MW_show_log(tr("Failed to build test config for batch: ") + buildObject->error);
-                return;
-            }
+    runOnNewThread(
+        [this, profileIDs]()
+        {
+            // Whatever exit path is taken below,
+            // speedtestRunning becomes false.
+            AtomicFlagResetGuard runningGuard(
+                speedtestRunning
+            );
 
-            std::atomic<int> counter(0);
-            auto testCount = buildObject->fullConfigs.size() + (!buildObject->outboundTags.empty());
-            for (const auto &entID: buildObject->fullConfigs.keys()) {
-                auto configStr = buildObject->fullConfigs[entID];
-                auto func = [this, &counter, testCount, configStr, entID]() {
-                    runURLTest(configStr, "", true, {}, {}, entID);
-                    ++counter;
-                    if (counter.load() == testCount) {
-                        speedtestRunning.unlock();
+            stopSpeedtest.store(
+                false,
+                std::memory_order_release
+            );
+
+            dataViewHtmlGenerator_
+                .seedLatencyTest(
+                    DataViewHtmlGenerator::
+                    LatencyTestPanelState::
+                    Kind::Url,
+
+                    profileIDs.size()
+                );
+            UpdateDataView(true);
+
+            // =========================================
+            // Execute one batch
+            // =========================================
+            auto speedTestFunc =
+                [this](
+                    const QList<
+                    std::shared_ptr<
+                    Configs::Profile
+                    >
+                    >& profileSlice,
+
+                    const QList<int>& ids)
+                {
+                    auto buildObject =
+                        Configs::BuildTestConfig(
+                            profileSlice
+                        );
+
+                    if (!buildObject ||
+                        !buildObject
+                        ->error
+                        .isEmpty())
+                    {
+                        if (buildObject) {
+
+                            MW_show_log(
+                                tr(
+                                    "Failed to build "
+                                    "test config for batch: "
+                                )
+                                +
+                                buildObject->error
+                            );
+                        }
+                        return;
                     }
-                };
-                parallelCoreCallPool->start(func);
-            }
 
-            if (!buildObject->outboundTags.empty()) {
-                auto func = [this, &buildObject, &counter, testCount]() {
-                    auto xrayConf = buildObject->isXrayNeeded ? QJsonObject2QString(buildObject->xrayConfig, false) : "";
-                    runURLTest(QJsonObject2QString(buildObject->coreConfig, false),xrayConf, false, buildObject->outboundTags, buildObject->tag2entID);
-                    ++counter;
-                    if (counter.load() == testCount) {
-                        speedtestRunning.unlock();
+                    // ---------------------------------
+                    // Completion semaphore for THIS
+                    // batch only.
+                    //
+                    // It starts with zero permits.
+                    // ---------------------------------
+                    auto completion =
+                        std::make_shared<
+                        QSemaphore
+                        >(0);
+
+                    int taskCount = 0;
+
+                    // ---------------------------------
+                    // Full standalone configs
+                    // ---------------------------------
+                    for (const auto entID :
+                        buildObject
+                        ->fullConfigs
+                        .keys())
+                    {
+                        const QString configStr =
+                            buildObject
+                            ->fullConfigs[
+                                entID
+                            ];
+
+                        ++taskCount;
+
+                        parallelCoreCallPool->start(
+                            [
+                                this,
+                                completion,
+                                configStr,
+                                entID
+                            ]()
+                            {
+                                SemaphoreReleaseGuard
+                                    completionGuard(
+                                        *completion
+                                    );
+
+                                runURLTest(
+                                    configStr,
+                                    "",
+                                    true,
+                                    {},
+                                    {},
+                                    entID
+                                );
+                            }
+                        );
                     }
-                };
-                parallelCoreCallPool->start(func);
-            }
-            if (testCount == 0) speedtestRunning.unlock();
 
-            speedtestRunning.lock();
-            MW_show_log("URL test for batch done.");
-            runOnUiThread([=,this]{
-                refresh_proxy_list(ids);
-            });
-        };
-        std::shared_ptr<Configs::Group> currentGroup;
-        for (int i=0;i<profileIDs.length();i+=100) {
-            if (stopSpeedtest.load()) break;
-            auto profileIDsSlice = profileIDs.mid(i, 100);
-            auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(profileIDsSlice);
-            if (!currentGroup && !profiles.isEmpty()) {
-                currentGroup = Configs::dataManager->groupsRepo->GetGroup(profiles[0]->gid);
+                    // ---------------------------------
+                    // Shared core config
+                    // ---------------------------------
+                    if (!buildObject
+                        ->outboundTags
+                        .empty())
+                    {
+                        ++taskCount;
+
+                        // Keep BuildTestConfig result alive
+                        // until worker has finished.
+                        auto taskBuildObject =
+                            buildObject;
+
+                        parallelCoreCallPool->start(
+                            [
+                                this,
+                                completion,
+                                taskBuildObject
+                            ]()
+                            {
+                                SemaphoreReleaseGuard
+                                    completionGuard(
+                                        *completion
+                                    );
+
+                                const QString xrayConf =
+                                    taskBuildObject
+                                    ->isXrayNeeded
+                                    ?
+                                    QJsonObject2QString(
+                                        taskBuildObject
+                                        ->xrayConfig,
+                                        false
+                                    )
+                                    :
+                                    "";
+
+                                runURLTest(
+                                    QJsonObject2QString(
+                                        taskBuildObject
+                                        ->coreConfig,
+                                        false
+                                    ),
+                                    xrayConf,
+                                    false,
+                                    taskBuildObject
+                                    ->outboundTags,
+                                    taskBuildObject
+                                    ->tag2entID
+                                );
+                            }
+                        );
+                    }
+
+                    // ---------------------------------
+                    // Wait for every task in THIS batch.
+                    //
+                    // No QMutex ownership tricks.
+                    // ---------------------------------
+                    if (taskCount > 0) {
+                        completion->acquire(
+                            taskCount
+                        );
+                    }
+
+                    MW_show_log(
+                        "URL test for batch done."
+                    );
+
+                    runOnUiThread(
+                        [this, ids]()
+                        {
+                            refresh_proxy_list(
+                                ids
+                            );
+                        }
+                    );
+                };
+
+            // =========================================
+            // Process profile batches
+            // =========================================
+            std::shared_ptr<Configs::Group>
+                currentGroup;
+
+            for (int i = 0;
+                i < profileIDs.size();
+                i += 100)
+            {
+                if (stopSpeedtest.load(
+                    std::memory_order_acquire))
+                {
+                    break;
+                }
+
+                const auto profileIDsSlice =
+                    profileIDs.mid(
+                        i,
+                        100
+                    );
+                const auto profiles =
+                    Configs::dataManager
+                    ->profilesRepo
+                    ->GetProfileBatch(
+                        profileIDsSlice
+                    );
+
+                if (!currentGroup &&
+                    !profiles.isEmpty() &&
+                    profiles.first())
+                {
+                    currentGroup =
+                        Configs::dataManager
+                        ->groupsRepo
+                        ->GetGroup(
+                            profiles
+                            .first()
+                            ->gid
+                        );
+                }
+                speedTestFunc(
+                    profiles,
+                    profileIDsSlice
+                );
             }
-            speedTestFunc(profiles, profileIDsSlice);
+
+            dataViewHtmlGenerator_
+                .clearTestSections();
+
+            UpdateDataView(true);
+
+            // =========================================
+            // Optional cleanup
+            // =========================================
+            if (currentGroup) {
+
+                const auto groupSnapshot =
+                    currentGroup
+                    ->Snapshot();
+
+                if (groupSnapshot
+                    .auto_clear_unavailable)
+                {
+                    MW_show_log(
+                        "URL test finished, "
+                        "clearing unavailable "
+                        "profiles..."
+                    );
+
+                    runOnUiThread(
+                        [
+                            this,
+                            profileIDs
+                        ]()
+                        {
+                            clearUnavailableProfiles(
+                                false,
+                                profileIDs
+                            );
+                        }
+                    );
+                }
+            }
+
+            MW_show_log(
+                tr("URL test finished!")
+            );
+
+            // No speedtestRunning.unlock().
+            //
+            // AtomicFlagResetGuard automatically does:
+            //
+            // speedtestRunning.store(false)
         }
-        dataViewHtmlGenerator_.clearTestSections();
-        UpdateDataView(true);
-        speedtestRunning.unlock();
-        if (currentGroup->auto_clear_unavailable) {
-            MW_show_log("URL test finished, clearing unavailable profiles...");
-            runOnUiThread([=, this] {
-               clearUnavailableProfiles(false, profileIDs);
-            });
-        }
-        MW_show_log(tr("URL test finished!"));
-    });
+    );
 }
 
 void MainWindow::stopTests() {
@@ -470,85 +780,324 @@ void MainWindow::url_test_current() {
     });
 }
 
-void MainWindow::iptest_current_group(const QList<int>& profileIDs) {
+void MainWindow::iptest_current_group(
+    const QList<int>& profileIDs)
+{
     if (profileIDs.isEmpty()) {
         return;
     }
-    if (!speedtestRunning.tryLock()) {
-        MessageBoxWarning(software_name, tr("The last test did not exit completely, please wait. If it persists, please restart the program."));
+
+
+    if (speedtestRunning.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
+        MessageBoxWarning(
+            software_name,
+            tr(
+                "The last test did not exit "
+                "completely, please wait. "
+                "If it persists, please restart "
+                "the program."
+            )
+        );
+
         return;
     }
 
-    runOnNewThread([this, profileIDs]() {
-        stopSpeedtest.store(false);
-        dataViewHtmlGenerator_.seedLatencyTest(DataViewHtmlGenerator::LatencyTestPanelState::Kind::Ip, profileIDs.size());
-        UpdateDataView(true);
-        auto ipTestFunc = [=, this](const QList<std::shared_ptr<Configs::Profile>>& profileSlice, const QList<int>& ids) {
-            auto buildObject = Configs::BuildTestConfig(profileSlice);
-            if (!buildObject->error.isEmpty()) {
-                MW_show_log(tr("Failed to build test config for batch: ") + buildObject->error);
-                return;
-            }
 
-            std::atomic<int> counter(0);
-            auto testCount = buildObject->fullConfigs.size() + (!buildObject->outboundTags.empty());
-            for (const auto &entID: buildObject->fullConfigs.keys()) {
-                auto configStr = buildObject->fullConfigs[entID];
-                auto func = [this, &counter, testCount, configStr, entID]() {
-                    runIPTest(configStr, "", true, {}, {}, entID);
-                    ++counter;
-                    if (counter.load() == testCount) {
-                        speedtestRunning.unlock();
+    runOnNewThread(
+        [this, profileIDs]()
+        {
+            AtomicFlagResetGuard runningGuard(
+                speedtestRunning
+            );
+
+
+            stopSpeedtest.store(
+                false,
+                std::memory_order_release
+            );
+
+
+            dataViewHtmlGenerator_
+                .seedLatencyTest(
+                    DataViewHtmlGenerator::
+                    LatencyTestPanelState::
+                    Kind::Ip,
+
+                    profileIDs.size()
+                );
+
+
+            UpdateDataView(true);
+
+
+            auto ipTestFunc =
+                [this](
+                    const QList<
+                    std::shared_ptr<
+                    Configs::Profile
+                    >
+                    >& profileSlice,
+
+                    const QList<int>& ids)
+                {
+                    auto buildObject =
+                        Configs::BuildTestConfig(
+                            profileSlice
+                        );
+
+
+                    if (!buildObject ||
+                        !buildObject
+                        ->error
+                        .isEmpty())
+                    {
+                        if (buildObject) {
+
+                            MW_show_log(
+                                tr(
+                                    "Failed to build "
+                                    "test config for batch: "
+                                )
+                                +
+                                buildObject->error
+                            );
+                        }
+
+                        return;
                     }
-                };
-                parallelCoreCallPool->start(func);
-            }
 
-            if (!buildObject->outboundTags.empty()) {
-                auto func = [this, &buildObject, &counter, testCount]() {
-                    auto xrayConf = buildObject->isXrayNeeded ? QJsonObject2QString(buildObject->xrayConfig, false) : "";
-                    runIPTest(QJsonObject2QString(buildObject->coreConfig, false), xrayConf, false, buildObject->outboundTags, buildObject->tag2entID);
-                    ++counter;
-                    if (counter.load() == testCount) {
-                        speedtestRunning.unlock();
+
+                    auto completion =
+                        std::make_shared<
+                        QSemaphore
+                        >(0);
+
+
+                    int taskCount = 0;
+
+
+                    // ---------------------------------
+                    // Standalone configs
+                    // ---------------------------------
+
+                    for (const auto entID :
+                        buildObject
+                        ->fullConfigs
+                        .keys())
+                    {
+                        const QString configStr =
+                            buildObject
+                            ->fullConfigs[
+                                entID
+                            ];
+
+
+                        ++taskCount;
+
+
+                        parallelCoreCallPool->start(
+                            [
+                                this,
+                                completion,
+                                configStr,
+                                entID
+                            ]()
+                            {
+                                SemaphoreReleaseGuard
+                                    completionGuard(
+                                        *completion
+                                    );
+
+
+                                runIPTest(
+                                    configStr,
+                                    "",
+                                    true,
+                                    {},
+                                    {},
+                                    entID
+                                );
+                            }
+                        );
                     }
-                };
-                parallelCoreCallPool->start(func);
-            }
-            if (testCount == 0) speedtestRunning.unlock();
 
-            speedtestRunning.lock();
-            MW_show_log("IP test for batch done.");
-            runOnUiThread([=,this]{
-                refresh_proxy_list(ids);
-            });
-        };
-        for (int i = 0; i < profileIDs.length(); i += 100) {
-            if (stopSpeedtest.load()) break;
-            auto profileIDsSlice = profileIDs.mid(i, 100);
-            auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(profileIDsSlice);
-            ipTestFunc(profiles, profileIDsSlice);
+
+                    // ---------------------------------
+                    // Shared config
+                    // ---------------------------------
+
+                    if (!buildObject
+                        ->outboundTags
+                        .empty())
+                    {
+                        ++taskCount;
+
+
+                        auto taskBuildObject =
+                            buildObject;
+
+
+                        parallelCoreCallPool->start(
+                            [
+                                this,
+                                completion,
+                                taskBuildObject
+                            ]()
+                            {
+                                SemaphoreReleaseGuard
+                                    completionGuard(
+                                        *completion
+                                    );
+
+
+                                const QString xrayConf =
+                                    taskBuildObject
+                                    ->isXrayNeeded
+                                    ?
+                                    QJsonObject2QString(
+                                        taskBuildObject
+                                        ->xrayConfig,
+                                        false
+                                    )
+                                    :
+                                    "";
+
+
+                                runIPTest(
+                                    QJsonObject2QString(
+                                        taskBuildObject
+                                        ->coreConfig,
+                                        false
+                                    ),
+
+                                    xrayConf,
+
+                                    false,
+
+                                    taskBuildObject
+                                    ->outboundTags,
+
+                                    taskBuildObject
+                                    ->tag2entID
+                                );
+                            }
+                        );
+                    }
+
+
+                    // ---------------------------------
+                    // Proper completion barrier
+                    // ---------------------------------
+
+                    if (taskCount > 0) {
+
+                        completion->acquire(
+                            taskCount
+                        );
+                    }
+
+
+                    MW_show_log(
+                        "IP test for batch done."
+                    );
+
+
+                    runOnUiThread(
+                        [this, ids]()
+                        {
+                            refresh_proxy_list(
+                                ids
+                            );
+                        }
+                    );
+                };
+
+
+            // =========================================
+            // Process batches
+            // =========================================
+
+            for (int i = 0;
+                i < profileIDs.size();
+                i += 100)
+            {
+                if (stopSpeedtest.load(
+                    std::memory_order_acquire))
+                {
+                    break;
+                }
+
+
+                const auto profileIDsSlice =
+                    profileIDs.mid(
+                        i,
+                        100
+                    );
+
+
+                const auto profiles =
+                    Configs::dataManager
+                    ->profilesRepo
+                    ->GetProfileBatch(
+                        profileIDsSlice
+                    );
+
+
+                ipTestFunc(
+                    profiles,
+                    profileIDsSlice
+                );
+            }
+
+
+            dataViewHtmlGenerator_
+                .clearTestSections();
+
+
+            UpdateDataView(true);
+
+
+            MW_show_log(
+                tr("IP test finished!")
+            );
+
+
+            // runningGuard resets speedtestRunning.
         }
-        dataViewHtmlGenerator_.clearTestSections();
-        UpdateDataView(true);
-        speedtestRunning.unlock();
-        MW_show_log(tr("IP test finished!"));
-    });
+    );
 }
-
 void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool testCurrent)
 {
     if (profileIDs.isEmpty() && !testCurrent) {
         return;
     }
-    if (!speedtestRunning.tryLock()) {
-        MessageBoxWarning(software_name, tr("The last test did not finish completely, please wait. If it persists, please restart the program."));
+    if (speedtestRunning.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
+        MessageBoxWarning(
+            software_name,
+            tr(
+                "The last speed test did not exit "
+                "completely, please wait. "
+                "If it persists, please restart "
+                "the program."
+            )
+        );
+
         return;
     }
 
     currentUnderTest.store(testCurrent);
 
     runOnNewThread([this, profileIDs, testCurrent]() {
+        AtomicFlagResetGuard runningGuard(
+            speedtestRunning
+        );
+
         stopSpeedtest.store(false);
         if (!testCurrent)
         {
@@ -586,7 +1135,6 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
         }
         dataViewHtmlGenerator_.clearTestSections();
         UpdateDataView(true);
-        speedtestRunning.unlock();
         runOnUiThread([=,this]{
             refresh_proxy_list(profileIDs);
             MW_show_log(tr("Speedtest finished!"));

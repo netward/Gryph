@@ -813,34 +813,82 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     else ui->system_dns->hide();
 
     // Включение действий, применимых к текущему состоянию и выделению перед показом меню сервера.
-    connect(ui->menu_server, &QMenu::aboutToShow, this, [=,this](){
-        if (running)
+    connect(
+        ui->menu_server,
+        &QMenu::aboutToShow,
+        this,
+        [this]()
         {
-            ui->actionSpeedtest_Current->setEnabled(true);
-        } else
-        {
-            ui->actionSpeedtest_Current->setEnabled(false);
+            // -------------------------------------------------
+            // Current profile speed test
+            // -------------------------------------------------
+
+            ui->actionSpeedtest_Current
+                ->setEnabled(
+                    static_cast<bool>(running)
+                );
+
+
+            // -------------------------------------------------
+            // Selected profiles actions
+            // -------------------------------------------------
+
+            const auto selected =
+                get_now_selected_list();
+
+            const bool hasSelection =
+                !selected.empty();
+
+
+            ui->actionSpeedtest_Selected
+                ->setEnabled(hasSelection);
+
+            ui->actionUrl_Test_Selected
+                ->setEnabled(hasSelection);
+
+            ui->menu_resolve_selected
+                ->setEnabled(hasSelection);
+
+            ui->actionResolve_Selected_Out_IP
+                ->setEnabled(hasSelection);
+
+
+            // -------------------------------------------------
+            // Stop testing action
+            // -------------------------------------------------
+
+            const bool isTesting =
+                speedtestRunning.load(
+                    std::memory_order_acquire
+                );
+
+
+            if (isTesting) {
+
+                // Add only if it is not already in the menu.
+                if (!ui->menu_server
+                    ->actions()
+                    .contains(
+                        ui->menu_stop_testing
+                    ))
+                {
+                    ui->menu_server
+                        ->addAction(
+                            ui->menu_stop_testing
+                        );
+                }
+
+            }
+            else {
+
+                ui->menu_server
+                    ->removeAction(
+                        ui->menu_stop_testing
+                    );
+            }
         }
-        if (auto selected = get_now_selected_list(); selected.empty())
-        {
-            ui->actionSpeedtest_Selected->setEnabled(false);
-            ui->actionUrl_Test_Selected->setEnabled(false);
-            ui->menu_resolve_selected->setEnabled(false);
-            ui->actionResolve_Selected_Out_IP->setEnabled(false);
-        } else
-        {
-            ui->actionSpeedtest_Selected->setEnabled(true);
-            ui->actionUrl_Test_Selected->setEnabled(true);
-            ui->menu_resolve_selected->setEnabled(true);
-            ui->actionResolve_Selected_Out_IP->setEnabled(true);
-        }
-        if (!speedtestRunning.tryLock()) {
-            ui->menu_server->addAction(ui->menu_stop_testing);
-        } else {
-            speedtestRunning.unlock();
-            ui->menu_server->removeAction(ui->menu_stop_testing);
-        }
-    });
+    );
+
     // Получение каталога удалённых профилей маршрутизации
     auto getRemoteRouteProfiles = [=, this]
         {
@@ -3047,93 +3095,462 @@ void MainWindow::on_masterLogBrowser_customContextMenuRequested(const QPoint &po
     menu->exec(ui->masterLogBrowser->viewport()->mapToGlobal(pos)); // 弹出菜单
 }
 
-void MainWindow::on_tabWidget_customContextMenuRequested(const QPoint &p) {
-    int clickedIndex = ui->tabWidget->tabBar()->tabAt(p);
-    if (clickedIndex == -1) {
-        auto* menu = new QMenu(this);
-        auto* addAction = new QAction(tr("Add new Group"), this);
-        connect(addAction, &QAction::triggered, this, [=,this]{
-            auto ent = Configs::dataManager->groupsRepo->NewGroup();
-            auto dialog = new DialogEditGroup(ent, this);
-            int ret = dialog->exec();
-            dialog->deleteLater();
+void MainWindow::on_tabWidget_customContextMenuRequested(
+    const QPoint& p)
+{
+    auto* tabBar =
+        ui->tabWidget->tabBar();
 
-            if (ret == QDialog::Accepted) {
-                Configs::dataManager->groupsRepo->AddGroup(ent);
-                MW_dialog_message(MwMessage::GroupsChanged, {});
+    const int clickedIndex =
+        tabBar->tabAt(p);
+
+
+    // =====================================================
+    // Clicked on empty tab-bar area
+    // =====================================================
+
+    if (clickedIndex == -1)
+    {
+        QMenu menu(this);
+
+
+        auto* addAction =
+            menu.addAction(
+                tr("Add new Group")
+            );
+
+
+        connect(
+            addAction,
+            &QAction::triggered,
+            this,
+            [this]()
+            {
+                auto group =
+                    Configs::dataManager
+                    ->groupsRepo
+                    ->NewGroup();
+
+
+                auto* dialog =
+                    new DialogEditGroup(
+                        group,
+                        this
+                    );
+
+
+                const int result =
+                    dialog->exec();
+
+
+                dialog->deleteLater();
+
+
+                if (result !=
+                    QDialog::Accepted)
+                {
+                    return;
+                }
+
+
+                Configs::dataManager
+                    ->groupsRepo
+                    ->AddGroup(group);
+
+
+                MW_dialog_message(
+                    MwMessage::GroupsChanged,
+                    {}
+                );
             }
-        });
+        );
 
-        menu->addAction(addAction);
-        menu->exec(ui->tabWidget->tabBar()->mapToGlobal(p));
+
+        menu.exec(
+            tabBar->mapToGlobal(p)
+        );
+
         return;
     }
 
-    ui->tabWidget->setCurrentIndex(clickedIndex);
-    auto* menu = new QMenu(this);
 
-    auto* addAction = new QAction(tr("Add new Group"), this);
-    auto* deleteAction = new QAction(tr("Delete selected Group"), this);
-    auto* editAction = new QAction(tr("Edit selected Group"), this);
-    connect(addAction, &QAction::triggered, this, [=,this]{
-        auto ent = Configs::GroupsRepo::NewGroup();
-        auto dialog = new DialogEditGroup(ent, this);
-        int ret = dialog->exec();
-        dialog->deleteLater();
+    // =====================================================
+    // Resolve clicked group
+    // =====================================================
 
-        if (ret == QDialog::Accepted) {
-            Configs::dataManager->groupsRepo->AddGroup(ent);
-            MW_dialog_message(MwMessage::GroupsChanged, {});
-        }
-    });
-    connect(deleteAction, &QAction::triggered, this, [=,this] {
-        auto id = Configs::dataManager->groupsRepo->GetGroupsTabOrder()[clickedIndex];
-        if (QMessageBox::question(this, tr("Confirmation"), tr("Remove %1?").arg(Configs::dataManager->groupsRepo->GetGroup(id)->name)) ==
-            QMessageBox::StandardButton::Yes) {
-            if (running != nullptr) {
-                if (running->gid == id) profile_stop(false, true, false);
-            }
-            Configs::dataManager->groupsRepo->DeleteGroup(id);
-            MW_dialog_message(MwMessage::GroupsChanged, {});
-        }
-    });
-    connect(editAction, &QAction::triggered, this, [=,this]{
-        auto id = Configs::dataManager->groupsRepo->GetGroupsTabOrder()[clickedIndex];
-        auto ent = Configs::dataManager->groupsRepo->GetGroup(id);
-        auto dialog = new DialogEditGroup(ent, this);
-        connect(dialog, &QDialog::finished, this, [=,this] {
-            if (dialog->result() == QDialog::Accepted) {
-                Configs::dataManager->groupsRepo->Save(ent);
-                MW_dialog_message(MwMessage::GroupsChanged, {});
-            }
+    const auto groupsOrder =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroupsTabOrder();
+
+
+    if (clickedIndex < 0 ||
+        clickedIndex >= groupsOrder.size())
+    {
+        return;
+    }
+
+
+    const int clickedGroupId =
+        groupsOrder[
+            clickedIndex
+        ];
+
+
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroup(
+            clickedGroupId
+        );
+
+
+    if (!group) {
+        return;
+    }
+
+
+    ui->tabWidget
+        ->setCurrentIndex(
+            clickedIndex
+        );
+
+
+    QMenu menu(this);
+
+
+    // =====================================================
+    // Add group
+    // =====================================================
+
+    auto* addAction =
+        menu.addAction(
+            tr("Add new Group")
+        );
+
+
+    connect(
+        addAction,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            auto newGroup =
+                Configs::GroupsRepo::
+                NewGroup();
+
+
+            auto* dialog =
+                new DialogEditGroup(
+                    newGroup,
+                    this
+                );
+
+
+            const int result =
+                dialog->exec();
+
+
             dialog->deleteLater();
-        });
-        dialog->show();
-    });
-    menu->addAction(ui->actionRefresh_Column_Widths);
-    menu->addAction(addAction);
-    menu->addAction(editAction);
-    auto group = Configs::dataManager->groupsRepo->GetGroup(Configs::dataManager->settingsRepo->current_group);
-    if (Configs::dataManager->groupsRepo->GetAllGroupIds().size() > 1) menu->addAction(deleteAction);
-    if (!group->Profiles().empty()) {
-        menu->addAction(ui->actionUrl_Test_Group);
-        menu->addAction(ui->actionSpeedtest_Group);
-        menu->addAction(ui->actionResolve_Out_IP);
-        menu->addAction(ui->menu_resolve_domain);
-        menu->addAction(ui->menu_clear_test_result);
-        menu->addAction(ui->menu_delete_repeat);
-        menu->addAction(ui->menu_remove_unavailable);
-        menu->addAction(ui->menu_remove_invalid);
+
+
+            if (result !=
+                QDialog::Accepted)
+            {
+                return;
+            }
+
+
+            Configs::dataManager
+                ->groupsRepo
+                ->AddGroup(
+                    newGroup
+                );
+
+
+            MW_dialog_message(
+                MwMessage::GroupsChanged,
+                {}
+            );
+        }
+    );
+
+
+    // =====================================================
+    // Delete group
+    // =====================================================
+
+    auto* deleteAction =
+        new QAction(
+            tr("Delete selected Group"),
+            &menu
+        );
+
+
+    connect(
+        deleteAction,
+        &QAction::triggered,
+        this,
+        [
+            this,
+            clickedGroupId
+        ]()
+        {
+            auto selectedGroup =
+                Configs::dataManager
+                ->groupsRepo
+                ->GetGroup(
+                    clickedGroupId
+                );
+
+
+            if (!selectedGroup) {
+                return;
+            }
+
+
+            const auto snapshot =
+                selectedGroup
+                ->Snapshot();
+
+
+            const auto answer =
+                QMessageBox::question(
+                    this,
+                    tr("Confirmation"),
+                    tr("Remove %1?")
+                    .arg(
+                        snapshot.name
+                    )
+                );
+
+
+            if (answer !=
+                QMessageBox::
+                StandardButton::Yes)
+            {
+                return;
+            }
+
+
+            if (running &&
+                running->gid ==
+                clickedGroupId)
+            {
+                profile_stop(
+                    false,
+                    true,
+                    false
+                );
+            }
+
+
+            Configs::dataManager
+                ->groupsRepo
+                ->DeleteGroup(
+                    clickedGroupId
+                );
+
+
+            MW_dialog_message(
+                MwMessage::GroupsChanged,
+                {}
+            );
+        }
+    );
+
+
+    // =====================================================
+    // Edit group
+    // =====================================================
+
+    auto* editAction =
+        new QAction(
+            tr("Edit selected Group"),
+            &menu
+        );
+
+
+    connect(
+        editAction,
+        &QAction::triggered,
+        this,
+        [
+            this,
+            clickedGroupId
+        ]()
+        {
+            auto selectedGroup =
+                Configs::dataManager
+                ->groupsRepo
+                ->GetGroup(
+                    clickedGroupId
+                );
+
+
+            if (!selectedGroup) {
+                return;
+            }
+
+
+            auto* dialog =
+                new DialogEditGroup(
+                    selectedGroup,
+                    this
+                );
+
+
+            connect(
+                dialog,
+                &QDialog::finished,
+                this,
+                [
+                    this,
+                    dialog,
+                    selectedGroup
+                ](int result)
+                {
+                    if (result ==
+                        QDialog::Accepted)
+                    {
+                        Configs::dataManager
+                            ->groupsRepo
+                            ->Save(
+                                selectedGroup
+                            );
+
+
+                        MW_dialog_message(
+                            MwMessage::
+                            GroupsChanged,
+                            {}
+                        );
+                    }
+
+
+                    dialog
+                        ->deleteLater();
+                }
+            );
+
+
+            dialog->show();
+        }
+    );
+
+
+    // =====================================================
+    // Common actions
+    // =====================================================
+
+    menu.addAction(
+        ui->actionRefresh_Column_Widths
+    );
+
+    // addAction is already present because it was created
+    // through menu.addAction().
+
+    menu.addAction(
+        editAction
+    );
+
+
+    if (Configs::dataManager
+        ->groupsRepo
+        ->GetAllGroupIds()
+        .size() > 1)
+    {
+        menu.addAction(
+            deleteAction
+        );
     }
-    if (!group->url.isEmpty()) menu->addAction(ui->menu_update_subscription);
-    if (!speedtestRunning.tryLock()) {
-        menu->addAction(ui->menu_stop_testing);
-    } else {
-        speedtestRunning.unlock();
-        menu->removeAction(ui->menu_stop_testing);
+
+
+    // =====================================================
+    // Immutable Group snapshot
+    // =====================================================
+
+    const auto groupSnapshot =
+        group->Snapshot();
+
+
+    if (!groupSnapshot
+        .profiles
+        .isEmpty())
+    {
+        menu.addAction(
+            ui->actionUrl_Test_Group
+        );
+
+        menu.addAction(
+            ui->actionSpeedtest_Group
+        );
+
+        menu.addAction(
+            ui->actionResolve_Out_IP
+        );
+
+        menu.addAction(
+            ui->menu_resolve_domain
+        );
+
+        menu.addAction(
+            ui->menu_clear_test_result
+        );
+
+        menu.addAction(
+            ui->menu_delete_repeat
+        );
+
+        menu.addAction(
+            ui->menu_remove_unavailable
+        );
+
+        menu.addAction(
+            ui->menu_remove_invalid
+        );
     }
-    menu->exec(ui->tabWidget->tabBar()->mapToGlobal(p));
-    return;
+
+
+    // =====================================================
+    // Subscription action
+    // =====================================================
+
+    if (!groupSnapshot
+        .url
+        .isEmpty())
+    {
+        menu.addAction(
+            ui->menu_update_subscription
+        );
+    }
+
+
+    // =====================================================
+    // Stop testing
+    // =====================================================
+
+    const bool isTesting =
+        speedtestRunning.load(
+            std::memory_order_acquire
+        );
+
+
+    if (isTesting)
+    {
+        menu.addAction(
+            ui->menu_stop_testing
+        );
+    }
+
+
+    // =====================================================
+    // Show
+    // =====================================================
+
+    menu.exec(
+        tabBar->mapToGlobal(p)
+    );
 }
 
 // eventFilter
