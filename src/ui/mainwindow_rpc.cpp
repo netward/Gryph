@@ -1443,8 +1443,25 @@ void MainWindow::profile_start(int _id) {
         return;
     }
 
-    auto group = Configs::dataManager->groupsRepo->GetGroup(ent->gid);
-    if (group == nullptr || group->archive) return;
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroup(
+            ent->gid
+        );
+
+    if (!group)
+    {
+        return;
+    }
+
+    const auto groupSnapshot =
+        group->Snapshot();
+
+    if (groupSnapshot.archive)
+    {
+        return;
+    }
 
     auto result = Configs::BuildSingBoxConfig(ent);
     if (!result->error.isEmpty()) {

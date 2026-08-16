@@ -39,17 +39,47 @@ DialogManageGroups::~DialogManageGroups() {
     delete ui;
 }
 
-void DialogManageGroups::on_add_clicked() {
-    auto ent = Configs::dataManager->groupsRepo->NewGroup();
-    auto dialog = new DialogEditGroup(ent, this);
-    int ret = dialog->exec();
+void DialogManageGroups::on_add_clicked()
+{
+    auto ent =
+        Configs::dataManager
+        ->groupsRepo
+        ->NewGroup();
+
+    auto* dialog =
+        new DialogEditGroup(
+            ent,
+            this
+        );
+
+    const int ret =
+        dialog->exec();
+
     dialog->deleteLater();
 
-    if (ret == QDialog::Accepted) {
-        Configs::dataManager->groupsRepo->AddGroup(ent);
-        AddGroupToListIfExist(ent->id);
-        MW_dialog_message(MwMessage::GroupsChanged, {});
+    if (ret != QDialog::Accepted)
+    {
+        return;
     }
+
+    const bool added =
+        Configs::dataManager
+        ->groupsRepo
+        ->AddGroup(ent);
+
+    if (!added)
+    {
+        return;
+    }
+
+    AddGroupToListIfExist(
+        ent->Id()
+    );
+
+    MW_dialog_message(
+        MwMessage::GroupsChanged,
+        {}
+    );
 }
 
 void DialogManageGroups::on_update_all_clicked() {

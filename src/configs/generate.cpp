@@ -5,11 +5,9 @@
 #include <QApplication>
 #include <QFileInfo>
 
-
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
 #include "include/database/RoutesRepo.h"
-
 
 #include "include/database/entities/Profile.h"
 #include "include/sys/linux/systemChecks.h"
@@ -264,16 +262,52 @@ namespace Configs {
             for (const auto &addr: entAddrs) preReqs->dnsDeps->directDomains << addr;
             preReqs->dnsDeps->needDirectDnsRules = true;
         }
-        if (auto group = Configs::dataManager->groupsRepo->GetGroup(ctx->ent->gid); group != nullptr)
+        if (auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(ctx->ent->gid);
+            group != nullptr)
         {
+            const auto groupSnapshot =
+                group->Snapshot();
+
+
             QList<int> groupEnts;
-            if (auto frontEntID = group->front_proxy_id; frontEntID >= 0) groupEnts << frontEntID;
-            if (auto landingEntID = group->landing_proxy_id; landingEntID >= 0) groupEnts << landingEntID;
-            auto addrs = getEntDomains(groupEnts, ctx->error);
-            if (!ctx->error.isEmpty()) return;
-            for (const auto &addr: addrs)
+
+
+            if (groupSnapshot.front_proxy_id >= 0)
             {
-                preReqs->dnsDeps->directDomains << addr;
+                groupEnts <<
+                    groupSnapshot.front_proxy_id;
+            }
+
+
+            if (groupSnapshot.landing_proxy_id >= 0)
+            {
+                groupEnts <<
+                    groupSnapshot.landing_proxy_id;
+            }
+
+
+            auto addrs =
+                getEntDomains(
+                    groupEnts,
+                    ctx->error
+                );
+
+
+            if (!ctx->error.isEmpty())
+            {
+                return;
+            }
+
+
+            for (const auto& addr : addrs)
+            {
+                preReqs
+                    ->dnsDeps
+                    ->directDomains
+                    << addr;
             }
         }
 
@@ -1084,33 +1118,103 @@ namespace Configs {
     void buildOutboundsSection(std::shared_ptr<BuildSingBoxConfigContext> &ctx) {
         // First, our own ent
         QList<int> entIDs;
-        auto group = Configs::dataManager->groupsRepo->GetGroup(ctx->ent->gid);
-        if (group == nullptr)
+        auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(
+                ctx->ent->gid
+            );
+
+
+        if (!group)
         {
-            ctx->error = "No group found for ent, data is corrupted";
+            ctx->error =
+                "No group found for ent, "
+                "data is corrupted";
+
             return;
         }
-        if (group->landing_proxy_id >= 0) entIDs.prepend(group->landing_proxy_id);
+
+
+        const auto groupSnapshot =
+            group->Snapshot();
+
+
+        if (groupSnapshot.landing_proxy_id >= 0)
+        {
+            entIDs.prepend(
+                groupSnapshot.landing_proxy_id
+            );
+        }
+
+
         if (ctx->ent->type == "chain")
         {
-            auto chain = ctx->ent->Chain();
-            if (chain == nullptr)
+            auto chain =
+                ctx->ent->Chain();
+
+
+            if (!chain)
             {
-                ctx->error = "Ent is nullptr after cast to chain, data is corrupted";
+                ctx->error =
+                    "Ent is nullptr after cast "
+                    "to chain, data is corrupted";
+
                 return;
             }
-            for (int idx = chain->list.size()-1; idx >=0; idx--) entIDs.append(chain->list[idx]);
-        } else
-        {
-            entIDs.append(ctx->ent->id);
-        }
-        if (group->front_proxy_id >= 0) entIDs.append(group->front_proxy_id);
-        const bool warpWrap = dataManager->settingsRepo->enable_warp;
-        if (warpWrap) {
-            entIDs.prepend(warpProfileID);
-        }
-        buildOutboundChain(ctx, entIDs, "config", true, true, -1, -1, 0, warpWrap);
 
+
+            for (int idx =
+                chain->list.size() - 1;
+                idx >= 0;
+                --idx)
+            {
+                entIDs.append(
+                    chain->list[idx]
+                );
+            }
+        }
+        else
+        {
+            entIDs.append(
+                ctx->ent->id
+            );
+        }
+
+
+        if (groupSnapshot.front_proxy_id >= 0)
+        {
+            entIDs.append(
+                groupSnapshot.front_proxy_id
+            );
+        }
+
+
+        const bool warpWrap =
+            dataManager
+            ->settingsRepo
+            ->enable_warp;
+
+
+        if (warpWrap)
+        {
+            entIDs.prepend(
+                warpProfileID
+            );
+        }
+
+
+        buildOutboundChain(
+            ctx,
+            entIDs,
+            "config",
+            true,
+            true,
+            -1,
+            -1,
+            0,
+            warpWrap
+        );
         // A chain-typed profile wrapper isn't in entIDs (only its hops are),
         // so the chainGroup just built doesn't include it. Add it so the
         // chain's row in the proxy list also accumulates traffic.
@@ -1712,13 +1816,42 @@ namespace Configs {
                 }
             }
             auto IDs = unwrapChain(item->id);
-            auto group = Configs::dataManager->groupsRepo->GetGroup(item->gid);
-            if (group == nullptr) {
-                res->error = "Null group on profile, data is corrupted";
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->GetGroup(
+                    item->gid
+                );
+
+
+            if (!group)
+            {
+                res->error =
+                    "Null group on profile, "
+                    "data is corrupted";
+
                 return res;
             }
-            if (group->landing_proxy_id >= 0) IDs.prepend(group->landing_proxy_id);
-            if (group->front_proxy_id >= 0) IDs.append(group->front_proxy_id);
+
+
+            const auto groupSnapshot =
+                group->Snapshot();
+
+
+            if (groupSnapshot.landing_proxy_id >= 0)
+            {
+                IDs.prepend(
+                    groupSnapshot.landing_proxy_id
+                );
+            }
+
+
+            if (groupSnapshot.front_proxy_id >= 0)
+            {
+                IDs.append(
+                    groupSnapshot.front_proxy_id
+                );
+            }
             int singToXrayPort = -1;
             int xrayToSingPort = -1;
             if (item->outbound->IsXray()) singToXrayPort = xrayPorts[xrayPortIdx++];

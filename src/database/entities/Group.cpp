@@ -1,4 +1,4 @@
-#include <include/database/entities/Group.h>
+#include "include/database/entities/Group.h"
 
 #include "include/database/ProfilesRepo.h"
 #include "include/global/Configs.hpp"
@@ -11,6 +11,379 @@
 
 namespace Configs
 {
+    int Group::Id() const
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+        return id;
+    }
+
+
+    void Group::LoadSnapshot(
+        const GroupSnapshot& snapshot)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        id =
+            snapshot.id;
+
+
+        archive =
+            snapshot.archive;
+
+
+        skip_auto_update =
+            snapshot.skip_auto_update;
+
+
+        auto_clear_unavailable =
+            snapshot.auto_clear_unavailable;
+
+
+        name =
+            snapshot.name;
+
+
+        url =
+            snapshot.url;
+
+
+        info =
+            snapshot.info;
+
+
+        sub_last_update =
+            snapshot.sub_last_update;
+
+
+        front_proxy_id =
+            snapshot.front_proxy_id;
+
+
+        landing_proxy_id =
+            snapshot.landing_proxy_id;
+
+
+        column_width =
+            snapshot.column_width;
+
+
+        profiles =
+            snapshot.profiles;
+
+
+        scroll_last_profile =
+            snapshot.scroll_last_profile;
+
+
+        test_sort_by =
+            snapshot.test_sort_by;
+
+
+        traffic_sort_by =
+            snapshot.traffic_sort_by;
+
+
+        test_items_to_show =
+            snapshot.test_items_to_show;
+    }
+
+
+    bool Group::TryAssignId(
+        int newId)
+    {
+        if (newId < 0) {
+            return false;
+        }
+
+
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        if (id >= 0) {
+            return false;
+        }
+
+
+        id =
+            newId;
+
+
+        return true;
+    }
+
+
+    // =========================================================
+    // General settings
+    // =========================================================
+
+    void Group::SetArchive(
+        bool value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        archive =
+            value;
+    }
+
+
+    void Group::SetAutoClearUnavailable(
+        bool value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        auto_clear_unavailable =
+            value;
+    }
+
+
+    void Group::SetSkipAutoUpdate(
+        bool value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        skip_auto_update =
+            value;
+    }
+
+
+    void Group::UpdateEditableSettings(
+        const QString& newName,
+        const QString& newUrl,
+        bool autoClearUnavailable,
+        bool skipAutoUpdate,
+        int frontProxyId,
+        int landingProxyId)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        name =
+            newName;
+
+
+        url =
+            newUrl;
+
+
+        auto_clear_unavailable =
+            autoClearUnavailable;
+
+
+        skip_auto_update =
+            skipAutoUpdate;
+
+
+        front_proxy_id =
+            frontProxyId;
+
+
+        landing_proxy_id =
+            landingProxyId;
+    }
+
+
+    void Group::SetProxyIds(
+        int frontProxyId,
+        int landingProxyId)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        front_proxy_id =
+            frontProxyId;
+
+
+        landing_proxy_id =
+            landingProxyId;
+    }
+
+
+    // =========================================================
+    // Column widths
+    // =========================================================
+
+    void Group::SetColumnWidths(
+        const QList<int>& widths)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        column_width =
+            widths;
+    }
+
+
+    void Group::ClearColumnWidths()
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        column_width.clear();
+    }
+
+
+    void Group::SetCalculatedColumnWidths(
+        const QList<int>& widths)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        calculated_column_width =
+            widths;
+    }
+
+
+    QList<int>
+        Group::CalculatedColumnWidths() const
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        return calculated_column_width;
+    }
+
+
+    void Group::ResetCalculatedColumnWidth(
+        int column)
+    {
+        if (column < 0) {
+            return;
+        }
+
+
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        if (column >=
+            calculated_column_width.size())
+        {
+            return;
+        }
+
+
+        calculated_column_width[
+            column
+        ] = 0;
+    }
+
+
+    // =========================================================
+    // UI/list state
+    // =========================================================
+
+    void Group::SetScrollLastProfile(
+        int profileId)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        scroll_last_profile =
+            profileId;
+    }
+
+
+    void Group::SetSelectedProfilesIdIdxPairs(
+        const QList<
+        std::pair<int, int>
+        >& value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        selectedProfilesIdIdxPairs =
+            value;
+    }
+
+
+    QList<std::pair<int, int>>
+        Group::SelectedProfilesIdIdxPairs() const
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        return selectedProfilesIdIdxPairs;
+    }
+
+
+    // =========================================================
+    // Sort/display
+    // =========================================================
+
+    void Group::SetTestSortBy(
+        testBy value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        test_sort_by =
+            value;
+    }
+
+
+    void Group::SetTrafficSortBy(
+        trafficBy value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        traffic_sort_by =
+            value;
+    }
+
+
+    void Group::SetTestItemsToShow(
+        testShowItems value)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        test_items_to_show =
+            value;
+    }
+
     void Group::clearCalculatedColumnWidth()
     {
         QMutexLocker locker(&mutex);

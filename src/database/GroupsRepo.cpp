@@ -125,26 +125,113 @@ namespace Configs {
         return json;
     }
 
-    std::shared_ptr<Group> GroupsRepo::groupFromJson(const QJsonObject& json) const {
-        auto group = std::make_shared<Group>();
-        
-        group->id = json["id"].toInt();
-        group->archive = json["archive"].toBool();
-        group->skip_auto_update = json["skip_auto_update"].toBool();
-        group->auto_clear_unavailable = json["auto_clear_unavailable"].toBool();
-        group->name = json["name"].toString();
-        group->url = json["url"].toString();
-        group->info = json["info"].toString();
-        group->sub_last_update = json["sub_last_update"].toVariant().toLongLong();
-        group->front_proxy_id = json["front_proxy_id"].toInt();
-        group->landing_proxy_id = json["landing_proxy_id"].toInt();
-        group->column_width = QJsonArray2QListInt(json["column_width"].toArray());
-        group->profiles = QJsonArray2QListInt(json["profiles"].toArray());
-        group->scroll_last_profile = json["scroll_last_profile"].toInt(-1);
-        group->test_sort_by = static_cast<testBy>(json["test_sort_by"].toInt(0));
-        group->traffic_sort_by = static_cast<trafficBy>(json["traffic_sort_by"].toInt(0));
-        group->test_items_to_show = static_cast<testShowItems>(json["test_items_to_show"].toInt(0));
-        
+    std::shared_ptr<Group>
+        GroupsRepo::groupFromJson(
+            const QJsonObject& json) const
+    {
+        auto group =
+            std::make_shared<Group>();
+
+
+        GroupSnapshot snapshot;
+
+
+        snapshot.id =
+            json["id"]
+            .toInt(-1);
+
+
+        snapshot.archive =
+            json["archive"]
+            .toBool();
+
+
+        snapshot.skip_auto_update =
+            json["skip_auto_update"]
+            .toBool();
+
+
+        snapshot.auto_clear_unavailable =
+            json["auto_clear_unavailable"]
+            .toBool();
+
+
+        snapshot.name =
+            json["name"]
+            .toString();
+
+
+        snapshot.url =
+            json["url"]
+            .toString();
+
+
+        snapshot.info =
+            json["info"]
+            .toString();
+
+
+        snapshot.sub_last_update =
+            json["sub_last_update"]
+            .toVariant()
+            .toLongLong();
+
+
+        snapshot.front_proxy_id =
+            json["front_proxy_id"]
+            .toInt(-1);
+
+
+        snapshot.landing_proxy_id =
+            json["landing_proxy_id"]
+            .toInt(-1);
+
+
+        snapshot.column_width =
+            QJsonArray2QListInt(
+                json["column_width"]
+                .toArray()
+            );
+
+
+        snapshot.profiles =
+            QJsonArray2QListInt(
+                json["profiles"]
+                .toArray()
+            );
+
+
+        snapshot.scroll_last_profile =
+            json["scroll_last_profile"]
+            .toInt(-1);
+
+
+        snapshot.test_sort_by =
+            static_cast<testBy>(
+                json["test_sort_by"]
+                .toInt(0)
+                );
+
+
+        snapshot.traffic_sort_by =
+            static_cast<trafficBy>(
+                json["traffic_sort_by"]
+                .toInt(0)
+                );
+
+
+        snapshot.test_items_to_show =
+            static_cast<testShowItems>(
+                json["test_items_to_show"]
+                .toInt(0)
+                );
+
+
+        group->LoadSnapshot(
+            snapshot
+        );
+
+
         return group;
     }
 
@@ -468,23 +555,11 @@ namespace Configs {
         // Assign ID under Group::mutex
         // -------------------------------------------------
 
+        if (!group->TryAssignId(
+            newId))
         {
-            QMutexLocker groupLocker(
-                &group->mutex
-            );
-
-
-            // Another caller theoretically could have
-            // assigned this object meanwhile.
-            if (group->id >= 0) {
-                return false;
-            }
-
-
-            group->id =
-                newId;
+            return false;
         }
-
 
         // -------------------------------------------------
         // Immutable snapshot

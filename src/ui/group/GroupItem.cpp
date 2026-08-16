@@ -54,7 +54,23 @@ GroupItem::GroupItem(QWidget *parent, const std::shared_ptr<Configs::Group> &ent
     if (ent == nullptr) return;
 
     connect(this, &GroupItem::edit_clicked, this, &GroupItem::on_edit_clicked);
-    connect(Subscription::groupUpdater, &Subscription::GroupUpdater::asyncUpdateCallback, this, [=,this](int gid) { if (gid == this->ent->id) refresh_data(); });
+    connect(
+        Subscription::groupUpdater,
+        &Subscription::GroupUpdater::asyncUpdateCallback,
+        this,
+        [this](int gid)
+        {
+            if (!this->ent)
+            {
+                return;
+            }
+
+            if (gid == this->ent->Id())
+            {
+                refresh_data();
+            }
+        }
+    );
 
     refresh_data();
 }
@@ -63,46 +79,147 @@ GroupItem::~GroupItem() {
     delete ui;
 }
 
-void GroupItem::refresh_data() {
-    ui->name->setText(ent->name);
+void GroupItem::refresh_data()
+{
+    if (!ent)
+    {
+        return;
+    }
 
-    auto type = ent->url.isEmpty() ? tr("Basic") : tr("Subscription");
-    if (ent->archive) type = tr("Archive") + " " + type;
-    type += " (" + Int2String(ent->Profiles().length()) + ")";
-    ui->type->setText(type);
 
-    if (ent->url.isEmpty()) {
+    const auto snapshot =
+        ent->Snapshot();
+
+
+    ui->name->setText(
+        snapshot.name
+    );
+
+
+    QString type =
+        snapshot.url.isEmpty()
+        ? tr("Basic")
+        : tr("Subscription");
+
+
+    if (snapshot.archive)
+    {
+        type =
+            tr("Archive")
+            + " "
+            + type;
+    }
+
+
+    type +=
+        " ("
+        + Int2String(
+            snapshot.profiles.size()
+        )
+        + ")";
+
+
+    ui->type->setText(
+        type
+    );
+
+
+    if (snapshot.url.isEmpty())
+    {
         ui->url->hide();
         ui->subinfo->hide();
         ui->update_sub->hide();
-    } else {
-        ui->url->setText(ent->url);
+    }
+    else
+    {
+        ui->url->show();
+
+        ui->url->setText(
+            snapshot.url
+        );
+
+
         QStringList info;
-        if (ent->sub_last_update != 0) {
-            info << tr("Last update: %1").arg(DisplayTime(ent->sub_last_update, QLocale::ShortFormat));
+
+
+        if (snapshot.sub_last_update != 0)
+        {
+            info <<
+                tr("Last update: %1")
+                .arg(
+                    DisplayTime(
+                        snapshot.sub_last_update,
+                        QLocale::ShortFormat
+                    )
+                );
         }
-        auto subinfo = ParseSubInfo(ent->info);
-        if (!ent->info.isEmpty()) {
-            info << subinfo;
+
+
+        if (!snapshot.info.isEmpty())
+        {
+            const QString subinfo =
+                ParseSubInfo(
+                    snapshot.info
+                );
+
+
+            if (!subinfo.isEmpty())
+            {
+                info <<
+                    subinfo;
+            }
         }
-        if (info.isEmpty()) {
+
+
+        if (info.isEmpty())
+        {
             ui->subinfo->hide();
-        } else {
+        }
+        else
+        {
             ui->subinfo->show();
-            ui->subinfo->setText(info.join(" | "));
+
+            ui->subinfo->setText(
+                info.join(" | ")
+            );
         }
     }
+
+
     runOnThread(
-        [=,this] {
+        [=, this]
+        {
             adjustSize();
-            item->setSizeHint(sizeHint());
-            dynamic_cast<QWidget *>(parent())->adjustSize();
+
+            item->setSizeHint(
+                sizeHint()
+            );
+
+            dynamic_cast<QWidget*>(
+                parent()
+                )->adjustSize();
         },
-        this);
+        this
+    );
 }
 
-void GroupItem::on_update_sub_clicked() {
-    Subscription::groupUpdater->AsyncUpdate(ent->url, ent->id);
+void GroupItem::on_update_sub_clicked()
+{
+    if (!ent)
+    {
+        return;
+    }
+
+
+    const auto snapshot =
+        ent->Snapshot();
+
+
+    Subscription::groupUpdater
+        ->AsyncUpdate(
+            snapshot.url,
+            snapshot.id
+        );
 }
 
 void GroupItem::on_edit_clicked() {
@@ -118,13 +235,60 @@ void GroupItem::on_edit_clicked() {
     dialog->show();
 }
 
-void GroupItem::on_remove_clicked() {
-    if (Configs::dataManager->groupsRepo->GetAllGroupIds().size() <= 1) return;
-    if (QMessageBox::question(this, tr("Confirmation"), tr("Remove %1?").arg(ent->name)) ==
-        QMessageBox::StandardButton::Yes) {
-        MainWindowApi::StopProfile(false, true, false);
-        Configs::dataManager->groupsRepo->DeleteGroup(ent->id);
-        MW_dialog_message(MwMessage::GroupsChanged, {});
-        delete item;
+void GroupItem::on_remove_clicked()
+{
+    if (!ent)
+    {
+        return;
     }
+
+
+    if (Configs::dataManager
+        ->groupsRepo
+        ->GetAllGroupIds()
+        .size() <= 1)
+    {
+        return;
+    }
+
+
+    const auto snapshot =
+        ent->Snapshot();
+
+
+    if (QMessageBox::question(
+        this,
+        tr("Confirmation"),
+        tr("Remove %1?")
+        .arg(
+            snapshot.name
+        )
+    )
+        != QMessageBox::StandardButton::Yes)
+    {
+        return;
+    }
+
+
+    MainWindowApi::StopProfile(
+        false,
+        true,
+        false
+    );
+
+
+    Configs::dataManager
+        ->groupsRepo
+        ->DeleteGroup(
+            snapshot.id
+        );
+
+
+    MW_dialog_message(
+        MwMessage::GroupsChanged,
+        {}
+    );
+
+
+    delete item;
 }

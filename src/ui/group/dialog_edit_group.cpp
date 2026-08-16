@@ -21,54 +21,259 @@
         }, \
         this);
 
-DialogEditGroup::DialogEditGroup(const std::shared_ptr<Configs::Group> &ent, QWidget *parent) : QDialog(parent), ui(new Ui::DialogEditGroup) {
+DialogEditGroup::DialogEditGroup(
+    const std::shared_ptr<Configs::Group>& ent,
+    QWidget* parent)
+    :
+    QDialog(parent),
+    ui(new Ui::DialogEditGroup)
+{
     ui->setupUi(this);
+
     this->ent = ent;
 
-    connect(ui->type, &QComboBox::currentIndexChanged, this, [=,this](int index) {
-        ui->cat_sub->setHidden(index == 0);
-        ADJUST_SIZE
-    });
 
-    ui->name->setText(ent->name);
-    ui->auto_clear_unavailable->setChecked(ent->auto_clear_unavailable);
-    ui->skip_auto_update->setChecked(ent->skip_auto_update);
-    ui->url->setText(ent->url);
-    ui->type->setCurrentIndex(ent->url.isEmpty() ? 0 : 1);
-    ui->type->currentIndexChanged(ui->type->currentIndex());
-    ui->cat_share->setVisible(false);
-    if (Configs::dataManager->profilesRepo->GetProfile(ent->front_proxy_id) == nullptr) {
-        ent->front_proxy_id = -1;
-        Configs::dataManager->groupsRepo->Save(ent);
+    if (!ent)
+    {
+        reject();
+        return;
     }
-    if (Configs::dataManager->profilesRepo->GetProfile(ent->landing_proxy_id) == nullptr) {
-        ent->landing_proxy_id = -1;
-        Configs::dataManager->groupsRepo->Save(ent);
-    }
-    CACHE.front_proxy = ent->front_proxy_id;
-    LANDING.landing_proxy = ent->landing_proxy_id;
 
-    if (ent->id >= 0) { // already a group
-        ui->type->setDisabled(true);
-        if (!ent->Profiles().isEmpty()) {
-            ui->cat_share->setVisible(true);
+
+    const auto snapshot =
+        ent->Snapshot();
+
+
+    connect(
+        ui->type,
+        &QComboBox::currentIndexChanged,
+        this,
+        [this](int index)
+        {
+            ui->cat_sub
+                ->setHidden(
+                    index == 0
+                );
+
+            ADJUST_SIZE
+        }
+    );
+
+
+    // =====================================================
+    // General group settings
+    // =====================================================
+
+    ui->name->setText(
+        snapshot.name
+    );
+
+
+    ui->auto_clear_unavailable
+        ->setChecked(
+            snapshot
+            .auto_clear_unavailable
+        );
+
+
+    ui->skip_auto_update
+        ->setChecked(
+            snapshot
+            .skip_auto_update
+        );
+
+
+    ui->url->setText(
+        snapshot.url
+    );
+
+
+    ui->type->setCurrentIndex(
+        snapshot.url.isEmpty()
+        ? 0
+        : 1
+    );
+
+
+    ui->type->currentIndexChanged(
+        ui->type->currentIndex()
+    );
+
+
+    ui->cat_share
+        ->setVisible(false);
+
+
+    // =====================================================
+    // Front / landing proxies
+    // =====================================================
+
+    int frontProxyId =
+        snapshot.front_proxy_id;
+
+
+    int landingProxyId =
+        snapshot.landing_proxy_id;
+
+
+    if (frontProxyId >= 0 &&
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfile(
+            frontProxyId
+        ) == nullptr)
+    {
+        frontProxyId =
+            -1;
+    }
+
+
+    if (landingProxyId >= 0 &&
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfile(
+            landingProxyId
+        ) == nullptr)
+    {
+        landingProxyId =
+            -1;
+    }
+
+
+    // Persist corrected proxy IDs only if something
+    // actually changed.
+    if (frontProxyId !=
+        snapshot.front_proxy_id
+        ||
+        landingProxyId !=
+        snapshot.landing_proxy_id)
+    {
+        ent->SetProxyIds(
+            frontProxyId,
+            landingProxyId
+        );
+
+
+        Configs::dataManager
+            ->groupsRepo
+            ->Save(ent);
+    }
+
+
+    CACHE.front_proxy =
+        frontProxyId;
+
+
+    LANDING.landing_proxy =
+        landingProxyId;
+
+
+    // =====================================================
+    // Existing group
+    // =====================================================
+
+    if (snapshot.id >= 0)
+    {
+        ui->type
+            ->setDisabled(true);
+
+
+        if (!snapshot
+            .profiles
+            .isEmpty())
+        {
+            ui->cat_share
+                ->setVisible(true);
         }
     }
 
-    auto proxyListRaw = Configs::dataManager->profilesRepo->GetAllProfileIDNameMapped();
-    QHash<int, QString> idToName;
-    idToName.reserve(proxyListRaw.size());
-    for (const auto& [id, name] : proxyListRaw) idToName.insert(id, name);
-    QList<std::pair<int, QString>> proxyList;
-    auto groupIDs = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
-    for (auto groupID: groupIDs) {
-        auto group = Configs::dataManager->groupsRepo->GetGroup(groupID);
-        if (!group) continue;
-        const QString prefix = "[" + group->name + "] ";
-        for (int profileID : group->profiles) {
-            auto it = idToName.constFind(profileID);
-            if (it == idToName.constEnd()) continue;
-            proxyList << std::make_pair(profileID, prefix + it.value());
+
+    // =====================================================
+    // Build proxy list
+    // =====================================================
+
+    const auto proxyListRaw =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetAllProfileIDNameMapped();
+
+
+    QHash<int, QString>
+        idToName;
+
+
+    idToName.reserve(
+        proxyListRaw.size()
+    );
+
+
+    for (const auto& [id, name] :
+        proxyListRaw)
+    {
+        idToName.insert(
+            id,
+            name
+        );
+    }
+
+
+    QList<std::pair<int, QString>>
+        proxyList;
+
+
+    const auto groupIDs =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroupsTabOrder();
+
+
+    for (const int groupID :
+    groupIDs)
+    {
+        auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(
+                groupID
+            );
+
+
+        if (!group) {
+            continue;
+        }
+
+
+        const auto groupSnapshot =
+            group->Snapshot();
+
+
+        const QString prefix =
+            "["
+            + groupSnapshot.name
+            + "] ";
+
+
+        for (const int profileID :
+        groupSnapshot.profiles)
+        {
+            const auto it =
+                idToName.constFind(
+                    profileID
+                );
+
+
+            if (it ==
+                idToName.constEnd())
+            {
+                continue;
+            }
+
+
+            proxyList <<
+                std::make_pair(
+                    profileID,
+                    prefix + it.value()
+                );
         }
     }
     QStringList proxyNameList;
@@ -207,19 +412,60 @@ int DialogEditGroup::resolve_proxy_selection(QComboBox *combo, int fallback) con
     return fallback;
 }
 
-void DialogEditGroup::accept() {
-    if (ent->id >= 0) { // already a group
-        if (!ent->url.isEmpty() && ui->url->text().isEmpty()) {
-            MessageBoxWarning(tr("Warning"), tr("Please input URL"));
+void DialogEditGroup::accept()
+{
+    const auto oldState =
+        ent->Snapshot();
+
+
+    if (oldState.id >= 0)
+    {
+        if (!oldState.url.isEmpty() &&
+            ui->url
+            ->text()
+            .isEmpty())
+        {
+            MessageBoxWarning(
+                tr("Warning"),
+                tr("Please input URL")
+            );
+
             return;
         }
     }
-    ent->name = ui->name->text();
-    ent->auto_clear_unavailable = ui->auto_clear_unavailable->isChecked();
-    ent->url = ui->url->text();
-    ent->skip_auto_update = ui->skip_auto_update->isChecked();
-    ent->front_proxy_id = resolve_proxy_selection(ui->front_proxy, CACHE.front_proxy);
-    ent->landing_proxy_id = resolve_proxy_selection(ui->landing_proxy, LANDING.landing_proxy);
+
+
+    const int frontProxyId =
+        resolve_proxy_selection(
+            ui->front_proxy,
+            CACHE.front_proxy
+        );
+
+
+    const int landingProxyId =
+        resolve_proxy_selection(
+            ui->landing_proxy,
+            LANDING.landing_proxy
+        );
+
+
+    ent->UpdateEditableSettings(
+        ui->name->text(),
+
+        ui->url->text(),
+
+        ui->auto_clear_unavailable
+        ->isChecked(),
+
+        ui->skip_auto_update
+        ->isChecked(),
+
+        frontProxyId,
+
+        landingProxyId
+    );
+
+
     QDialog::accept();
 }
 
@@ -228,7 +474,15 @@ QString DialogEditGroup::get_proxy_name(int id) {
     if (auto profile = Configs::dataManager->profilesRepo->GetProfile(id)) {
         auto group = Configs::dataManager->groupsRepo->GetGroup(profile->gid);
         if (group == nullptr) return "INVALID";
-        return QString("[" + group->name + "] ") + profile->name;
+        const auto snapshot =
+            group->Snapshot();
+
+        return QString(
+            "["
+            + snapshot.name
+            + "] "
+        )
+            + profile->name;
     }
     return "INVALID";
 }

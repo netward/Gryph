@@ -472,48 +472,156 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionResized, this, [=, this](int, int, int) {
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
         if (Configs::dataManager->settingsRepo->refreshing_group || group == nullptr) return;
-        group->column_width.clear();
-        for (int i = 0; i < ui->profilesTableView->horizontalHeader()->count(); i++) {
-            group->column_width.push_back(ui->profilesTableView->horizontalHeader()->sectionSize(i));
+        QList<int> widths;
+
+
+        auto* header =
+            ui->profilesTableView
+            ->horizontalHeader();
+
+
+        widths.reserve(
+            header->count()
+        );
+
+
+        for (int i = 0;
+            i < header->count();
+            ++i)
+        {
+            widths.append(
+                header->sectionSize(i)
+            );
         }
-        Configs::dataManager->groupsRepo->Save(Configs::dataManager->groupsRepo->CurrentGroup());
+
+
+        group->SetColumnWidths(
+            widths
+        );
+
+
+        Configs::dataManager
+            ->groupsRepo
+            ->Save(group);
     });
     // Контекстное меню заголовка:
     //  столбец 3 — состав и сортировка результатов тестирования;
     //  столбец 4 — способ сортировки трафика.
     ui->profilesTableView->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(ui->profilesTableView->horizontalHeader(), &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
+        
         auto* header = ui->profilesTableView->horizontalHeader();
         int columnIndex = header->logicalIndexAt(pos);
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
         if (group == nullptr) return;
+        const auto groupSnapshot =
+            group->Snapshot();
         if (columnIndex == 3) {
             QMenu menu(this);
             auto* includeLabel = menu.addAction(tr("Include:"));
             includeLabel->setEnabled(false);
 
-            auto* actionShowOutIP = menu.addAction(tr("Out IP"));
-            actionShowOutIP->setCheckable(true);
-            actionShowOutIP->setChecked(group->test_items_to_show == Configs::testShowItems::all ||
-                group->test_items_to_show == Configs::testShowItems::ipOnly);
+            auto* actionShowOutIP =
+                menu.addAction(
+                    tr("Out IP")
+                );
 
-            auto* actionShowSpeed = menu.addAction(tr("Speed"));
-            actionShowSpeed->setCheckable(true);
-            actionShowSpeed->setChecked(group->test_items_to_show == Configs::testShowItems::all ||
-                group->test_items_to_show == Configs::testShowItems::speedOnly);
+            actionShowOutIP->setCheckable(
+                true
+            );
+
+            actionShowOutIP->setChecked(
+                groupSnapshot.test_items_to_show ==
+                Configs::testShowItems::all
+                ||
+                groupSnapshot.test_items_to_show ==
+                Configs::testShowItems::ipOnly
+            );
+
+
+            auto* actionShowSpeed =
+                menu.addAction(
+                    tr("Speed")
+                );
+
+            actionShowSpeed->setCheckable(
+                true
+            );
+
+            actionShowSpeed->setChecked(
+                groupSnapshot.test_items_to_show ==
+                Configs::testShowItems::all
+                ||
+                groupSnapshot.test_items_to_show ==
+                Configs::testShowItems::speedOnly
+            );
 
             // Преобразование состояния двух независимых checkbox-действий в одно перечисление test_items_to_show.
-            auto updateTestItemsToShow = [this, group, actionShowOutIP, actionShowSpeed] {
-                    const bool ip = actionShowOutIP->isChecked();
-                    const bool speed = actionShowSpeed->isChecked();
-                    if (ip && speed) group->test_items_to_show = Configs::testShowItems::all;
-                    else if (ip) group->test_items_to_show = Configs::testShowItems::ipOnly;
-                    else if (speed) group->test_items_to_show = Configs::testShowItems::speedOnly;
-                    else group->test_items_to_show = Configs::testShowItems::none;
-                    Configs::dataManager->groupsRepo->Save(group);
-                    if (group->calculated_column_width.size() > 3) {
-                        group->calculated_column_width[3] = 0;
+            auto updateTestItemsToShow =
+                [
+                    this,
+                    group,
+                    actionShowOutIP,
+                    actionShowSpeed
+                ]()
+                {
+                    const bool ip =
+                        actionShowOutIP
+                        ->isChecked();
+
+
+                    const bool speed =
+                        actionShowSpeed
+                        ->isChecked();
+
+
+                    Configs::testShowItems value;
+
+
+                    if (ip && speed) {
+
+                        value =
+                            Configs::
+                            testShowItems::all;
+
                     }
+                    else if (ip) {
+
+                        value =
+                            Configs::
+                            testShowItems::ipOnly;
+
+                    }
+                    else if (speed) {
+
+                        value =
+                            Configs::
+                            testShowItems::speedOnly;
+
+                    }
+                    else {
+
+                        value =
+                            Configs::
+                            testShowItems::none;
+                    }
+
+
+                    group->SetTestItemsToShow(
+                        value
+                    );
+
+
+                    group->ResetCalculatedColumnWidth(
+                        3
+                    );
+
+
+                    Configs::dataManager
+                        ->groupsRepo
+                        ->Save(group);
+
+
                     refresh_proxy_list();
                 };
 
@@ -535,15 +643,26 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 auto* act = menu.addAction(opt.label);
                 act->setData(opt.value);
                 act->setCheckable(true);
-                act->setChecked(static_cast<int>(group->test_sort_by) == opt.value);
+                act->setChecked(
+                    static_cast<int>(
+                        groupSnapshot.test_sort_by
+                        ) == opt.value
+                );
             }
 
             // exec() показывает модальное контекстное меню и возвращает выбранное действие
             auto* chosen = menu.exec(header->mapToGlobal(pos));
             if (chosen == nullptr || !chosen->data().isValid()) return;
 
-            int testSortBy = chosen->data().toInt();
-            group->test_sort_by = static_cast<Configs::testBy>(testSortBy);
+            const int testSortBy =
+                chosen->data().toInt();
+
+
+            group->SetTestSortBy(
+                static_cast<Configs::testBy>(
+                    testSortBy
+                    )
+            );
             Configs::dataManager->groupsRepo->Save(group);
             GroupSortAction action;
             action.method = GroupSortMethod::ByTestResult;
@@ -577,19 +696,56 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
                 { 2, tr("Uploaded") }
             };
 
-            for (const auto& opt : options) {
-                auto* act = menu.addAction(opt.label);
-                act->setData(opt.value);
-                act->setCheckable(true);
-                act->setChecked(static_cast<int>(group->traffic_sort_by) == opt.value);
+            for (const auto& opt : options)
+            {
+                auto* act =
+                    menu.addAction(
+                        opt.label
+                    );
+
+                act->setData(
+                    opt.value
+                );
+
+                act->setCheckable(
+                    true
+                );
+
+                act->setChecked(
+                    static_cast<int>(
+                        groupSnapshot.traffic_sort_by
+                        ) == opt.value
+                );
             }
 
-            auto* chosen = menu.exec(header->mapToGlobal(pos));
-            if (chosen == nullptr || !chosen->data().isValid()) return;
 
-            int trafficSortBy = chosen->data().toInt();
-            group->traffic_sort_by = static_cast<Configs::trafficBy>(trafficSortBy);
-            Configs::dataManager->groupsRepo->Save(group);
+            auto* chosen =
+                menu.exec(
+                    header->mapToGlobal(pos)
+                );
+
+            if (chosen == nullptr ||
+                !chosen->data().isValid())
+            {
+                return;
+            }
+
+
+            const int trafficSortBy =
+                chosen->data().toInt();
+
+
+            group->SetTrafficSortBy(
+                static_cast<Configs::trafficBy>(
+                    trafficSortBy
+                    )
+            );
+
+
+            Configs::dataManager
+                ->groupsRepo
+                ->Save(group);
+
             GroupSortAction action;
             action.method = GroupSortMethod::ByTraffic;
             action.descending = false;
@@ -935,10 +1091,24 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Сброс сохранённых ширин возвращает автоматический расчёт столбцов.
     connect(ui->actionRefresh_Column_Widths, &QAction::triggered, this, [=, this] {
-        auto ent = Configs::dataManager->groupsRepo->CurrentGroup();
-        ent->column_width.clear();
-        Configs::dataManager->groupsRepo->Save(ent);
-        show_group(ent->id);
+        auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->CurrentGroup();
+
+        if (!group) {
+            return;
+        }
+
+        group->ClearColumnWidths();
+
+        Configs::dataManager
+            ->groupsRepo
+            ->Save(group);
+
+        show_group(
+            group->Id()
+        );
     });
 
     // Динамическое меню маршрутизации.
@@ -1043,8 +1213,17 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             ent->ClearTestResults();
         }
         Configs::dataManager->profilesRepo->SaveBatch(ents);
-        if (auto group = Configs::dataManager->groupsRepo->GetGroup(ents.first()->gid); group &&
-            group->calculated_column_width.size() > 3) group->calculated_column_width[3] = 0;
+        if (auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(
+                ents.first()->gid
+            ))
+        {
+            group->ResetCalculatedColumnWidth(
+                3
+            );
+        }
         refresh_proxy_list();
     });
     connect(ui->actionUrl_Test_Selected, &QAction::triggered, this, [=,this]() {
@@ -1373,7 +1552,10 @@ void MainWindow::show_group(int gid) {
     if (Configs::dataManager->settingsRepo->current_group != gid) {
         saveProfileFocusState();
         if (auto lastGroup = Configs::dataManager->groupsRepo->CurrentGroup()) {
-            lastGroup->scroll_last_profile = ui->profilesTableView->firstVisibleRow();
+            lastGroup->SetScrollLastProfile(
+                ui->profilesTableView
+                ->firstVisibleRow()
+            );
             Configs::dataManager->groupsRepo->Save(lastGroup);
         }
         Configs::dataManager->settingsRepo->current_group = gid;
@@ -1386,7 +1568,10 @@ void MainWindow::show_group(int gid) {
     refresh_proxy_list({}, true);
 
     int rowCount = profilesTableModel->rowCount();
-    int targetRow = group->scroll_last_profile;
+    const auto groupSnapshot =
+        group->Snapshot();
+    int targetRow =
+        groupSnapshot.scroll_last_profile;
     if (targetRow >= rowCount && rowCount > 0) targetRow = rowCount - 1;
     QTimer::singleShot(0, ui->profilesTableView, [=, this]() {
         if (targetRow >= 0) {
@@ -1448,28 +1633,86 @@ void MainWindow::handle_import_route(const QString &url) {
     Configs::dataManager->routesRepo->AddRouteProfile(profile);
 }
 
-void MainWindow::handle_addsub(const QString &url, const QString &name, bool autoUpdate) {
-    if (url.isEmpty()) {
-        MessageBoxWarning(tr("Add subscription"), tr("The link did not contain a subscription URL."));
+void MainWindow::handle_addsub(
+    const QString& url,
+    const QString& name,
+    bool autoUpdate)
+{
+    if (url.isEmpty())
+    {
+        MessageBoxWarning(
+            tr("Add subscription"),
+            tr(
+                "The link did not contain "
+                "a subscription URL."
+            )
+        );
+
         return;
     }
 
     ActivateWindow(this);
 
-    const QString groupName = FIRST_OR_SECOND(name, QUrl(url).host());
-    const auto prompt = tr("Add this subscription?\n\nName: %1\nURL: %2\nAuto update: %3")
-                            .arg(groupName, url, autoUpdate ? tr("On") : tr("Off"));
-    if (QMessageBox::question(GetMessageBoxParent(), tr("Add subscription"), prompt) != QMessageBox::StandardButton::Yes) {
+    const QString groupName =
+        FIRST_OR_SECOND(
+            name,
+            QUrl(url).host()
+        );
+
+    const auto prompt =
+        tr(
+            "Add this subscription?\n\n"
+            "Name: %1\n"
+            "URL: %2\n"
+            "Auto update: %3"
+        )
+        .arg(
+            groupName,
+            url,
+            autoUpdate
+            ? tr("On")
+            : tr("Off")
+        );
+
+    if (QMessageBox::question(
+        GetMessageBoxParent(),
+        tr("Add subscription"),
+        prompt
+    )
+        != QMessageBox::StandardButton::Yes)
+    {
         return;
     }
 
-    auto group = Configs::GroupsRepo::NewGroup();
-    group->name = groupName;
-    group->url = url;
-    group->skip_auto_update = !autoUpdate;
-    Configs::dataManager->groupsRepo->AddGroup(group);
+    auto group =
+        Configs::GroupsRepo::NewGroup();
+
+    group->SetSubscriptionSource(
+        groupName,
+        url
+    );
+
+    group->SetSkipAutoUpdate(
+        !autoUpdate
+    );
+
+    if (!Configs::dataManager
+        ->groupsRepo
+        ->AddGroup(group))
+    {
+        return;
+    }
+
+    const int groupId =
+        group->Id();
+
     refresh_groups();
-    Subscription::groupUpdater->AsyncUpdate(url, group->id);
+
+    Subscription::groupUpdater
+        ->AsyncUpdate(
+            url,
+            groupId
+        );
 }
 
 void MainWindow::import_or_handle_deeplink(const QString &text) {
@@ -2167,7 +2410,11 @@ void MainWindow::refresh_status(const QString &traffic_update) {
     QString group_name;
     if (running != nullptr) {
         auto group = Configs::dataManager->groupsRepo->GetGroup(running->gid);
-        if (group != nullptr) group_name = group->name;
+        if (group)
+        {
+            group_name =
+                group->Snapshot().name;
+        }
     }
 
     if (QDateTime::currentSecsSinceEpoch() - last_test_time > 2) {
@@ -2264,88 +2511,339 @@ void MainWindow::update_traffic_graph(int proxyDl, int proxyUp, int directDl, in
 // table显示
 
 // refresh_groups -> show_group -> refresh_proxy_list
-void MainWindow::refresh_groups() {
-    Configs::dataManager->settingsRepo->refreshing_group_list = true;
+void MainWindow::refresh_groups()
+{
+    Configs::dataManager
+        ->settingsRepo
+        ->refreshing_group_list = true;
 
-    // refresh group?
-    for (int i = ui->tabWidget->count() - 1; i > 0; i--) {
+    for (int i =
+        ui->tabWidget->count() - 1;
+        i > 0;
+        --i)
+    {
         ui->tabWidget->removeTab(i);
     }
 
+    const auto groupOrder =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroupsTabOrder();
+
     int index = 0;
-    for (const auto &gid: Configs::dataManager->groupsRepo->GetGroupsTabOrder()) {
-        auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
-        if (index == 0) {
-            ui->tabWidget->setTabText(0, group->name);
-        } else {
-            auto widget2 = new QWidget();
-            auto layout2 = new QVBoxLayout();
-            layout2->setContentsMargins(QMargins());
-            layout2->setSpacing(0);
-            widget2->setLayout(layout2);
-            ui->tabWidget->addTab(widget2, group->name);
+
+    for (const int gid : groupOrder)
+    {
+        auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(gid);
+
+        if (!group) {
+            continue;
         }
-        ui->tabWidget->tabBar()->setTabData(index, gid);
-        index++;
+
+        const auto snapshot =
+            group->Snapshot();
+
+        if (index == 0)
+        {
+            ui->tabWidget
+                ->setTabText(
+                    0,
+                    snapshot.name
+                );
+        }
+        else
+        {
+            auto* widget =
+                new QWidget();
+
+            auto* layout =
+                new QVBoxLayout();
+
+            layout->setContentsMargins(
+                QMargins()
+            );
+
+            layout->setSpacing(0);
+
+            widget->setLayout(
+                layout
+            );
+
+            ui->tabWidget
+                ->addTab(
+                    widget,
+                    snapshot.name
+                );
+        }
+
+        ui->tabWidget
+            ->tabBar()
+            ->setTabData(
+                index,
+                gid
+            );
+
+        ++index;
     }
 
-    // show after group changed
-    if (Configs::dataManager->groupsRepo->CurrentGroup() == nullptr) {
-        Configs::dataManager->settingsRepo->current_group = -1;
-        ui->tabWidget->setCurrentIndex(groupId2TabIndex(0));
-        show_group(Configs::dataManager->groupsRepo->GetGroupsTabOrder().count() > 0 ? Configs::dataManager->groupsRepo->GetGroupsTabOrder().first() : 0);
-    } else {
-        ui->tabWidget->setCurrentIndex(groupId2TabIndex(Configs::dataManager->settingsRepo->current_group));
-        show_group(Configs::dataManager->settingsRepo->current_group);
+    if (Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup() == nullptr)
+    {
+        Configs::dataManager
+            ->settingsRepo
+            ->current_group = -1;
+
+        const int targetGroup =
+            !groupOrder.isEmpty()
+            ? groupOrder.first()
+            : 0;
+
+        ui->tabWidget
+            ->setCurrentIndex(
+                groupId2TabIndex(
+                    targetGroup
+                )
+            );
+
+        show_group(
+            targetGroup
+        );
+    }
+    else
+    {
+        const int currentGroupId =
+            Configs::dataManager
+            ->settingsRepo
+            ->current_group;
+
+        ui->tabWidget
+            ->setCurrentIndex(
+                groupId2TabIndex(
+                    currentGroupId
+                )
+            );
+
+        show_group(
+            currentGroupId
+        );
     }
 
-    Configs::dataManager->settingsRepo->refreshing_group_list = false;
+    Configs::dataManager
+        ->settingsRepo
+        ->refreshing_group_list = false;
 }
 
-void MainWindow::refresh_proxy_list_column_size() {
-    auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-    if (!group) return;
+void MainWindow::refresh_proxy_list_column_size()
+{
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
 
-    auto *hHeader = dynamic_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader());
-    QTimer::singleShot(0, ui->profilesTableView, [=, this]() {
-        hHeader->blockSignals(true);
-        if (group->column_width.isEmpty()) {
-            hHeader->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-            hHeader->setSectionResizeMode(1, QHeaderView::Stretch);
-            hHeader->setSectionResizeMode(2, QHeaderView::Stretch);
-            hHeader->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-            hHeader->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-            if (!group->calculated_column_width.empty() && group->calculated_column_width[0] > hHeader->sectionSize(0)) {
-                hHeader->setSectionResizeMode(0, QHeaderView::Fixed);
-                hHeader->resizeSection(0, group->calculated_column_width[0]);
+    if (!group) {
+        return;
+    }
+
+    auto* hHeader =
+        dynamic_cast<
+        ProfilesTableFilterHeader*
+        >(
+            ui->profilesTableView
+            ->horizontalHeader()
+            );
+
+    if (!hHeader) {
+        return;
+    }
+
+    QTimer::singleShot(
+        0,
+        ui->profilesTableView,
+
+        [this, group, hHeader]()
+        {
+            const auto snapshot =
+                group->Snapshot();
+
+            const auto calculated =
+                group
+                ->CalculatedColumnWidths();
+
+            hHeader->blockSignals(
+                true
+            );
+
+            if (snapshot
+                .column_width
+                .isEmpty())
+            {
+                hHeader->setSectionResizeMode(
+                    0,
+                    QHeaderView::
+                    ResizeToContents
+                );
+
+                hHeader->setSectionResizeMode(
+                    1,
+                    QHeaderView::Stretch
+                );
+
+                hHeader->setSectionResizeMode(
+                    2,
+                    QHeaderView::Stretch
+                );
+
+                hHeader->setSectionResizeMode(
+                    3,
+                    QHeaderView::
+                    ResizeToContents
+                );
+
+                hHeader->setSectionResizeMode(
+                    4,
+                    QHeaderView::
+                    ResizeToContents
+                );
+
+                if (calculated.size() > 0 &&
+                    calculated[0] >
+                    hHeader->sectionSize(0))
+                {
+                    hHeader
+                        ->setSectionResizeMode(
+                            0,
+                            QHeaderView::Fixed
+                        );
+
+                    hHeader->resizeSection(
+                        0,
+                        calculated[0]
+                    );
+                }
+
+                if (calculated.size() > 3 &&
+                    calculated[3] >
+                    hHeader->sectionSize(3))
+                {
+                    hHeader
+                        ->setSectionResizeMode(
+                            3,
+                            QHeaderView::Fixed
+                        );
+
+                    hHeader->resizeSection(
+                        3,
+                        calculated[3]
+                    );
+                }
+
+                if (calculated.size() > 4 &&
+                    calculated[4] >
+                    hHeader->sectionSize(4))
+                {
+                    hHeader
+                        ->setSectionResizeMode(
+                            4,
+                            QHeaderView::Fixed
+                        );
+
+                    hHeader->resizeSection(
+                        4,
+                        calculated[4]
+                    );
+                }
+
+                ui->profilesTableView
+                    ->setHorizontalScrollBarPolicy(
+                        Qt::ScrollBarAlwaysOff
+                    );
+
+                QList<int>
+                    newCalculated;
+
+                newCalculated.reserve(
+                    5
+                );
+
+                for (int i = 0;
+                    i <= 4;
+                    ++i)
+                {
+                    const int size =
+                        hHeader
+                        ->sectionSize(i);
+
+                    hHeader
+                        ->setSectionResizeMode(
+                            i,
+                            QHeaderView::
+                            Interactive
+                        );
+
+                    hHeader->resizeSection(
+                        i,
+                        size
+                    );
+
+                    newCalculated.append(
+                        size
+                    );
+                }
+
+                group
+                    ->SetCalculatedColumnWidths(
+                        newCalculated
+                    );
             }
-            if (group->calculated_column_width.size() > 3 && group->calculated_column_width[3] > hHeader->sectionSize(3)) {
-                hHeader->setSectionResizeMode(3, QHeaderView::Fixed);
-                hHeader->resizeSection(3, group->calculated_column_width[3]);
+            else
+            {
+                group
+                    ->clearCalculatedColumnWidth();
+
+                const int count =
+                    qMin(
+                        5,
+                        snapshot
+                        .column_width
+                        .size()
+                    );
+
+                for (int i = 0;
+                    i < count;
+                    ++i)
+                {
+                    hHeader
+                        ->setSectionResizeMode(
+                            i,
+                            QHeaderView::
+                            Interactive
+                        );
+
+                    hHeader->resizeSection(
+                        i,
+                        snapshot
+                        .column_width
+                        .at(i)
+                    );
+                }
+
+                ui->profilesTableView
+                    ->setHorizontalScrollBarPolicy(
+                        Qt::ScrollBarAsNeeded
+                    );
             }
-            if (group->calculated_column_width.size() > 4 && group->calculated_column_width[4] > hHeader->sectionSize(4)) {
-                hHeader->setSectionResizeMode(4, QHeaderView::Fixed);
-                hHeader->resizeSection(4, group->calculated_column_width[4]);
-            }
-            ui->profilesTableView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-            group->clearCalculatedColumnWidth();
-            for (int i=0;i<=4;i++) {
-                auto size = hHeader->sectionSize(i);
-                hHeader->setSectionResizeMode(i, QHeaderView::Interactive);
-                hHeader->resizeSection(i, size);
-                group->calculated_column_width << size;
-            }
-        } else {
-            group->clearCalculatedColumnWidth();
-            for (int i=0;i<=4;i++) {
-                hHeader->setSectionResizeMode(i, QHeaderView::Interactive);
-                hHeader->resizeSection(i, group->column_width.at(i));
-            }
-            ui->profilesTableView->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+            hHeader->adjustPositions();
+
+            hHeader->blockSignals(
+                false
+            );
         }
-        hHeader->adjustPositions();
-        hHeader->blockSignals(false);
-    });
+    );
 }
 
 void MainWindow::refresh_proxy_list(const QList<int>& ids, bool mayNeedReset) {
@@ -2375,7 +2873,10 @@ void MainWindow::refresh_proxy_list_impl_refresh_data(const QList<int>& ids, boo
             return;
         for (auto id:ids) profilesTableModel->refreshProfileId(id);
     } else {
-        auto profileIDs = filterProfilesList(currentGroup->profiles);
+        const auto profileIDs =
+            filterProfilesList(
+                currentGroup->Profiles()
+            );
         profilesTableModel->refreshTable(profileIDs, mayNeedReset);
     }
 }
@@ -2458,18 +2959,53 @@ void MainWindow::on_menu_delete_triggered() {
     }
 }
 
-void MainWindow::on_menu_reset_traffic_triggered() {
-    auto entIDs = get_now_selected_list();
-    if (entIDs.count() == 0) return;
-    auto ents = Configs::dataManager->profilesRepo->GetProfileBatch(entIDs);
-    if (ents.empty()) return;
-    for (const auto& ent: ents) {
-        ent->ResetTraffic();
-        Configs::dataManager->profilesRepo->SaveTraffic(ent);
+void MainWindow::on_menu_reset_traffic_triggered()
+{
+    const auto entIDs =
+        get_now_selected_list();
+
+    if (entIDs.isEmpty()) {
+        return;
     }
-    if (auto group = Configs::dataManager->groupsRepo->GetGroup(ents.first()->gid); group &&
-        group->calculated_column_width.size() > 4) group->calculated_column_width[4] = 0;
-    refresh_proxy_list(entIDs);
+
+    const auto ents =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfileBatch(entIDs);
+
+    if (ents.empty()) {
+        return;
+    }
+
+    for (const auto& ent : ents)
+    {
+        if (!ent) {
+            continue;
+        }
+
+        ent->ResetTraffic();
+
+        Configs::dataManager
+            ->profilesRepo
+            ->SaveTraffic(ent);
+    }
+
+    if (auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroup(
+            ents.first()->gid
+        );
+        group)
+    {
+        group->ResetCalculatedColumnWidth(
+            4
+        );
+    }
+
+    refresh_proxy_list(
+        entIDs
+    );
 }
 
 void MainWindow::on_menu_copy_links_triggered() {
@@ -2728,16 +3264,44 @@ void MainWindow::on_menu_scan_qr_triggered() {
     }
 }
 
-void MainWindow::on_menu_clear_test_result_triggered() {
-    auto entIDs = get_selected_or_group();
-    auto ents = Configs::dataManager->profilesRepo->GetProfileBatch(entIDs);
-    if (ents.empty()) return;
-    for (const auto &ent: ents) {
-        ent->ClearTestResults();
+void MainWindow::on_menu_clear_test_result_triggered()
+{
+    const auto entIDs =
+        get_selected_or_group();
+
+    const auto ents =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfileBatch(entIDs);
+
+    if (ents.empty()) {
+        return;
     }
-    Configs::dataManager->profilesRepo->SaveBatch(ents);
-    if (auto group = Configs::dataManager->groupsRepo->GetGroup(ents.first()->gid); group &&
-        group->calculated_column_width.size() > 3) group->calculated_column_width[3] = 0;
+
+    for (const auto& ent : ents)
+    {
+        if (ent) {
+            ent->ClearTestResults();
+        }
+    }
+
+    Configs::dataManager
+        ->profilesRepo
+        ->SaveBatch(ents);
+
+    if (auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroup(
+            ents.first()->gid
+        );
+        group)
+    {
+        group->ResetCalculatedColumnWidth(
+            3
+        );
+    }
+
     refresh_proxy_list();
 }
 
@@ -2751,12 +3315,49 @@ void MainWindow::on_menu_select_all_triggered() {
 
 bool mw_sub_updating = false;
 
-void MainWindow::on_menu_update_subscription_triggered() {
-    auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-    if (group->url.isEmpty()) return;
-    if (mw_sub_updating) return;
-    mw_sub_updating = true;
-    Subscription::groupUpdater->AsyncUpdate(group->url, group->id, [&] { mw_sub_updating = false; });
+void MainWindow::
+on_menu_update_subscription_triggered()
+{
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
+
+
+    if (!group) {
+        return;
+    }
+
+
+    const auto snapshot =
+        group->Snapshot();
+
+
+    if (snapshot.url.isEmpty()) {
+        return;
+    }
+
+
+    if (mw_sub_updating) {
+        return;
+    }
+
+
+    mw_sub_updating =
+        true;
+
+
+    Subscription::groupUpdater
+        ->AsyncUpdate(
+            snapshot.url,
+            snapshot.id,
+
+            [&]()
+            {
+                mw_sub_updating =
+                    false;
+            }
+        );
 }
 
 void MainWindow::on_menu_remove_unavailable_triggered() {
@@ -2894,58 +3495,221 @@ QList<int> MainWindow::get_selected_or_group() {
     return profileIDs;
 }
 
-void MainWindow::saveProfileFocusState() {
-    auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-    if (group == nullptr) return;
+void MainWindow::saveProfileFocusState()
+{
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
 
-    if (!profilesTableModel) return;
-    QModelIndexList indices = ui->profilesTableView->selectionModel()->selectedRows(0);
-    group->selectedProfilesIdIdxPairs.clear();
-
-    for (const QModelIndex &idx : indices) {
-        group->selectedProfilesIdIdxPairs << std::make_pair(profilesTableModel->profileIdAt(idx.row()), idx.row());
-    }
-}
-
-void MainWindow::restoreProfileFocusState() {
-    auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-    if (group == nullptr || group->selectedProfilesIdIdxPairs.isEmpty()) return;
-
-    QList<int> newIndexes;
-    for (auto &id: group->selectedProfilesIdIdxPairs | std::views::keys) {
-        if (auto newIdx = profilesTableModel->indexOfProfile(id); newIdx != -1) {
-            newIndexes << newIdx;
-        }
-    }
-
-    ui->profilesTableView->setFocus();
-
-    if (!newIndexes.isEmpty()) {
-        // some profiles were selected, some of them remain, select the remaining ones
-        QItemSelection selection;
-
-        for (int row : newIndexes) {
-            QModelIndex left  = profilesTableModel->index(row, 0);
-            QModelIndex right = profilesTableModel->index(row, profilesTableModel->columnCount() - 1);
-            selection.select(left, right);
-        }
-        ui->profilesTableView->selectionModel()->select(selection, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
-        ui->profilesTableView->selectionModel()->setCurrentIndex(profilesTableModel->index(newIndexes.first(), 0), QItemSelectionModel::NoUpdate);
+    if (!group ||
+        !profilesTableModel ||
+        !ui->profilesTableView
+        ->selectionModel())
+    {
         return;
     }
 
-    auto desiredIndex = group->selectedProfilesIdIdxPairs.first().second;
-    desiredIndex = std::min(desiredIndex, static_cast<int>(profilesTableModel->profileIds().size() - 1));
-    if (desiredIndex < 0) return;
+    const auto indices =
+        ui->profilesTableView
+        ->selectionModel()
+        ->selectedRows(0);
 
-    if (group->selectedProfilesIdIdxPairs.size() == 1) {
-        QItemSelection selection;
-        QModelIndex left  = profilesTableModel->index(desiredIndex, 0);
-        QModelIndex right = profilesTableModel->index(desiredIndex, profilesTableModel->columnCount() - 1);
-        selection.select(left, right);
-        ui->profilesTableView->selectionModel()->select(selection, QItemSelectionModel::Select);
+    QList<std::pair<int, int>>
+        selection;
+
+    selection.reserve(
+        indices.size()
+    );
+
+    for (const QModelIndex& idx :
+        indices)
+    {
+        selection.append(
+            {
+                profilesTableModel
+                    ->profileIdAt(
+                        idx.row()
+                    ),
+
+                idx.row()
+            }
+        );
     }
-    ui->profilesTableView->selectionModel()->setCurrentIndex(profilesTableModel->index(desiredIndex, 0), QItemSelectionModel::NoUpdate);
+
+    group
+        ->SetSelectedProfilesIdIdxPairs(
+            selection
+        );
+}
+
+
+void MainWindow::restoreProfileFocusState()
+{
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
+
+    if (!group ||
+        !profilesTableModel ||
+        !ui->profilesTableView
+        ->selectionModel())
+    {
+        return;
+    }
+
+    const auto selectionState =
+        group
+        ->SelectedProfilesIdIdxPairs();
+
+    if (selectionState.isEmpty()) {
+        return;
+    }
+
+    QList<int> newIndexes;
+
+    for (const auto& item :
+        selectionState)
+    {
+        const int profileId =
+            item.first;
+
+        const int newIdx =
+            profilesTableModel
+            ->indexOfProfile(
+                profileId
+            );
+
+        if (newIdx >= 0)
+        {
+            newIndexes.append(
+                newIdx
+            );
+        }
+    }
+
+    ui->profilesTableView
+        ->setFocus();
+
+    if (!newIndexes.isEmpty())
+    {
+        QItemSelection selection;
+
+        for (const int row :
+        newIndexes)
+        {
+            const QModelIndex left =
+                profilesTableModel
+                ->index(row, 0);
+
+            const QModelIndex right =
+                profilesTableModel
+                ->index(
+                    row,
+                    profilesTableModel
+                    ->columnCount() - 1
+                );
+
+            selection.select(
+                left,
+                right
+            );
+        }
+
+        ui->profilesTableView
+            ->selectionModel()
+            ->select(
+                selection,
+
+                QItemSelectionModel::
+                ClearAndSelect
+                |
+                QItemSelectionModel::
+                Rows
+            );
+
+        ui->profilesTableView
+            ->selectionModel()
+            ->setCurrentIndex(
+                profilesTableModel
+                ->index(
+                    newIndexes.first(),
+                    0
+                ),
+
+                QItemSelectionModel::
+                NoUpdate
+            );
+
+        return;
+    }
+
+    int desiredIndex =
+        selectionState
+        .first()
+        .second;
+
+    desiredIndex =
+        std::min(
+            desiredIndex,
+
+            static_cast<int>(
+                profilesTableModel
+                ->profileIds()
+                .size() - 1
+                )
+        );
+
+    if (desiredIndex < 0) {
+        return;
+    }
+
+    if (selectionState.size() == 1)
+    {
+        QItemSelection selection;
+
+        const QModelIndex left =
+            profilesTableModel
+            ->index(
+                desiredIndex,
+                0
+            );
+
+        const QModelIndex right =
+            profilesTableModel
+            ->index(
+                desiredIndex,
+
+                profilesTableModel
+                ->columnCount() - 1
+            );
+
+        selection.select(
+            left,
+            right
+        );
+
+        ui->profilesTableView
+            ->selectionModel()
+            ->select(
+                selection,
+                QItemSelectionModel::Select
+            );
+    }
+
+    ui->profilesTableView
+        ->selectionModel()
+        ->setCurrentIndex(
+            profilesTableModel
+            ->index(
+                desiredIndex,
+                0
+            ),
+
+            QItemSelectionModel::
+            NoUpdate
+        );
 }
 
 void MainWindow::clearUnavailableProfiles(bool confirm, QList<int> profileIDs) {

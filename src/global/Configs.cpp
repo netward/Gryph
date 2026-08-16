@@ -33,10 +33,27 @@ namespace Configs {
     void initDB(const std::string& dbPath) {
         dataManager = new DatabaseManager(dbPath);
 
-        if (dataManager->groupsRepo->GetAllGroupIds().empty()) {
-            auto defaultGroup = GroupsRepo::NewGroup();
-            defaultGroup->name = QObject::tr("Default");
-            dataManager->groupsRepo->AddGroup(defaultGroup);
+        if (dataManager
+            ->groupsRepo
+            ->GetAllGroupIds()
+            .empty())
+        {
+            auto defaultGroup =
+                GroupsRepo::NewGroup();
+
+
+            defaultGroup
+                ->SetSubscriptionSource(
+                    QObject::tr("Default"),
+                    QString()
+                );
+
+
+            dataManager
+                ->groupsRepo
+                ->AddGroup(
+                    defaultGroup
+                );
         }
         if (dataManager->routesRepo->GetAllRouteProfileIds().empty()) {
             auto defaultRoute = RouteProfile::GetDefaultChain();
