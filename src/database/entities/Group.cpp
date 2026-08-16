@@ -170,6 +170,37 @@ namespace Configs
             std::shared_ptr<Profile>
         > profileById;
 
+        QHash<
+            int,
+            ProfileTrafficSnapshot
+        > trafficById;
+
+
+        if (sortAction.method ==
+            GroupSortMethod::ByTraffic)
+        {
+            trafficById.reserve(
+                loadedProfiles.size()
+            );
+
+
+            for (const auto& profile :
+                loadedProfiles)
+            {
+                if (!profile ||
+                    profile->id < 0)
+                {
+                    continue;
+                }
+
+
+                trafficById.insert(
+                    profile->id,
+                    profile->TrafficSnapshot()
+                );
+            }
+        }
+
 
         profileById.reserve(
             loadedProfiles.size()
@@ -399,41 +430,50 @@ namespace Configs
                 if (sortAction.method ==
                     GroupSortMethod::ByTraffic)
                 {
+                    const auto trafficA =
+                        trafficById.value(
+                            a,
+                            ProfileTrafficSnapshot{}
+                        );
+
+
+                    const auto trafficB =
+                        trafficById.value(
+                            b,
+                            ProfileTrafficSnapshot{}
+                        );
+
+
                     if (traffic_sort_by ==
                         trafficBy::total)
                     {
-                        const auto valueA =
-                            profA->traffic_downlink
-                            + profA->traffic_uplink;
-
-                        const auto valueB =
-                            profB->traffic_downlink
-                            + profB->traffic_uplink;
-
-
                         return sortAction.descending
-                            ? valueA > valueB
-                            : valueA < valueB;
+                            ? trafficA.total()
+                            > trafficB.total()
+                            : trafficA.total()
+                            < trafficB.total();
                     }
+
 
                     if (traffic_sort_by ==
                         trafficBy::dl)
                     {
                         return sortAction.descending
-                            ? profA->traffic_downlink
-                            > profB->traffic_downlink
-                            : profA->traffic_downlink
-                            < profB->traffic_downlink;
+                            ? trafficA.downlink
+                            > trafficB.downlink
+                            : trafficA.downlink
+                            < trafficB.downlink;
                     }
+
 
                     if (traffic_sort_by ==
                         trafficBy::ul)
                     {
                         return sortAction.descending
-                            ? profA->traffic_uplink
-                            > profB->traffic_uplink
-                            : profA->traffic_uplink
-                            < profB->traffic_uplink;
+                            ? trafficA.uplink
+                            > trafficB.uplink
+                            : trafficA.uplink
+                            < trafficB.uplink;
                     }
                 }
 

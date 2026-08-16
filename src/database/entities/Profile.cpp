@@ -59,17 +59,59 @@ namespace Configs
         }
     }
 
-    QString Profile::DisplayTraffic() const {
-        if (traffic_downlink + traffic_uplink == 0) return "";
-        return UNICODE_LRO + QString("%1↑ %2↓").arg(ReadableSize(traffic_uplink), ReadableSize(traffic_downlink));
+    void Profile::AddTraffic(
+        qint64 downlinkDelta,
+        qint64 uplinkDelta)
+    {
+        traffic_.Add(
+            downlinkDelta,
+            uplinkDelta
+        );
     }
 
-    void Profile::ResetTraffic() {
-        traffic_downlink = 0;
-        traffic_uplink = 0;
+
+    void Profile::SetTraffic(
+        qint64 downlink,
+        qint64 uplink)
+    {
+        traffic_.Set(
+            downlink,
+            uplink
+        );
     }
 
-        QString ProfileFilter_ent_key(const std::shared_ptr<Configs::Profile> &ent, bool ignoreMetadata) {
+
+    ProfileTrafficSnapshot
+        Profile::TrafficSnapshot() const
+    {
+        return traffic_.Snapshot();
+    }
+
+    QString Profile::DisplayTraffic() const
+    {
+        const auto traffic =
+            TrafficSnapshot();
+
+
+        if (traffic.total() == 0) {
+            return "";
+        }
+
+
+        return UNICODE_LRO
+            + QString("%1↑ %2↓")
+            .arg(
+                ReadableSize(traffic.uplink),
+                ReadableSize(traffic.downlink)
+            );
+    }
+
+    void Profile::ResetTraffic()
+    {
+        traffic_.Reset();
+    }
+
+    QString ProfileFilter_ent_key(const std::shared_ptr<Configs::Profile> &ent, bool ignoreMetadata) {
         auto key = ent->outbound->ExportJsonLink(ignoreMetadata);
         return key;
     }

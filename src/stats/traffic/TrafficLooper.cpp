@@ -115,8 +115,10 @@ namespace Stats {
                     continue;
                 }
 
-                profile->traffic_uplink += up;
-                profile->traffic_downlink += down;
+                profile->AddTraffic(
+                    static_cast<qint64>(down),
+                    static_cast<qint64>(up)
+                );
             }
 
 
@@ -342,16 +344,20 @@ namespace Stats {
                                     row.id =
                                         profile->id;
 
+                                    const auto traffic =
+                                        profile->TrafficSnapshot();
+
+
                                     row.traffic_dl =
                                         static_cast<long long>(
-                                            profile->traffic_downlink
+                                            traffic.downlink
                                             );
+
 
                                     row.traffic_up =
                                         static_cast<long long>(
-                                            profile->traffic_uplink
+                                            traffic.uplink
                                             );
-
 
                                     trafficRows.push_back(
                                         row
@@ -586,14 +592,19 @@ namespace Stats {
                         row.id =
                             profile->id;
 
+                        const auto traffic =
+                            profile->TrafficSnapshot();
+
+
                         row.traffic_dl =
                             static_cast<long long>(
-                                profile->traffic_downlink
+                                traffic.downlink
                                 );
+
 
                         row.traffic_up =
                             static_cast<long long>(
-                                profile->traffic_uplink
+                                traffic.uplink
                                 );
 
 

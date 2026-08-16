@@ -41,28 +41,62 @@ namespace Configs {
         db.exec("CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name)");
     }
 
-    QJsonObject ProfilesRepo::profileToJson(const Profile* profile) const {
+    QJsonObject ProfilesRepo::profileToJson(
+        const Profile* profile) const
+    {
         QJsonObject json;
-        
-        // Simple fields
-        json["type"] = profile->type;
-        json["name"] = profile->outbound->name;
-        json["id"] = profile->id;
-        json["gid"] = profile->gid;
-        json["latency"] = profile->latency;
-        json["dl_speed"] = profile->dl_speed;
-        json["ul_speed"] = profile->ul_speed;
-        json["test_country"] = profile->test_country;
-        json["ip_out"] = profile->ip_out;
-        
-        // Complex objects - serialize to JSON strings
+
+
+        json["type"] =
+            profile->type;
+
+        json["name"] =
+            profile->outbound
+            ? profile->outbound->name
+            : QString();
+
+        json["id"] =
+            profile->id;
+
+        json["gid"] =
+            profile->gid;
+
+        json["latency"] =
+            profile->latency;
+
+        json["dl_speed"] =
+            profile->dl_speed;
+
+        json["ul_speed"] =
+            profile->ul_speed;
+
+        json["test_country"] =
+            profile->test_country;
+
+        json["ip_out"] =
+            profile->ip_out;
+
+
         if (profile->outbound) {
-            json["outbound"] = profile->outbound->ExportToJson();
+
+            json["outbound"] =
+                profile
+                ->outbound
+                ->ExportToJson();
         }
-        
-        json["traffic_dl"] = static_cast<qint64>(profile->traffic_downlink);
-        json["traffic_up"] = static_cast<qint64>(profile->traffic_uplink);
-        
+
+
+        const auto traffic =
+            profile->TrafficSnapshot();
+
+
+        json["traffic_dl"] =
+            traffic.downlink;
+
+        json["traffic_up"] =
+            traffic.uplink;
+
+
         return json;
     }
 
@@ -143,8 +177,32 @@ namespace Configs {
             profile->outbound->ParseFromJson(json["outbound"].toObject());
         }
         
-        if (json.contains("traffic_dl")) profile->traffic_downlink = json["traffic_dl"].toVariant().toLongLong();
-        if (json.contains("traffic_up")) profile->traffic_uplink = json["traffic_up"].toVariant().toLongLong();
+        qint64 trafficDownlink = 0;
+        qint64 trafficUplink = 0;
+
+
+        if (json.contains("traffic_dl")) {
+
+            trafficDownlink =
+                json["traffic_dl"]
+                .toVariant()
+                .toLongLong();
+        }
+
+
+        if (json.contains("traffic_up")) {
+
+            trafficUplink =
+                json["traffic_up"]
+                .toVariant()
+                .toLongLong();
+        }
+
+
+        profile->SetTraffic(
+            trafficDownlink,
+            trafficUplink
+        );
         
         profile->name = profile->outbound->name;
         
@@ -162,8 +220,20 @@ namespace Configs {
             outboundJson = QString::fromUtf8(outboundDoc.toJson(QJsonDocument::Compact));
         }
         QString name = profile->outbound ? profile->outbound->name : QString();
-        const long long traffic_dl = static_cast<long long>(profile->traffic_downlink);
-        const long long traffic_up = static_cast<long long>(profile->traffic_uplink);
+        const auto traffic =
+            profile->TrafficSnapshot();
+
+
+        const long long traffic_dl =
+            static_cast<long long>(
+                traffic.downlink
+                );
+
+
+        const long long traffic_up =
+            static_cast<long long>(
+                traffic.uplink
+                );
         
         auto checkQuery = db.query("SELECT id FROM profiles WHERE id = ?", id);
         bool exists = checkQuery && checkQuery->executeStep();
@@ -212,25 +282,84 @@ namespace Configs {
         }
     }
 
-    ProfileInsertRow ProfilesRepo::profileToInsertRow(const Profile* profile, int id, int gid) const {
+    ProfileInsertRow
+        ProfilesRepo::profileToInsertRow(
+            const Profile* profile,
+            int id,
+            int gid) const
+    {
         QString outboundJson;
+
+
         if (profile->outbound) {
-            outboundJson = QString::fromUtf8(QJsonDocument(profile->outbound->ExportToJson()).toJson(QJsonDocument::Compact));
+
+            outboundJson =
+                QString::fromUtf8(
+                    QJsonDocument(
+                        profile
+                        ->outbound
+                        ->ExportToJson()
+                    )
+                    .toJson(
+                        QJsonDocument::Compact
+                    )
+                );
         }
-        QString name = profile->outbound ? profile->outbound->name : QString();
+
+
+        const QString name =
+            profile->outbound
+            ? profile->outbound->name
+            : QString();
+
+
+        const auto traffic =
+            profile->TrafficSnapshot();
+
+
         ProfileInsertRow row;
+
+
         row.id = id;
-        row.type = profile->type.toStdString();
-        row.name = name.toStdString();
+
+        row.type =
+            profile->type.toStdString();
+
+        row.name =
+            name.toStdString();
+
         row.gid = gid;
-        row.latency = profile->latency;
-        row.dl_speed = profile->dl_speed.toStdString();
-        row.ul_speed = profile->ul_speed.toStdString();
-        row.test_country = profile->test_country.toStdString();
-        row.ip_out = profile->ip_out.toStdString();
-        row.outbound_json = outboundJson.toStdString();
-        row.traffic_dl = static_cast<long long>(profile->traffic_downlink);
-        row.traffic_up = static_cast<long long>(profile->traffic_uplink);
+
+        row.latency =
+            profile->latency;
+
+        row.dl_speed =
+            profile->dl_speed.toStdString();
+
+        row.ul_speed =
+            profile->ul_speed.toStdString();
+
+        row.test_country =
+            profile->test_country.toStdString();
+
+        row.ip_out =
+            profile->ip_out.toStdString();
+
+        row.outbound_json =
+            outboundJson.toStdString();
+
+
+        row.traffic_dl =
+            static_cast<long long>(
+                traffic.downlink
+                );
+
+        row.traffic_up =
+            static_cast<long long>(
+                traffic.uplink
+                );
+
+
         return row;
     }
 
@@ -770,27 +899,50 @@ namespace Configs {
         return true;
     }
 
-    bool ProfilesRepo::SaveTraffic(const std::shared_ptr<Profile>& profile) {
-        if (!profile || profile->id < 0) {
+    bool ProfilesRepo::SaveTraffic(
+        const std::shared_ptr<Profile>& profile)
+    {
+        if (!profile ||
+            profile->id < 0)
+        {
             return false;
         }
 
-        const int id = profile->id;
+
+        const int id =
+            profile->id;
+
+
+        // Traffic lock exists only during snapshot creation.
+        const auto traffic =
+            profile->TrafficSnapshot();
+
+
         const long long dl =
-            static_cast<long long>(profile->traffic_downlink);
+            static_cast<long long>(
+                traffic.downlink
+                );
+
         const long long up =
-            static_cast<long long>(profile->traffic_uplink);
+            static_cast<long long>(
+                traffic.uplink
+                );
+
 
         QMutexLocker locker(&mutex);
 
+
         db.exec(
             "UPDATE profiles "
-            "SET traffic_dl = ?, traffic_up = ? "
+            "SET traffic_dl = ?, "
+            "traffic_up = ? "
             "WHERE id = ?",
+
             dl,
             up,
             id
         );
+
 
         return true;
     }
