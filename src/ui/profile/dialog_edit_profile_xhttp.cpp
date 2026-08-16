@@ -168,7 +168,7 @@ void DialogEditProfile::updateXrayXHTTPControls() {
 }
 
 bool DialogEditProfile::validateXrayXHTTPSettings() {
-    if (!ent->outbound->IsXray() || ui->xray_network->currentText() != "xhttp") return true;
+    if (!ent->OutboundSnapshot()->IsXray() || ui->xray_network->currentText() != "xhttp") return true;
 
     if (!ui->xray_max_connections->text().trimmed().isEmpty() &&
         !ui->xray_max_concurrency->text().trimmed().isEmpty()) {

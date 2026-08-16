@@ -37,17 +37,15 @@
 #include "include/ui/profile/edit_shadowtls.h"
 #include "include/ui/profile/edit_xrayvless.h"
 
-#define LOAD_TYPE(a) ui->type->addItem(Configs::dataManager->profilesRepo->NewProfile(a)->outbound->DisplayType(), a);
-
 namespace {
-constexpr int kXrayXHTTPNetworkMinWidth = 760;
+    constexpr int kXrayXHTTPNetworkMinWidth = 760;
 }
 
 void DialogEditProfile::queueRefreshDialogLayout() {
-    runOnThread([=,this] {
+    runOnThread([=, this] {
         adjustSize();
         adjustPosition(MainWindowApi::Widget());
-    }, this);
+        }, this);
 }
 
 void DialogEditProfile::toggleSingboxWidgets(bool show) {
@@ -61,14 +59,14 @@ void DialogEditProfile::toggleXrayWidgets(bool show) {
     ui->xray_widget->setVisible(show && hasVisibleXrayDetails);
 }
 
-DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId, QWidget *parent)
+DialogEditProfile::DialogEditProfile(const QString& _type, int profileOrGroupId, QWidget* parent)
     : QDialog(parent), ui(new Ui::DialogEditProfile) {
     // setup UI
     ui->setupUi(this);
-    auto setXrayXHTTPNetworkVisible = [=,this](bool visible) {
+    auto setXrayXHTTPNetworkVisible = [=, this](bool visible) {
         ui->xray_network_scroll->setMinimumWidth(visible ? kXrayXHTTPNetworkMinWidth : 0);
         ui->xray_xhttp_box->setVisible(visible);
-    };
+        };
     ui->dialog_layout->setStretch(0, 0);
     ui->dialog_layout->setStretch(1, 1);
     ui->dialog_layout->setStretch(2, 1);
@@ -79,7 +77,7 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
     ui->verticalLayout_8->setAlignment(Qt::AlignTop);
 
     // Xray init
-    ui->xray_security->addItems({"", "tls", "reality"});
+    ui->xray_security->addItems({ "", "tls", "reality" });
     ui->xray_network->addItems(Configs::XrayNetworks);
     ui->xray_fp->addItems(Configs::tlsFingerprints);
     setupXrayXHTTPControls();
@@ -88,7 +86,7 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
 
     // network changed
     network_title_base = ui->network_box->title();
-    connect(ui->network, &QComboBox::currentTextChanged, this, [=,this](const QString &txt) {
+    connect(ui->network, &QComboBox::currentTextChanged, this, [=, this](const QString& txt) {
         ui->network_box->setTitle(network_title_base.arg(txt));
         if (txt == "grpc") {
             ui->headers->setVisible(false);
@@ -99,7 +97,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
             ui->path_l->setVisible(false);
             ui->host->setVisible(false);
             ui->host_l->setVisible(false);
-        } else if (txt == "ws" || txt == "httpupgrade") {
+        }
+        else if (txt == "ws" || txt == "httpupgrade") {
             ui->headers->setVisible(true);
             ui->headers_l->setVisible(true);
             ui->method->setVisible(false);
@@ -108,7 +107,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
             ui->path_l->setVisible(true);
             ui->host->setVisible(true);
             ui->host_l->setVisible(true);
-        } else if (txt == "http") {
+        }
+        else if (txt == "http") {
             ui->headers->setVisible(true);
             ui->headers_l->setVisible(true);
             ui->method->setVisible(true);
@@ -117,7 +117,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
             ui->path_l->setVisible(true);
             ui->host->setVisible(true);
             ui->host_l->setVisible(true);
-        } else {
+        }
+        else {
             ui->headers->setVisible(false);
             ui->headers_l->setVisible(false);
             ui->method->setVisible(false);
@@ -130,7 +131,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
         if (txt == "grpc") {
             ui->service_name->setVisible(true);
             ui->service_name_l->setVisible(true);
-        } else {
+        }
+        else {
             ui->service_name->setVisible(false);
             ui->service_name_l->setVisible(false);
         }
@@ -139,7 +141,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
             ui->ws_early_data_length_l->setVisible(true);
             ui->ws_early_data_name->setVisible(true);
             ui->ws_early_data_name_l->setVisible(true);
-        } else {
+        }
+        else {
             ui->ws_early_data_length->setVisible(false);
             ui->ws_early_data_length_l->setVisible(false);
             ui->ws_early_data_name->setVisible(false);
@@ -147,60 +150,62 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
         }
         if (!ui->utlsFingerprint->count()) ui->utlsFingerprint->addItems(Configs::tlsFingerprints);
         int networkBoxVisible = 0;
-        for (auto label: ui->network_box->findChildren<QLabel *>()) {
+        for (auto label : ui->network_box->findChildren<QLabel*>()) {
             if (!label->isHidden()) networkBoxVisible++;
         }
         ui->network_box->setVisible(networkBoxVisible);
         queueRefreshDialogLayout();
-    });
+        });
     ui->network->removeItem(0);
 
     // security changed
-    connect(ui->security, &QComboBox::currentTextChanged, this, [=,this](const QString &txt) {
+    connect(ui->security, &QComboBox::currentTextChanged, this, [=, this](const QString& txt) {
         if (txt == "tls") {
             ui->security_box->setVisible(true);
             ui->tls_camouflage_box->setVisible(true);
-        } else {
+        }
+        else {
             ui->security_box->setVisible(false);
             ui->tls_camouflage_box->setVisible(false);
         }
         queueRefreshDialogLayout();
-    });
+        });
     emit ui->security->currentTextChanged(ui->security->currentText());
 
     // for fragment
-    connect(ui->tls_frag, &QCheckBox::stateChanged, this, [=,this](bool state)
-    {
-        ui->tls_frag_fall_delay->setEnabled(state);
-    });
+    connect(ui->tls_frag, &QCheckBox::stateChanged, this, [=, this](bool state)
+        {
+            ui->tls_frag_fall_delay->setEnabled(state);
+        });
 
     // mux setting changed
-    connect(ui->multiplex, &QComboBox::currentTextChanged, this, [=,this](const QString &txt) {
+    connect(ui->multiplex, &QComboBox::currentTextChanged, this, [=, this](const QString& txt) {
         if (txt == "Off") {
             ui->brutal_enable->setCheckState(Qt::CheckState::Unchecked);
             ui->brutal_box->setEnabled(false);
-        } else {
+        }
+        else {
             ui->brutal_box->setEnabled(true);
         }
-    });
+        });
 
     // Advanced options
-    connect(ui->advanced_button, &QPushButton::clicked, this, [=,this]() {
+    connect(ui->advanced_button, &QPushButton::clicked, this, [=, this]() {
         auto advancedWidget = new EditAdvanced(this, ent);
         advancedWidget->show();
-    });
+        });
 
     // Xray
-    connect(ui->xray_mode, &QComboBox::currentTextChanged, this, [=,this](const QString &) {
+    connect(ui->xray_mode, &QComboBox::currentTextChanged, this, [=, this](const QString&) {
         updateXrayXHTTPControls();
         queueRefreshDialogLayout();
-    });
-    connect(ui->xray_xpadding_obfs_mode, &QCheckBox::toggled, this, [=,this](bool) {
+        });
+    connect(ui->xray_xpadding_obfs_mode, &QCheckBox::toggled, this, [=, this](bool) {
         updateXrayXHTTPControls();
         queueRefreshDialogLayout();
-    });
+        });
     ui->xray_network_box->hide();
-    connect(ui->xray_network, &QComboBox::currentTextChanged, this, [=,this](const QString &txt) {
+    connect(ui->xray_network, &QComboBox::currentTextChanged, this, [=, this](const QString& txt) {
         if (txt == "raw") {
             ui->xray_network_box->setVisible(false);
             if (ui->xray_security_box->isHidden()) ui->xray_widget->hide();
@@ -216,7 +221,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
                 ui->xray_headers->setVisible(true);
                 ui->xray_multi_mode->setVisible(false);
                 updateXrayXHTTPControls();
-            } else {
+            }
+            else {
                 setXrayXHTTPNetworkVisible(false);
                 if (txt == "grpc") {
                     ui->xray_ed_label->setVisible(false);
@@ -224,7 +230,8 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
                     ui->xray_headers_l->setVisible(false);
                     ui->xray_headers->setVisible(false);
                     ui->xray_multi_mode->setVisible(true);
-                } else {
+                }
+                else {
                     ui->xray_ed_label->setVisible(true);
                     ui->xray_ed_length->setVisible(true);
                     ui->xray_headers_l->setVisible(true);
@@ -235,10 +242,10 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
         }
         updateXrayCommons(txt);
         queueRefreshDialogLayout();
-    });
+        });
 
     ui->xray_security_box->hide();
-    connect(ui->xray_security, &QComboBox::currentTextChanged, this, [=,this](const QString &txt) {
+    connect(ui->xray_security, &QComboBox::currentTextChanged, this, [=, this](const QString& txt) {
         if (txt.isEmpty()) {
             ui->xray_security_box->setVisible(false);
             if (ui->xray_network_box->isHidden()) ui->xray_widget->hide();
@@ -248,56 +255,130 @@ DialogEditProfile::DialogEditProfile(const QString &_type, int profileOrGroupId,
             ui->xray_security_box->setVisible(true);
             ui->xray_tls_only->setVisible(true);
             ui->xray_reality_box->setVisible(false);
-        } else {
+        }
+        else {
             ui->xray_widget->show();
             ui->xray_security_box->setVisible(true);
             ui->xray_tls_only->setVisible(false);
             ui->xray_reality_box->setVisible(true);
         }
         queueRefreshDialogLayout();
-    });
+        });
 
     newEnt = _type != "";
     if (newEnt) {
         this->groupId = profileOrGroupId;
         this->type = _type;
 
+        // Load profile types without exposing Profile::outbound_.
+        const auto loadType =
+            [this](const QString& profileType)
+            {
+                const auto profile =
+                    Configs::dataManager
+                    ->profilesRepo
+                    ->NewProfile(profileType);
+
+                if (!profile)
+                {
+                    return;
+                }
+
+                const auto outbound =
+                    profile->OutboundSnapshot();
+
+                if (!outbound)
+                {
+                    return;
+                }
+
+                ui->type->addItem(
+                    outbound->DisplayType(),
+                    profileType
+                );
+            };
+
         // load type to combo box
-        LOAD_TYPE("socks")
-        LOAD_TYPE("http")
-        LOAD_TYPE("shadowsocks")
-        LOAD_TYPE("trojan")
-        LOAD_TYPE("vmess")
-        LOAD_TYPE("vless")
+        loadType("socks");
+        loadType("http");
+        loadType("shadowsocks");
+        loadType("trojan");
+        loadType("vmess");
+        loadType("vless");
         ui->type->addItem("VLESS (Xray)", "xrayvless");
-        LOAD_TYPE("hysteria")
-        LOAD_TYPE("tuic")
-        LOAD_TYPE("juicity")
-        LOAD_TYPE("naive")
-        LOAD_TYPE("trusttunnel")
-        LOAD_TYPE("anytls")
-        LOAD_TYPE("shadowtls")
-        LOAD_TYPE("wireguard")
-        LOAD_TYPE("tailscale")
-        LOAD_TYPE("ssh")
-        LOAD_TYPE("direct")
+        loadType("hysteria");
+        loadType("tuic");
+        loadType("juicity");
+        loadType("naive");
+        loadType("trusttunnel");
+        loadType("anytls");
+        loadType("shadowtls");
+        loadType("wireguard");
+        loadType("tailscale");
+        loadType("ssh");
+        loadType("direct");
         ui->type->addItem(tr("Custom (%1 outbound)").arg(software_core_name), Configs::Custom::CustomOutbound);
         ui->type->addItem(tr("Custom (%1 config)").arg(software_core_name), Configs::Custom::CustomFullConfig);
         ui->type->addItem(tr("Custom (Xray outbound)"), Configs::Custom::CustomXrayOutbound);
         ui->type->addItem(tr("Custom (Xray config)"), Configs::Custom::CustomXrayFullConfig);
         ui->type->addItem(tr("Extra Core"), "extracore");
-        LOAD_TYPE("chain")
+        loadType("chain");
 
         // type changed
-        connect(ui->type, &QComboBox::currentIndexChanged, this, [=,this](int index) {
+        connect(ui->type, &QComboBox::currentIndexChanged, this, [=, this](int index) {
             typeSelected(ui->type->itemData(index).toString());
-        });
-    } else {
-        this->ent = Configs::dataManager->profilesRepo->GetProfile(profileOrGroupId);
-        if (this->ent == nullptr) return;
-        this->type = ent->type;
-        ui->type->setVisible(false);
-        ui->type_l->setVisible(false);
+            });
+    }
+    else
+    {
+        // Original object stored in ProfilesRepo.
+        originalEnt =
+            Configs::dataManager
+            ->profilesRepo
+            ->GetProfile(
+                profileOrGroupId
+            );
+
+
+        if (!originalEnt)
+        {
+            return;
+        }
+
+
+        // Remember the exact revision that was opened in the editor.
+        // A later commit is rejected if the live Profile changed meanwhile.
+        const auto originalSnapshot =
+            originalEnt->ConfigSnapshot();
+
+        originalRevision =
+            originalSnapshot.revision;
+
+
+        // IMPORTANT:
+        //
+        // UI edits a detached deep copy.
+        // The live Profile remains untouched.
+        ent =
+            originalEnt
+            ->CloneForEditing();
+
+
+        if (!ent)
+        {
+            return;
+        }
+
+
+        type =
+            ent->Type();
+
+
+        ui->type
+            ->setVisible(false);
+
+        ui->type_l
+            ->setVisible(false);
     }
 
     typeSelected(this->type);
@@ -307,7 +388,7 @@ DialogEditProfile::~DialogEditProfile() {
     delete ui;
 }
 
-void DialogEditProfile::typeSelected(const QString &newType) {
+void DialogEditProfile::typeSelected(const QString& newType) {
     QString customType;
     type = newType;
     bool validType = true;
@@ -316,108 +397,130 @@ void DialogEditProfile::typeSelected(const QString &newType) {
         auto _innerWidget = new EditHttp(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "socks") {
+    }
+    else if (type == "socks") {
         auto _innerWidget = new EditSocks(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "shadowsocks") {
+    }
+    else if (type == "shadowsocks") {
         auto _innerWidget = new EditShadowSocks(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "chain") {
+    }
+    else if (type == "chain") {
         auto _innerWidget = new EditChain(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "vmess") {
+    }
+    else if (type == "vmess") {
         auto _innerWidget = new EditVMess(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if ( type == "vless") {
+    }
+    else if (type == "vless") {
         auto _innerWidget = new EditVless(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-        connect(_innerWidget->_flow, &QComboBox::currentTextChanged, _innerWidget, [=,this](const QString &txt)
-        {
-            if (txt == "xtls-rprx-vision")
+        connect(_innerWidget->_flow, &QComboBox::currentTextChanged, _innerWidget, [=, this](const QString& txt)
             {
-                ui->multiplex->setDisabled(true);
-            } else
-            {
-                ui->multiplex->setDisabled(false);
-            }
-        });
-    } else if (type == "xrayvless") {
+                if (txt == "xtls-rprx-vision")
+                {
+                    ui->multiplex->setDisabled(true);
+                }
+                else
+                {
+                    ui->multiplex->setDisabled(false);
+                }
+            });
+    }
+    else if (type == "xrayvless") {
         auto _innerWidget = new EditXrayVless(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "trojan") {
+    }
+    else if (type == "trojan") {
         auto _innerWidget = new EditTrojan(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "hysteria") {
+    }
+    else if (type == "hysteria") {
         auto _innerWidget = new EditHysteria(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-        connect(_innerWidget->_protocol_version, &QComboBox::currentTextChanged, _innerWidget, [=,this](const QString &txt)
-        {
-            _innerWidget->editHysteriaLayout(txt);
-            queueRefreshDialogLayout();
-        });
-    } else if (type == "tuic") {
+        connect(_innerWidget->_protocol_version, &QComboBox::currentTextChanged, _innerWidget, [=, this](const QString& txt)
+            {
+                _innerWidget->editHysteriaLayout(txt);
+                queueRefreshDialogLayout();
+            });
+    }
+    else if (type == "tuic") {
         auto _innerWidget = new EditTuic(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "juicity") {
+    }
+    else if (type == "juicity") {
         auto _innerWidget = new EditJuicity(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "trusttunnel") {
+    }
+    else if (type == "trusttunnel") {
         auto _innerWidget = new EditTrustTunnel(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "anytls") {
+    }
+    else if (type == "anytls") {
         auto _innerWidget = new EditAnyTLS(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "shadowtls") {
+    }
+    else if (type == "shadowtls") {
         auto _innerWidget = new EditShadowTLS(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "wireguard") {
+    }
+    else if (type == "wireguard") {
         auto _innerWidget = new EditWireguard(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "tailscale") {
+    }
+    else if (type == "tailscale") {
         auto _innerWidget = new EditTailScale(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "ssh") {
+    }
+    else if (type == "ssh") {
         auto _innerWidget = new EditSSH(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == Configs::Custom::CustomOutbound || type == Configs::Custom::CustomFullConfig ||
-               type == Configs::Custom::CustomXrayOutbound || type == Configs::Custom::CustomXrayFullConfig ||
-               type == "custom") {
+    }
+    else if (type == Configs::Custom::CustomOutbound || type == Configs::Custom::CustomFullConfig ||
+        type == Configs::Custom::CustomXrayOutbound || type == Configs::Custom::CustomXrayFullConfig ||
+        type == "custom") {
         auto _innerWidget = new EditCustom(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
         customType = newEnt ? type : ent->Custom()->type;
         _innerWidget->preset_core = customType;
         type = "custom";
-    } else if (type == "extracore")
+    }
+    else if (type == "extracore")
     {
         auto _innerWidget = new EditExtraCore(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "naive") {
+    }
+    else if (type == "naive") {
         auto _innerWidget = new EditNaive(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else if (type == "direct") {
+    }
+    else if (type == "direct") {
         auto _innerWidget = new EditDirect(this);
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
-    } else {
+    }
+    else {
         validType = false;
     }
 
@@ -427,39 +530,57 @@ void DialogEditProfile::typeSelected(const QString &newType) {
     }
 
     if (newEnt) {
-        this->ent = Configs::dataManager->profilesRepo->NewProfile(type);
-        this->ent->gid = groupId;
+        this->ent =
+            Configs::dataManager
+            ->profilesRepo
+            ->NewProfile(type);
+    }
+
+    const auto outbound =
+        ent
+        ? ent->OutboundSnapshot()
+        : nullptr;
+
+    if (!outbound)
+    {
+        MessageBoxWarning(
+            tr("Error"),
+            tr("Profile outbound is not available.")
+        );
+
+        return;
     }
 
     // hide some widget
     auto showAddressPort = type != "chain"
-                           && type != "direct"
-                           && customType != Configs::Custom::CustomOutbound
-                           && customType != Configs::Custom::CustomFullConfig
-                           && customType != Configs::Custom::CustomXrayOutbound
-                           && customType != Configs::Custom::CustomXrayFullConfig
-                           && type != "extracore" && type != "tailscale";
+        && type != "direct"
+        && customType != Configs::Custom::CustomOutbound
+        && customType != Configs::Custom::CustomFullConfig
+        && customType != Configs::Custom::CustomXrayOutbound
+        && customType != Configs::Custom::CustomXrayFullConfig
+        && type != "extracore" && type != "tailscale";
     ui->address->setVisible(showAddressPort);
     ui->address_l->setVisible(showAddressPort);
     ui->port->setVisible(showAddressPort);
     ui->port_l->setVisible(showAddressPort);
 
     auto showAdvancedDialOption = type != "chain"
-    && type != "extracore" && type != "tailscale"
-    && customType != Configs::Custom::CustomOutbound
-    && customType != Configs::Custom::CustomFullConfig
-    && customType != Configs::Custom::CustomXrayOutbound
-    && customType != Configs::Custom::CustomXrayFullConfig;
+        && type != "extracore" && type != "tailscale"
+        && customType != Configs::Custom::CustomOutbound
+        && customType != Configs::Custom::CustomFullConfig
+        && customType != Configs::Custom::CustomXrayOutbound
+        && customType != Configs::Custom::CustomXrayFullConfig;
     ui->advanced_button->setVisible(showAdvancedDialOption);
 
-    if (ent->outbound->HasTLS() || ent->outbound->HasTransport()) {
+    if (outbound->HasTLS() || outbound->HasTransport()) {
         ui->right_all_w->setVisible(true);
-        auto tls = ent->outbound->GetTLS();
-        auto transport = ent->outbound->GetTransport();
-        if (ent->outbound->MustTLS()) {
+        auto tls = outbound->GetTLS();
+        auto transport = outbound->GetTransport();
+        if (outbound->MustTLS()) {
             ui->security->setCurrentText("tls");
             ui->security->setEnabled(false);
-        } else {
+        }
+        else {
             ui->security->setCurrentText(tls->enabled ? "tls" : "");
             ui->security->setEnabled(true);
         }
@@ -471,7 +592,8 @@ void DialogEditProfile::typeSelected(const QString &newType) {
         ui->alpn->setText(tls->alpn.join(","));
         if (newEnt) {
             ui->utlsFingerprint->setCurrentText(Configs::dataManager->settingsRepo->utlsFingerprint);
-        } else {
+        }
+        else {
             ui->utlsFingerprint->setCurrentText(tls->utls->fingerPrint);
         }
         ui->tls_frag->setChecked(tls->fragment);
@@ -486,13 +608,14 @@ void DialogEditProfile::typeSelected(const QString &newType) {
         ui->reality_pbk->setText(tls->reality->public_key);
         ui->reality_sid->setText(tls->reality->short_id);
         CACHE.certificate = tls->certificate;
-    } else {
+    }
+    else {
         ui->right_all_w->setVisible(false);
     }
 
-    if (ent->outbound->IsXray()) {
-        auto xrayStream = ent->outbound->GetXrayStream();
-        auto xrayMux = ent->outbound->GetXrayMultiplex();
+    if (outbound->IsXray()) {
+        auto xrayStream = outbound->GetXrayStream();
+        auto xrayMux = outbound->GetXrayMultiplex();
 
         updateXrayCommons(xrayStream->network);
 
@@ -541,13 +664,14 @@ void DialogEditProfile::typeSelected(const QString &newType) {
 
         toggleXrayWidgets(true);
         toggleSingboxWidgets(false);
-    } else {
+    }
+    else {
         toggleXrayWidgets(false);
         toggleSingboxWidgets(true);
     }
 
-    if (ent->outbound->HasMux()) {
-        auto mux = ent->outbound->GetMux();
+    if (outbound->HasMux()) {
+        auto mux = outbound->GetMux();
         ui->multiplex->setCurrentIndex(mux->getMuxState());
         ui->brutal_enable->setChecked(mux->brutal->enabled);
         ui->brutal_d_speed->setText(Int2String(mux->brutal->down_mbps));
@@ -559,7 +683,7 @@ void DialogEditProfile::typeSelected(const QString &newType) {
     ui->bean->layout()->removeWidget(old);
     innerWidget->layout()->setContentsMargins(0, 0, 0, 0);
     ui->bean->layout()->addWidget(innerWidget);
-    ui->bean->setTitle(ent->outbound->DisplayType());
+    ui->bean->setTitle(outbound->DisplayType());
     delete old;
 
     // 左边 bean inner editor
@@ -567,72 +691,87 @@ void DialogEditProfile::typeSelected(const QString &newType) {
     innerEditor->get_edit_text_name = [&]() { return ui->name->text(); };
     innerEditor->get_edit_text_serverAddress = [&]() { return ui->address->text(); };
     innerEditor->get_edit_text_serverPort = [&]() { return ui->port->text(); };
-    innerEditor->set_edit_text_serverAddress = [&](const QString &v) { ui->address->setText(v); };
-    innerEditor->set_edit_text_serverPort = [&](const QString &v) { ui->port->setText(v); };
-    innerEditor->editor_cache_updated = [=,this] { editor_cache_updated_impl(); };
+    innerEditor->set_edit_text_serverAddress = [&](const QString& v) { ui->address->setText(v); };
+    innerEditor->set_edit_text_serverPort = [&](const QString& v) { ui->port->setText(v); };
+    innerEditor->editor_cache_updated = [=, this] { editor_cache_updated_impl(); };
     innerEditor->onStart(ent);
 
     // 左边 common
-    ui->name->setText(ent->outbound->name);
-    ui->address->setText(ent->outbound->GetAddress());
-    ui->port->setText(ent->outbound->GetPort());
+    ui->name->setText(outbound->name);
+    ui->address->setText(outbound->GetAddress());
+    ui->port->setText(outbound->GetPort());
     ui->port->setValidator(QRegExpValidator_Number);
 
     // 星号
     ADD_ASTERISK(this)
-    if (ent->outbound->HasTransport()) {
-        ui->network_l->setVisible(true);
-        ui->network->setVisible(true);
-        if (ui->network->currentText() == "tcp") {
-            ui->network_box->setVisible(false);
-        } else {
-            ui->network_box->setVisible(true);
+        if (outbound->HasTransport()) {
+            ui->network_l->setVisible(true);
+            ui->network->setVisible(true);
+            if (ui->network->currentText() == "tcp") {
+                ui->network_box->setVisible(false);
+            }
+            else {
+                ui->network_box->setVisible(true);
+            }
         }
-    } else {
-        ui->network_l->setVisible(false);
-        ui->network->setVisible(false);
-        ui->network_box->setVisible(false);
-    }
-    if (ent->outbound->HasTLS()) {
+        else {
+            ui->network_l->setVisible(false);
+            ui->network->setVisible(false);
+            ui->network_box->setVisible(false);
+        }
+    if (outbound->HasTLS()) {
         ui->security->setVisible(true);
         ui->security_l->setVisible(true);
-    } else {
+    }
+    else {
         ui->security->setVisible(false);
         ui->security_l->setVisible(false);
         ui->security_box->setVisible(false);
         ui->tls_camouflage_box->setVisible(false);
     }
-    if (ent->outbound->HasMux()) {
+    if (outbound->HasMux()) {
         ui->multiplex->setVisible(true);
         ui->multiplex_l->setVisible(true);
         ui->brutal_box->setVisible(true);
-    } else {
+    }
+    else {
         ui->multiplex->setVisible(false);
         ui->multiplex_l->setVisible(false);
         ui->brutal_box->setVisible(false);
     }
     int streamBoxVisible = 0;
-    for (auto label: ui->stream_box->findChildren<QLabel *>()) {
+    for (auto label : ui->stream_box->findChildren<QLabel*>()) {
         if (!label->isHidden() && label->parent() == ui->stream_box) streamBoxVisible++;
     }
     ui->stream_box->setVisible(streamBoxVisible);
 
     auto rightNoBox = (ui->security_box->isHidden() && ui->network_box->isHidden() && ui->tls_camouflage_box->isHidden());
-    if (rightNoBox && !ent->outbound->HasTLS() && !ent->outbound->HasTransport() && !ui->right_all_w->isHidden()) {
+    if (rightNoBox && !outbound->HasTLS() && !outbound->HasTransport() && !ui->right_all_w->isHidden()) {
         ui->right_all_w->setVisible(false);
     }
 
     editor_cache_updated_impl();
-    runOnThread([=,this] {
+    runOnThread([=, this] {
         adjustSize();
         adjustPosition(MainWindowApi::Widget());
         if (isHidden()) show();
-    }, this);
+        }, this);
 }
 
 void DialogEditProfile::updateXrayCommons(QString network) {
-    if (!ent->outbound->IsXray()) return;
-    auto stream = ent->outbound->GetXrayStream();
+    const auto outbound =
+        ent
+        ? ent->OutboundSnapshot()
+        : nullptr;
+
+    if (!outbound ||
+        !outbound->IsXray())
+    {
+        return;
+    }
+
+    auto stream =
+        outbound->GetXrayStream();
 
     if (network == "xhttp") {
         ui->xray_host->setText(stream->xhttp->host);
@@ -640,16 +779,19 @@ void DialogEditProfile::updateXrayCommons(QString network) {
         ui->xray_mode->setCurrentText(stream->xhttp->mode);
         ui->xray_headers->setText(Configs::getHeadersString(stream->xhttp->headers));
         updateXrayXHTTPControls();
-    } else if (network == "grpc") {
+    }
+    else if (network == "grpc") {
         ui->xray_host->setText(stream->grpc->authority);
         ui->xray_path->setText(stream->grpc->serviceName);
         ui->xray_multi_mode->setChecked(stream->grpc->multiMode);
-    } else if (network == "ws") {
+    }
+    else if (network == "ws") {
         ui->xray_host->setText(stream->ws->host);
         ui->xray_path->setText(stream->ws->path);
         ui->xray_ed_length->setText(QString::number(stream->ws->ed));
         ui->xray_headers->setText(Configs::getHeadersString(stream->ws->headers));
-    } else if(network == "httpupgrade") {
+    }
+    else if (network == "httpupgrade") {
         ui->xray_host->setText(stream->httpupgrade->host);
         ui->xray_path->setText(stream->httpupgrade->path);
         ui->xray_ed_length->setText(QString::number(stream->httpupgrade->ed));
@@ -662,7 +804,7 @@ bool DialogEditProfile::validateHeaders() {
 }
 
 bool DialogEditProfile::onEnd() {
-    // bean
+
     if (!innerEditor->onEnd()) {
         return false;
     }
@@ -670,13 +812,23 @@ bool DialogEditProfile::onEnd() {
     if (!validateHeaders()) return false;
     if (!validateXrayXHTTPSettings()) return false;
 
-    ent->outbound->name = ui->name->text();
-    ent->outbound->SetAddress(ui->address->text().remove(' '));    
-    ent->outbound->SetServerPort(ui->port->text().toInt());
+    const auto outbound =
+        ent
+        ? ent->OutboundSnapshot()
+        : nullptr;
 
-    if (ent->outbound->HasTLS() || ent->outbound->HasTransport()) {
-        auto tls = ent->outbound->GetTLS();
-        auto transport = ent->outbound->GetTransport();
+    if (!outbound)
+    {
+        return false;
+    }
+
+    outbound->name = ui->name->text();
+    outbound->SetAddress(ui->address->text().remove(' '));
+    outbound->SetServerPort(ui->port->text().toInt());
+
+    if (outbound->HasTLS() || outbound->HasTransport()) {
+        auto tls = outbound->GetTLS();
+        auto transport = outbound->GetTransport();
         transport->type = ui->network->currentText();
         tls->enabled = ui->security->currentText() == "tls";
         transport->path = ui->path->text();
@@ -699,16 +851,16 @@ bool DialogEditProfile::onEnd() {
         tls->reality->enabled = !tls->reality->public_key.isEmpty();
         tls->certificate = CACHE.certificate;
     }
-    if (ent->outbound->HasMux()) {
-        auto mux = ent->outbound->GetMux();
+    if (outbound->HasMux()) {
+        auto mux = outbound->GetMux();
         mux->saveMuxState(ui->multiplex->currentIndex());
         mux->brutal->enabled = ui->brutal_enable->isChecked();
         mux->brutal->down_mbps = ui->brutal_d_speed->text().toInt();
         mux->brutal->up_mbps = ui->brutal_u_speed->text().toInt();
     }
-    if (ent->outbound->IsXray()) {
-        auto xrayStream = ent->outbound->GetXrayStream();
-        auto xrayMux = ent->outbound->GetXrayMultiplex();
+    if (outbound->IsXray()) {
+        auto xrayStream = outbound->GetXrayStream();
+        auto xrayMux = outbound->GetXrayMultiplex();
 
         xrayStream->network = ui->xray_network->currentText();
         xrayStream->security = ui->xray_security->currentText();
@@ -762,16 +914,19 @@ bool DialogEditProfile::onEnd() {
             xrayStream->xhttp->cMaxReuseTimes = ui->xray_max_reuse_times->text();
             xrayStream->xhttp->hKeepAlivePeriod = ui->xray_keep_alive_period->text().toLongLong();
             xrayStream->xhttp->downloadSettings = xrayStream->xhttp->mode == "stream-one" ? QString() : CACHE.XrayDownloadSettings;
-        } else if (xrayStream->network == "grpc") {
+        }
+        else if (xrayStream->network == "grpc") {
             xrayStream->grpc->authority = ui->xray_host->text();
             xrayStream->grpc->serviceName = ui->xray_path->text();
             xrayStream->grpc->multiMode = ui->xray_multi_mode->isChecked();
-        } else if (xrayStream->network == "ws") {
+        }
+        else if (xrayStream->network == "ws") {
             xrayStream->ws->host = ui->xray_host->text();
             xrayStream->ws->path = ui->xray_path->text();
             xrayStream->ws->ed = ui->xray_ed_length->text().toInt();
             xrayStream->ws->headers = Configs::parseHeaderPairs(ui->xray_headers->text());
-        } else if (xrayStream->network == "httpupgrade") {
+        }
+        else if (xrayStream->network == "httpupgrade") {
             xrayStream->httpupgrade->host = ui->xray_host->text();
             xrayStream->httpupgrade->path = ui->xray_path->text();
             xrayStream->httpupgrade->ed = ui->xray_ed_length->text().toInt();
@@ -782,45 +937,136 @@ bool DialogEditProfile::onEnd() {
     return true;
 }
 
-void DialogEditProfile::accept() {
-    // save to ent
-    if (!onEnd()) {
+void DialogEditProfile::accept()
+{
+    // Apply widgets to the detached editing copy.
+    if (!onEnd())
+    {
         return;
     }
 
-    // finish
+
     QStringList args;
 
-    if (newEnt) {
-        auto ok = Configs::dataManager->profilesRepo->AddProfile(ent);
-        if (!ok) {
-            MessageBoxWarning("???", "id exists");
+
+    // =====================================================
+    // New profile
+    // =====================================================
+
+    if (newEnt)
+    {
+        const bool ok =
+            Configs::dataManager
+            ->profilesRepo
+            ->AddProfile(
+                ent,
+                groupId
+            );
+
+
+        if (!ok)
+        {
+            MessageBoxWarning(
+                tr("Error"),
+                tr(
+                    "Failed to add profile."
+                )
+            );
+
+            return;
         }
-    } else {
-        auto changed = Configs::dataManager->profilesRepo->Save(ent);
-        if (changed && Configs::dataManager->settingsRepo->started_id == ent->id) args << MwArg::RestartProxy;
     }
 
-    MW_dialog_message(MwMessage::ProfileChanged, args);
+    // =====================================================
+    // Existing profile
+    // =====================================================
+
+    else
+    {
+        if (!originalEnt)
+        {
+            return;
+        }
+
+
+        // Atomically replace old configuration.
+        if (!originalEnt
+            ->CommitConfigurationFrom(
+                *ent,
+                originalRevision
+            ))
+        {
+            MessageBoxWarning(
+                tr("Profile changed"),
+                tr(
+                    "The profile was modified "
+                    "while the editor was open. "
+                    "Please reopen it and try again."
+                )
+            );
+
+            return;
+        }
+
+
+        const bool changed =
+            Configs::dataManager
+            ->profilesRepo
+            ->Save(
+                originalEnt
+            );
+
+
+        if (changed &&
+            Configs::dataManager
+            ->settingsRepo
+            ->started_id ==
+            originalEnt->Id())
+        {
+            args <<
+                MwArg::RestartProxy;
+        }
+    }
+
+
+    MW_dialog_message(
+        MwMessage::ProfileChanged,
+        args
+    );
+
+
     QDialog::accept();
 }
 
 // cached editor (dialog)
 
 void DialogEditProfile::editor_cache_updated_impl() {
+    const auto outbound =
+        ent
+        ? ent->OutboundSnapshot()
+        : nullptr;
+
     if (CACHE.certificate.isEmpty()) {
         ui->certificate_edit->setText(tr("Not set"));
-    } else {
+    }
+    else {
         ui->certificate_edit->setText(tr("Already set"));
     }
-    if (ent->outbound->IsXray()) {
-        ui->xray_downloadsettings_edit->setText(CACHE.XrayDownloadSettings.isEmpty() ? "Not Set" : "Already Set");
+    if (outbound &&
+        outbound->IsXray())
+    {
+        ui->xray_downloadsettings_edit->setText(
+            CACHE.XrayDownloadSettings.isEmpty()
+            ? "Not Set"
+            : "Already Set"
+        );
     }
     // CACHE macro
-    for (auto a: innerEditor->get_editor_cached()) {
+    for (auto a : innerEditor->get_editor_cached()) {
         if (a.second.isEmpty()) {
             a.first->setText(tr("Not set"));
-        } else {
+        }
+        else {
             a.first->setText(tr("Already set"));
         }
     }

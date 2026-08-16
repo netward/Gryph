@@ -36,7 +36,7 @@ bool EditChain::onEnd() {
         int id = ui->listWidget->item(i)->data(114514).toInt();
         idList << id;
         auto e = Configs::dataManager->profilesRepo->GetProfile(id);
-        if (e != nullptr && e->outbound != nullptr && e->outbound->IsExtraCore()) {
+        if (e != nullptr && e->OutboundSnapshot() != nullptr && e->OutboundSnapshot()->IsExtraCore()) {
             extracoreCount++;
             // A profile using an extra core must be the outermost detour,
             // which corresponds to the top of the chain list (index 0). This
@@ -70,7 +70,7 @@ void EditChain::on_select_profile_clicked() {
 
 void EditChain::AddProfileToListIfExist(int profileId) {
     auto _ent = Configs::dataManager->profilesRepo->GetProfile(profileId);
-    if (_ent != nullptr && _ent->type != "chain") {
+    if (_ent != nullptr && _ent->Type() != "chain") {
         auto wI = new QListWidgetItem();
         wI->setData(114514, profileId);
         auto w = new ProxyItem(this, _ent, wI);
@@ -92,7 +92,7 @@ void EditChain::AddProfileToListIfExist(int profileId) {
 
 void EditChain::ReplaceProfile(ProxyItem *w, int profileId) {
     auto _ent = Configs::dataManager->profilesRepo->GetProfile(profileId);
-    if (_ent != nullptr && _ent->type != "chain") {
+    if (_ent != nullptr && _ent->Type() != "chain") {
         w->item->setData(114514, profileId);
         w->ent = _ent;
         w->refresh_data();

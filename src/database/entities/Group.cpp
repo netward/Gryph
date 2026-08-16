@@ -736,21 +736,13 @@ namespace Configs
     bool Group::SortProfiles(
         GroupSortAction sortAction)
     {
-        // Only one sorting operation may work on this
-        // Group at a time.
         QMutexLocker sortLocker(
             &sortMutex_
         );
-
-
         QList<int>
             idsSnapshot;
-
-
         testBy testSortBySnapshot =
             testBy::latency;
-
-
         trafficBy trafficSortBySnapshot =
             trafficBy::total;
 
@@ -1011,8 +1003,15 @@ namespace Configs
             loadedProfileIds;
 
 
-        QHash<int, QString>
-            textById;
+        // Frozen configuration/display data.
+        //
+        // Group::SortProfiles must not read
+        // mutable Profile::outbound fields from
+        // inside the comparator.
+        QHash<
+            int,
+            ProfileConfigSnapshot
+        > configById;
 
 
         QHash<
@@ -1031,7 +1030,6 @@ namespace Configs
             loadedProfiles.size()
         );
 
-
         if (sortAction.method ==
             GroupSortMethod::ByName ||
             sortAction.method ==
@@ -1039,11 +1037,10 @@ namespace Configs
             sortAction.method ==
             GroupSortMethod::ByAddress)
         {
-            textById.reserve(
+            configById.reserve(
                 loadedProfiles.size()
             );
         }
-
 
         if (sortAction.method ==
             GroupSortMethod::ByTestResult)
@@ -1074,15 +1071,28 @@ namespace Configs
         for (const auto& profile :
             loadedProfiles)
         {
-            if (!profile ||
-                profile->id < 0)
+            if (!profile)
             {
                 continue;
             }
 
 
+            // =====================================================
+            // Freeze profile configuration
+            // =====================================================
+
+            const auto config =
+                profile->ConfigSnapshot();
+
+
             const int profileId =
-                profile->id;
+                config.id;
+
+
+            if (profileId < 0)
+            {
+                continue;
+            }
 
 
             loadedProfileIds.insert(
@@ -1090,54 +1100,27 @@ namespace Configs
             );
 
 
-            if (sortAction.method ==
-                GroupSortMethod::ByName)
-            {
-                const QString value =
-                    profile->outbound
-                    ? profile->outbound->name
-                    : QString();
-
-                textById.insert(
-                    profileId,
-                    nameSortKey(value)
-                );
-            }
-
+            // -----------------------------------------------------
+            // Name / Type / Address
+            // -----------------------------------------------------
 
             if (sortAction.method ==
-                GroupSortMethod::ByType)
-            {
-                const QString value =
-                    profile->outbound
-                    ? profile
-                    ->outbound
-                    ->DisplayType()
-                    : QString();
-
-                textById.insert(
-                    profileId,
-                    value
-                );
-            }
-
-
-            if (sortAction.method ==
+                GroupSortMethod::ByName ||
+                sortAction.method ==
+                GroupSortMethod::ByType ||
+                sortAction.method ==
                 GroupSortMethod::ByAddress)
             {
-                const QString value =
-                    profile->outbound
-                    ? profile
-                    ->outbound
-                    ->DisplayAddress()
-                    : QString();
-
-                textById.insert(
+                configById.insert(
                     profileId,
-                    value
+                    config
                 );
             }
 
+
+            // -----------------------------------------------------
+            // Test Result
+            // -----------------------------------------------------
 
             if (sortAction.method ==
                 GroupSortMethod::ByTestResult)
@@ -1148,6 +1131,10 @@ namespace Configs
                 );
             }
 
+
+            // -----------------------------------------------------
+            // Traffic
+            // -----------------------------------------------------
 
             if (sortAction.method ==
                 GroupSortMethod::ByTraffic)
@@ -1209,25 +1196,79 @@ namespace Configs
                 }
 
 
-                // =========================================
-                // Name / Type / Address
-                // =========================================
+                // =========================================================
+// Name
+// =========================================================
 
                 if (sortAction.method ==
-                    GroupSortMethod::ByName ||
-                    sortAction.method ==
-                    GroupSortMethod::ByType ||
-                    sortAction.method ==
-                    GroupSortMethod::ByAddress)
+                    GroupSortMethod::ByName)
                 {
+                    const auto configA =
+                        configById.value(a);
+
+                    const auto configB =
+                        configById.value(b);
+
+
                     return compareText(
-                        textById.value(a),
-                        textById.value(b),
+                        nameSortKey(
+                            configA.name
+                        ),
+
+                        nameSortKey(
+                            configB.name
+                        ),
+
                         a,
                         b
                     );
                 }
 
+
+                // =========================================================
+                // Type
+                // =========================================================
+
+                if (sortAction.method ==
+                    GroupSortMethod::ByType)
+                {
+                    const auto configA =
+                        configById.value(a);
+
+                    const auto configB =
+                        configById.value(b);
+
+
+                    return compareText(
+                        configA.displayType,
+                        configB.displayType,
+                        a,
+                        b
+                    );
+                }
+
+
+                // =========================================================
+                // Address
+                // =========================================================
+
+                if (sortAction.method ==
+                    GroupSortMethod::ByAddress)
+                {
+                    const auto configA =
+                        configById.value(a);
+
+                    const auto configB =
+                        configById.value(b);
+
+
+                    return compareText(
+                        configA.displayAddress,
+                        configB.displayAddress,
+                        a,
+                        b
+                    );
+                }
 
                 // =========================================
                 // Test Result
@@ -1297,14 +1338,10 @@ namespace Configs
                             bitrateToBps(
                                 testB.dlSpeed
                             );
-
-
                         const bool validA =
                             valueA >= 0.0;
-
                         const bool validB =
                             valueB >= 0.0;
-
 
                         return compareOptionalNumber(
                             valueA,

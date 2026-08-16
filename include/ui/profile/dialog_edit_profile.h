@@ -38,9 +38,19 @@ private:
     ProfileEditor *innerEditor{};
 
     QString type;
-    int groupId;
+    int groupId = 0;
     bool newEnt = false;
+
+    // Оригинальный Profile, который находится в ProfilesRepo.
+    // Для нового профиля остаётся nullptr.
+    std::shared_ptr<Configs::Profile> originalEnt;
+
+    // Рабочий профиль.
+    // При редактировании существующего профиля это detached copy,
+    // созданная через CloneForEditing().
     std::shared_ptr<Configs::Profile> ent;
+
+    quint64 originalRevision = 0;
 
     QString network_title_base;
 

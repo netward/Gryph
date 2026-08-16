@@ -11,7 +11,7 @@ EditAdvanced::EditAdvanced(QWidget *parent, const std::shared_ptr<Configs::Profi
 {
     ui->setupUi(this);
     ent = _ent;
-    auto dialFieldsObj = ent->outbound->dialFields;
+    auto dialFieldsObj = ent->OutboundSnapshot()->dialFields;
     ui->reuse_addr->setChecked(dialFieldsObj->reuse_addr);
     ui->tcp_fast_open->setChecked(dialFieldsObj->tcp_fast_open);
     ui->udp_fragment->setChecked(dialFieldsObj->udp_fragment);
@@ -44,8 +44,8 @@ EditAdvanced::EditAdvanced(QWidget *parent, const std::shared_ptr<Configs::Profi
     populateBindCombo(ui->inet4_bind_address, m_systemIpv4Addresses, repo->dial_inet4_bind_address_history, dialFieldsObj->inet4_bind_address);
     populateBindCombo(ui->inet6_bind_address, m_systemIpv6Addresses, repo->dial_inet6_bind_address_history, dialFieldsObj->inet6_bind_address);
 
-    if (ent->outbound->HasTLS()) {
-        auto tlsObj = ent->outbound->GetTLS();
+    if (ent->OutboundSnapshot()->HasTLS()) {
+        auto tlsObj = ent->OutboundSnapshot()->GetTLS();
         ui->disable_sni->setChecked(tlsObj->disable_sni);
         ui->min_version->setText(tlsObj->min_version);
         ui->max_version->setText(tlsObj->max_version);
@@ -80,7 +80,7 @@ EditAdvanced::~EditAdvanced()
 }
 
 void EditAdvanced::accept() {
-    auto dialFieldsObj = ent->outbound->dialFields;
+    auto dialFieldsObj = ent->OutboundSnapshot()->dialFields;
     dialFieldsObj->reuse_addr = ui->reuse_addr->isChecked();
     dialFieldsObj->tcp_fast_open = ui->tcp_fast_open->isChecked();
     dialFieldsObj->udp_fragment = ui->udp_fragment->isChecked();
@@ -103,8 +103,8 @@ void EditAdvanced::accept() {
     updateHistory(repo->dial_inet6_bind_address_history, m_systemIpv6Addresses, dialFieldsObj->inet6_bind_address);
     repo->Save();
 
-    if (ent->outbound->HasTLS()) {
-        auto tlsObj = ent->outbound->GetTLS();
+    if (ent->OutboundSnapshot()->HasTLS()) {
+        auto tlsObj = ent->OutboundSnapshot()->GetTLS();
         tlsObj->disable_sni = ui->disable_sni->isChecked();
         tlsObj->min_version = ui->min_version->text();
         tlsObj->max_version = ui->max_version->text();

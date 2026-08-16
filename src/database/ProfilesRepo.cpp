@@ -44,23 +44,34 @@ namespace Configs {
     QJsonObject ProfilesRepo::profileToJson(
         const Profile* profile) const
     {
-        QJsonObject json;
+        if (!profile)
+        {
+            return {};
+        }
+
+        const auto config =
+            profile->ConfigSnapshot();
+
         const auto test =
             profile->TestSnapshot();
 
+        const auto traffic =
+            profile->TrafficSnapshot();
+
+
+        QJsonObject json;
+
         json["type"] =
-            profile->type;
+            config.type;
 
         json["name"] =
-            profile->outbound
-            ? profile->outbound->name
-            : QString();
+            config.name;
 
         json["id"] =
-            profile->id;
+            config.id;
 
         json["gid"] =
-            profile->gid;
+            config.gid;
 
         json["latency"] =
             test.latency;
@@ -77,19 +88,11 @@ namespace Configs {
         json["ip_out"] =
             test.ipOut;
 
-
-        if (profile->outbound) {
-
+        if (!config.outboundJson.isEmpty())
+        {
             json["outbound"] =
-                profile
-                ->outbound
-                ->ExportToJson();
+                config.outboundJson;
         }
-
-
-        const auto traffic =
-            profile->TrafficSnapshot();
-
 
         json["traffic_dl"] =
             traffic.downlink;
@@ -97,209 +100,238 @@ namespace Configs {
         json["traffic_up"] =
             traffic.uplink;
 
-
         return json;
     }
 
-    std::shared_ptr<Profile> ProfilesRepo::profileFromJson(const QJsonObject& json) const {
-        auto profile = std::make_shared<Profile>();
-        
-        // Simple fields
-        profile->type = json["type"].toString();
-        profile->name = json["name"].toString();
-        profile->id = json["id"].toInt();
-        profile->gid = json["gid"].toInt();
+    std::shared_ptr<Profile>
+        ProfilesRepo::profileFromJson(
+            const QJsonObject& json) const
+    {
+        const QString type =
+            json["type"].toString();
+
+
+        auto profile =
+            ProfilesRepo::NewProfile(
+                type
+            );
+
+        if (!profile)
+        {
+            return nullptr;
+        }
+
+
+        // =====================================================
+        // Identity
+        // =====================================================
+
+        profile->LoadIdentity(
+            json["id"].toInt(),
+            json["gid"].toInt()
+        );
+
+
+        // =====================================================
+        // Outbound
+        // =====================================================
+
+        const auto outbound =
+            profile->OutboundSnapshot();
+
+        if (!outbound)
+        {
+            return nullptr;
+        }
+
+
+        if (json.contains("outbound") &&
+            json["outbound"].isObject())
+        {
+            outbound->ParseFromJson(
+                json["outbound"].toObject()
+            );
+        }
+        else
+        {
+            // Compatibility with old DB records.
+            outbound->name =
+                json["name"].toString();
+        }
+
+
+        // =====================================================
+        // Test state
+        // =====================================================
+
         ProfileTestSnapshot test;
+
         test.latency =
-            json["latency"]
-            .toInt();
+            json["latency"].toInt();
+
         test.dlSpeed =
-            json["dl_speed"]
-            .toString();
+            json["dl_speed"].toString();
+
         test.ulSpeed =
-            json["ul_speed"]
-            .toString();
+            json["ul_speed"].toString();
+
         test.testCountry =
-            json["test_country"]
-            .toString();
+            json["test_country"].toString();
+
         test.ipOut =
-            json["ip_out"]
-            .toString();
+            json["ip_out"].toString();
+
 
         profile->SetTestSnapshot(
             test
         );
-        
-        // Reconstruct outbound (bean is not needed in new implementation)
-        QString type = profile->type;
-        if (type == "hysteria2") {
-            type = "hysteria";
-        }
-        
-        Configs::outbound* outbound = nullptr;
-        
-        // Create outbound based on type (bean is legacy, not needed)
-        if (type == "socks") {
-            outbound = new Configs::socks();
-        } else if (type == "http") {
-            outbound = new Configs::http();
-        } else if (type == "shadowsocks") {
-            outbound = new Configs::shadowsocks();
-        } else if (type == "chain") {
-            outbound = new Configs::chain();
-        } else if (type == "vmess") {
-            outbound = new Configs::vmess();
-        } else if (type == "trojan") {
-            outbound = new Configs::Trojan();
-        } else if (type == "vless") {
-            outbound = new Configs::vless();
-        } else if (type == "xrayvless") {
-            outbound = new Configs::xrayVless();
-        } else if (type == "hysteria" || type == "hysteria2") {
-            outbound = new Configs::hysteria();
-        } else if (type == "tuic") {
-            outbound = new Configs::tuic();
-        } else if (type == "juicity") {
-            outbound = new Configs::juicity();
-        } else if (type == "trusttunnel") {
-            outbound = new Configs::trusttunnel();
-        } else if (type == "anytls") {
-            outbound = new Configs::anyTLS();
-        } else if (type == "shadowtls") {
-            outbound = new Configs::shadowtls();
-        } else if (type == "wireguard") {
-            outbound = new Configs::wireguard();
-        } else if (type == "tailscale") {
-            outbound = new Configs::tailscale();
-        } else if (type == "ssh") {
-            outbound = new Configs::ssh();
-        } else if (type == "custom") {
-            outbound = new Configs::Custom();
-        } else if (type == "extracore") {
-            outbound = new Configs::extracore();
-        } else if (type == "naive") {
-            outbound = new Configs::naive();
-        } else if (type == "direct") {
-            outbound = new Configs::direct();
-        } else {
-            outbound = new Configs::outbound();
-            outbound->invalid = true;
-        }
-
-        profile->outbound = std::shared_ptr<Configs::outbound>(outbound);
-        
-        // Parse complex objects from JSON
-        if (json.contains("outbound") && json["outbound"].isObject()) {
-            profile->outbound->ParseFromJson(json["outbound"].toObject());
-        }
-        
-        qint64 trafficDownlink = 0;
-        qint64 trafficUplink = 0;
 
 
-        if (json.contains("traffic_dl")) {
+        // =====================================================
+        // Traffic
+        // =====================================================
 
-            trafficDownlink =
-                json["traffic_dl"]
-                .toVariant()
-                .toLongLong();
-        }
+        const qint64 trafficDownlink =
+            json["traffic_dl"]
+            .toVariant()
+            .toLongLong();
 
-
-        if (json.contains("traffic_up")) {
-
-            trafficUplink =
-                json["traffic_up"]
-                .toVariant()
-                .toLongLong();
-        }
+        const qint64 trafficUplink =
+            json["traffic_up"]
+            .toVariant()
+            .toLongLong();
 
 
         profile->SetTraffic(
             trafficDownlink,
             trafficUplink
         );
-        
-        profile->name = profile->outbound->name;
-        
+
+
         return profile;
     }
 
-    void ProfilesRepo::saveToDatabase(const Profile* profile, int id) const {
-        QJsonObject json = profileToJson(profile);
-        QJsonDocument doc(json);
-        QString jsonStr = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
-        
-        QString outboundJson;
-        if (profile->outbound) {
-            QJsonDocument outboundDoc(profile->outbound->ExportToJson());
-            outboundJson = QString::fromUtf8(outboundDoc.toJson(QJsonDocument::Compact));
+    void ProfilesRepo::saveToDatabase(
+        const Profile* profile,
+        int id) const
+    {
+        if (!profile)
+        {
+            return;
         }
-        QString name = profile->outbound ? profile->outbound->name : QString();
+
+
+        const auto config =
+            profile->ConfigSnapshot();
+
         const auto test =
             profile->TestSnapshot();
+
         const auto traffic =
             profile->TrafficSnapshot();
 
-        const long long traffic_dl =
+
+        const QString outboundJson =
+            QString::fromUtf8(
+                QJsonDocument(
+                    config.outboundJson
+                )
+                .toJson(
+                    QJsonDocument::Compact
+                )
+            );
+
+
+        const long long trafficDl =
             static_cast<long long>(
                 traffic.downlink
                 );
 
-
-        const long long traffic_up =
+        const long long trafficUp =
             static_cast<long long>(
                 traffic.uplink
                 );
-        
-        auto checkQuery = db.query("SELECT id FROM profiles WHERE id = ?", id);
-        bool exists = checkQuery && checkQuery->executeStep();
-        
-        if (exists) {
-            db.exec(R"(
-                UPDATE profiles 
-                SET type = ?, name = ?, gid = ?, latency = ?, dl_speed = ?, ul_speed = ?, 
-                    test_country = ?, ip_out = ?, outbound_json = ?,
-                    traffic_dl = ?, traffic_up = ?, updated_at = strftime('%s', 'now')
+
+
+        auto checkQuery =
+            db.query(
+                "SELECT id FROM profiles "
+                "WHERE id = ?",
+                id
+            );
+
+
+        const bool exists =
+            checkQuery &&
+            checkQuery->executeStep();
+
+
+        if (exists)
+        {
+            db.exec(
+                R"(
+                UPDATE profiles
+                SET type = ?,
+                    name = ?,
+                    gid = ?,
+                    latency = ?,
+                    dl_speed = ?,
+                    ul_speed = ?,
+                    test_country = ?,
+                    ip_out = ?,
+                    outbound_json = ?,
+                    traffic_dl = ?,
+                    traffic_up = ?,
+                    updated_at = strftime('%s', 'now')
                 WHERE id = ?
-            )", 
-                profile->type.toStdString(),
-                name.toStdString(),
-                profile->gid,
+            )",
+
+                config.type.toStdString(),
+                config.name.toStdString(),
+                config.gid,
+
                 test.latency,
                 test.dlSpeed.toStdString(),
                 test.ulSpeed.toStdString(),
                 test.testCountry.toStdString(),
                 test.ipOut.toStdString(),
+
                 outboundJson.toStdString(),
-                traffic_dl,
-                traffic_up,
+
+                trafficDl,
+                trafficUp,
+
                 id
             );
         }
-        else {
-            db.exec(R"(
-        INSERT INTO profiles 
-        (
-            id,
-            type,
-            name,
-            gid,
-            latency,
-            dl_speed,
-            ul_speed,
-            test_country,
-            ip_out,
-            outbound_json,
-            traffic_dl,
-            traffic_up
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    )",
+        else
+        {
+            db.exec(
+                R"(
+                INSERT INTO profiles
+                (
+                    id,
+                    type,
+                    name,
+                    gid,
+                    latency,
+                    dl_speed,
+                    ul_speed,
+                    test_country,
+                    ip_out,
+                    outbound_json,
+                    traffic_dl,
+                    traffic_up
+                )
+                VALUES
+                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            )",
+
                 id,
-                profile->type.toStdString(),
-                name.toStdString(),
-                profile->gid,
+
+                config.type.toStdString(),
+                config.name.toStdString(),
+                config.gid,
 
                 test.latency,
                 test.dlSpeed.toStdString(),
@@ -308,8 +340,9 @@ namespace Configs {
                 test.ipOut.toStdString(),
 
                 outboundJson.toStdString(),
-                traffic_dl,
-                traffic_up
+
+                trafficDl,
+                trafficUp
             );
         }
     }
@@ -320,62 +353,64 @@ namespace Configs {
             int id,
             int gid) const
     {
-        QString outboundJson;
+        ProfileInsertRow row;
 
-
-        if (profile->outbound) {
-
-            outboundJson =
-                QString::fromUtf8(
-                    QJsonDocument(
-                        profile
-                        ->outbound
-                        ->ExportToJson()
-                    )
-                    .toJson(
-                        QJsonDocument::Compact
-                    )
-                );
+        if (!profile)
+        {
+            return row;
         }
 
 
-        const QString name =
-            profile->outbound
-            ? profile->outbound->name
-            : QString();
-        
+        const auto config =
+            profile->ConfigSnapshot();
+
         const auto test =
             profile->TestSnapshot();
+
         const auto traffic =
             profile->TrafficSnapshot();
 
 
-        ProfileInsertRow row;
+        const QString outboundJson =
+            QString::fromUtf8(
+                QJsonDocument(
+                    config.outboundJson
+                )
+                .toJson(
+                    QJsonDocument::Compact
+                )
+            );
 
 
-        row.id = id;
+        row.id =
+            id;
 
         row.type =
-            profile->type.toStdString();
+            config.type.toStdString();
 
         row.name =
-            name.toStdString();
+            config.name.toStdString();
 
-        row.gid = gid;
+        row.gid =
+            gid;
 
         row.latency =
             test.latency;
+
         row.dl_speed =
             test.dlSpeed.toStdString();
+
         row.ul_speed =
             test.ulSpeed.toStdString();
+
         row.test_country =
             test.testCountry.toStdString();
+
         row.ip_out =
             test.ipOut.toStdString();
+
         row.outbound_json =
             outboundJson.toStdString();
-
 
         row.traffic_dl =
             static_cast<long long>(
@@ -487,7 +522,7 @@ namespace Configs {
         int gid)
     {
         if (!profile ||
-            profile->id >= 0)
+            profile->Id() >= 0)
         {
             return false;
         }
@@ -527,8 +562,12 @@ namespace Configs {
             return false;
         }
 
-        profile->id = newId;
-        profile->gid = targetGid;
+        if (!profile->TryAssignIdentity(
+            newId,
+            targetGid))
+        {
+            return false;
+        }
 
         // -------------------------------------------------
         // ProfilesRepo state + profile DB persistence
@@ -544,7 +583,7 @@ namespace Configs {
 
             saveToDatabase(
                 profile.get(),
-                newId
+                profile->Id()
             );
         }
 
@@ -600,7 +639,7 @@ namespace Configs {
         for (const auto& profile : profiles) {
 
             if (profile &&
-                profile->id < 0)
+                profile->Id() < 0)
             {
                 toAdd.append(profile);
             }
@@ -651,8 +690,17 @@ namespace Configs {
                 auto& profile =
                     toAdd[i];
 
-                profile->id = id;
-                profile->gid = targetGid;
+                if (!profile->TryAssignIdentity(
+                    id,
+                    targetGid))
+                {
+                    MW_show_log(
+                        "Failed to assign identity "
+                        "to profile in AddProfileBatch"
+                    );
+
+                    continue;
+                }
 
                 identityMap[id] =
                     std::weak_ptr<Profile>(
@@ -717,7 +765,8 @@ namespace Configs {
         if (!query) return result;
         while (query->executeStep()) {
             auto profile = profileFromRow(*query);
-            result[profile->id] = std::move(profile);
+            result[profile->Id()] =
+                std::move(profile);
         }
         return result;
     }
@@ -864,7 +913,9 @@ namespace Configs {
         }
         auto profiles = GetProfileBatch(ids);
         for (const auto& ent : profiles) {
-            groupIDs.insert(ent->gid);
+            groupIDs.insert(
+                ent->GroupId()
+            );
         }
         for (auto groupID : groupIDs) {
             auto group = dataManager->groupsRepo->GetGroup(groupID);
@@ -915,33 +966,64 @@ namespace Configs {
         return 0;
     }
 
-    bool ProfilesRepo::Save(const std::shared_ptr<Profile>& profile) {
-        if (!profile || profile->id < 0) {
-            return false;
-        }
-        
-        QMutexLocker locker(&mutex);
-        saveToDatabase(profile.get(), profile->id);
-        identityMap[profile->id] = std::weak_ptr<Profile>(profile);
-        
-        return true;
-    }
-
-    bool ProfilesRepo::SaveTraffic(
+    bool ProfilesRepo::Save(
         const std::shared_ptr<Profile>& profile)
     {
-        if (!profile ||
-            profile->id < 0)
+        if (!profile)
         {
             return false;
         }
 
 
         const int id =
-            profile->id;
+            profile->Id();
 
 
-        // Traffic lock exists only during snapshot creation.
+        if (id < 0)
+        {
+            return false;
+        }
+
+
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        saveToDatabase(
+            profile.get(),
+            id
+        );
+
+
+        identityMap[id] =
+            std::weak_ptr<Profile>(
+                profile
+            );
+
+
+        return true;
+    }
+
+    bool ProfilesRepo::SaveTraffic(
+        const std::shared_ptr<Profile>& profile)
+    {
+        if (!profile)
+        {
+            return false;
+        }
+
+
+        const int id =
+            profile->Id();
+
+
+        if (id < 0)
+        {
+            return false;
+        }
+
+
         const auto traffic =
             profile->TrafficSnapshot();
 
@@ -957,7 +1039,9 @@ namespace Configs {
                 );
 
 
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
 
 
         db.exec(
@@ -1036,18 +1120,14 @@ namespace Configs {
             }
 
 
+            const auto config =
+                profile->ConfigSnapshot();
+
             const int id =
-                profile->id;
-
-
-            if (id < 0) {
-                continue;
-            }
-
+                config.id;
 
             const int gid =
-                profile->gid;
-
+                config.gid;
 
             rows.push_back(
                 profileToInsertRow(

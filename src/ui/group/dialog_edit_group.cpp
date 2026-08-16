@@ -369,7 +369,7 @@ DialogEditGroup::DialogEditGroup(
         QStringList links;
         auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(ent->Profiles());
         for (const auto &profile: profiles) {
-            links += profile->outbound->ExportToLink();
+            links += profile->OutboundSnapshot()->ExportToLink();
         }
         QApplication::clipboard()->setText(links.join("\n"));
         MessageBoxInfo(software_name, tr("Copied"));
@@ -378,7 +378,7 @@ DialogEditGroup::DialogEditGroup(
         QStringList links;
         auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(ent->Profiles());
         for (const auto &profile: profiles) {
-            links += profile->outbound->ExportJsonLink();
+            links += profile->OutboundSnapshot()->ExportJsonLink();
         }
         QApplication::clipboard()->setText(links.join("\n"));
         MessageBoxInfo(software_name, tr("Copied"));
@@ -472,7 +472,7 @@ void DialogEditGroup::accept()
 QString DialogEditGroup::get_proxy_name(int id) {
     if (id == -1) return "None";
     if (auto profile = Configs::dataManager->profilesRepo->GetProfile(id)) {
-        auto group = Configs::dataManager->groupsRepo->GetGroup(profile->gid);
+        auto group = Configs::dataManager->groupsRepo->GetGroup(profile->GroupId());
         if (group == nullptr) return "INVALID";
         const auto snapshot =
             group->Snapshot();
@@ -482,7 +482,7 @@ QString DialogEditGroup::get_proxy_name(int id) {
             + snapshot.name
             + "] "
         )
-            + profile->name;
+            + profile->Name();
     }
     return "INVALID";
 }

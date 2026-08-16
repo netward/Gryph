@@ -246,8 +246,8 @@ namespace Subscription {
             } else {
                 ent = data["type"].toString() == "hysteria2" ? Configs::ProfilesRepo::NewProfile("hysteria") : Configs::ProfilesRepo::NewProfile(data["type"].toString());
             }
-            if (ent->outbound->invalid) return;
-            ent->outbound->ParseFromJson(data);
+            if (ent->OutboundSnapshot()->invalid) return;
+            ent->OutboundSnapshot()->ParseFromJson(data);
         }
 
         // Json
@@ -847,14 +847,14 @@ namespace Subscription {
             rawUpdater->updated_order)
         {
             if (!profile ||
-                profile->id < 0)
+                profile->Id() < 0)
             {
                 continue;
             }
 
 
             subscriptionOrder.append(
-                profile->id
+                profile->Id()
             );
         }
 
@@ -884,7 +884,7 @@ namespace Subscription {
                     change_text += "[+] " + Int2String(out_all.size()) + " profiles\n";
                 } else {
                     for (const auto &ent: out_all) {
-                        change_text += "[+] " + ent->outbound->DisplayTypeAndName() + "\n";
+                        change_text += "[+] " + ent->OutboundSnapshot()->DisplayTypeAndName() + "\n";
                     }
                 }
             } else {
@@ -903,7 +903,7 @@ namespace Subscription {
                 if (only_out.size() < 1000)
                 {
                     for (const auto &ent: only_out) {
-                        notice_added += "[+] " + ent->outbound->DisplayTypeAndName() + "\n";
+                        notice_added += "[+] " + ent->OutboundSnapshot()->DisplayTypeAndName() + "\n";
                     }
                 } else
                 {
@@ -912,7 +912,7 @@ namespace Subscription {
                 if (only_in.size() < 1000)
                 {
                     for (const auto &ent: only_in) {
-                        notice_deleted += "[-] " + ent->outbound->DisplayTypeAndName() + "\n";
+                        notice_deleted += "[-] " + ent->OutboundSnapshot()->DisplayTypeAndName() + "\n";
                     }
                 } else
                 {
@@ -957,7 +957,7 @@ namespace Subscription {
                         if (keptProfile) {
 
                             newProfileOrder.append(
-                                keptProfile->id
+                                keptProfile->Id()
                             );
                         }
                     }
@@ -965,7 +965,7 @@ namespace Subscription {
                     else {
 
                         newProfileOrder.append(
-                            ent->id
+                            ent->Id()
                         );
                     }
                 }
@@ -993,10 +993,10 @@ namespace Subscription {
                     }
 
                     if (!finalProfileIds.contains(
-                        ent->id))
+                        ent->Id()))
                     {
                         del_ids.append(
-                            ent->id
+                            ent->Id()
                         );
                     }
                 }

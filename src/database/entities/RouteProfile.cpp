@@ -24,7 +24,7 @@ namespace Configs {
     int getOutboundID(const QString& name) {
         if (name == "proxy") return -1;
         if (name == "direct") return -2;
-        if (auto profile = Configs::dataManager->profilesRepo->GetProfileByName(name)) return profile->id;
+        if (auto profile = Configs::dataManager->profilesRepo->GetProfileByName(name)) return profile->Id();
 
         return INVALID_ID;
     }

@@ -227,7 +227,7 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                         MW_show_log(
                             tr("[%1] test error: %2")
                             .arg(
-                                ent->outbound
+                                ent->OutboundSnapshot()
                                 ->DisplayTypeAndName(),
                                 error
                             )
@@ -308,7 +308,7 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                 MW_show_log(
                     tr("[%1] test error: %2")
                     .arg(
-                        ent->outbound
+                        ent->OutboundSnapshot()
                         ->DisplayTypeAndName(),
                         error
                     )
@@ -382,7 +382,7 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
                 } else {
                     if (!QString::fromStdString(res.error.value()).contains("test aborted") &&
                         !QString::fromStdString(res.error.value()).contains("context canceled")) {
-                        MW_show_log(tr("[%1] IP test error: %2").arg(ent->outbound->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
+                        MW_show_log(tr("[%1] IP test error: %2").arg(ent->OutboundSnapshot()->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
                     }
                     ent->ClearIpTestResult();
                 }
@@ -448,7 +448,7 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
                 MW_show_log(
                     tr("[%1] IP test error: %2")
                     .arg(
-                        ent->outbound
+                        ent->OutboundSnapshot()
                         ->DisplayTypeAndName(),
                         error
                     )
@@ -725,7 +725,7 @@ void MainWindow::urltest_current_group(
                         ->GetGroup(
                             profiles
                             .first()
-                            ->gid
+                            ->GroupId()
                         );
                 }
                 speedTestFunc(
@@ -1201,7 +1201,7 @@ void MainWindow::querySpeedtest(const QMap<QString, int>& tag2entID, bool testCu
     }
     runOnUiThread([=, this]
     {
-        dataViewHtmlGenerator_.setSpeedtestProgress(profile->outbound->name, res.result.value());
+        dataViewHtmlGenerator_.setSpeedtestProgress(profile->OutboundSnapshot()->name, res.result.value());
         UpdateDataView();
 
         if (res.result.value().error.value().empty() && !res.result.value().cancelled.value())
@@ -1231,7 +1231,7 @@ void MainWindow::querySpeedtest(const QMap<QString, int>& tag2entID, bool testCu
                     )
                 )
             );
-            refresh_proxy_list({profile->id});
+            refresh_proxy_list({profile->Id()});
         }
     });
 }
@@ -1269,7 +1269,7 @@ void MainWindow::queryCountryTest(const QMap<QString, int>& tag2entID, bool test
                         )
                     )
                 );
-                refresh_proxy_list({profile->id});
+                refresh_proxy_list({profile->Id()});
             }
         });
     }
@@ -1336,7 +1336,7 @@ void MainWindow::runSpeedTest(const QString& config, const QString& xrayConfig, 
     if (!rpcOK || result.results.empty()) return;
 
     for (const auto &res: result.results) {
-        if (testCurrent) entID = running ? running->id : -1;
+        if (testCurrent) entID = running ? running->Id() : -1;
         else {
             entID = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
         }
@@ -1385,7 +1385,7 @@ void MainWindow::runSpeedTest(const QString& config, const QString& xrayConfig, 
             MW_show_log(
                 tr("[%1] speed test error: %2")
                 .arg(
-                    ent->outbound
+                    ent->OutboundSnapshot()
                     ->DisplayTypeAndName(),
 
                     QString::fromStdString(
@@ -1437,7 +1437,7 @@ void MainWindow::profile_start(int _id) {
     if (ent == nullptr) return;
 
     if (select_mode) {
-        emit profile_selected(ent->id);
+        emit profile_selected(ent->Id());
         select_mode = false;
         refresh_status();
         return;
@@ -1447,7 +1447,7 @@ void MainWindow::profile_start(int _id) {
         Configs::dataManager
         ->groupsRepo
         ->GetGroup(
-            ent->gid
+            ent->GroupId()
         );
 
     if (!group)
@@ -1528,13 +1528,13 @@ void MainWindow::profile_start(int _id) {
         );
         Stats::connection_lister->suspend = false;
 
-        Configs::dataManager->settingsRepo->UpdateStartedId(ent->id);
+        Configs::dataManager->settingsRepo->UpdateStartedId(ent->Id());
         running = ent;
         if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
 
         runOnUiThread([=, this] {
             refresh_status();
-            refresh_proxy_list({ent->id});
+            refresh_proxy_list({ent->Id()});
 
             auto resp = NetworkRequestHelper::HttpGet("http://ip-api.com/json/", false, true);
             if (resp.error.isEmpty()) {
@@ -1544,7 +1544,7 @@ void MainWindow::profile_start(int _id) {
                     QString city = obj["city"].toString();
                     QString countryName = obj["country"].toString();
                     QString countryCode = obj["countryCode"].toString();
-                    if (running) running->runningCountryInfo = QString("%1 %2, %3").arg(CountryCodeToFlag(countryCode), countryName, city);
+                    if (running) running->RunningCountryInfo() = QString("%1 %2, %3").arg(CountryCodeToFlag(countryCode), countryName, city);
                     refresh_status();
                 }
             }
@@ -1569,7 +1569,7 @@ void MainWindow::profile_start(int _id) {
         runOnThread(
             [=, this] {
                 MW_show_log(tr("Try to start the config, but the core has not listened to the RPC port, so restart it..."));
-                core_process->start_profile_when_core_is_up = ent->id;
+                core_process->start_profile_when_core_is_up = ent->Id();
                 core_process->Restart();
             },
             DS_cores);
@@ -1591,9 +1591,9 @@ void MainWindow::profile_start(int _id) {
             mu_stopping.unlock();
         }
         // do start
-        MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(ent->outbound->DisplayTypeAndName()));
+        MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(ent->OutboundSnapshot()->DisplayTypeAndName()));
         if (!profile_start_stage2()) {
-            MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(ent->outbound->DisplayTypeAndName()));
+            MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(ent->OutboundSnapshot()->DisplayTypeAndName()));
         }
         mu_starting.unlock();
         // cancel timeout
@@ -1609,7 +1609,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual) {
     if (running == nullptr) {
         return;
     }
-    auto id = running->id;
+    auto id = running->Id();
 
     auto profile_stop_stage2 = [=,this] {
         if (currentUnderTest.load()) {
@@ -1700,7 +1700,7 @@ void MainWindow::profile_stop(bool crash, bool block, bool manual) {
             ">>>>>>>> "
             + tr("Stopping profile %1")
             .arg(
-                running->outbound
+                running->OutboundSnapshot()
                 ->DisplayTypeAndName()
             )
         );

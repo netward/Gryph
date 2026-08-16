@@ -79,44 +79,203 @@ void ProfilesTableModel::evictOne() const {
     m_cache.remove(id);
 }
 
-QVariant ProfilesTableModel::data(const QModelIndex &index, int role) const {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_profileIds.size()
-        || index.column() < 0 || index.column() >= 5) {
+QVariant ProfilesTableModel::data(
+    const QModelIndex& index,
+    int role) const
+{
+    // =====================================================
+    // Validate model index
+    // =====================================================
+
+    if (!index.isValid() ||
+        index.row() < 0 ||
+        index.row() >= m_profileIds.size() ||
+        index.column() < 0 ||
+        index.column() >= 5)
+    {
         return {};
     }
-    const int profileId = m_profileIds[index.row()];
-    if (role == ProfileIdRole) {
+
+
+    // =====================================================
+    // Profile ID
+    //
+    // m_profileIds itself is already the authoritative
+    // table-row → profile mapping, so no Profile object
+    // is needed for ProfileIdRole.
+    // =====================================================
+
+    const int profileId =
+        m_profileIds[
+            index.row()
+        ];
+
+
+    if (role == ProfileIdRole)
+    {
         return profileId;
     }
-    ensureCached(profileId);
-    auto it = m_cache.constFind(profileId);
-    if (it == m_cache.constEnd()) return {};
-    const std::shared_ptr<Configs::Profile> &profile = it.value();
-    if (!profile) return {};
 
-    const int startedId = Configs::dataManager->settingsRepo->started_id;
-    const bool isRunning = (profile->id == startedId);
-    //QColor linkColor = isRunning ? QApplication::palette().link().color() : QColor();
-    QColor linkColor = isRunning ? QColor("#008000") : QColor();
 
-    if (role == Qt::DisplayRole) {
-        switch (index.column()) {
-        case 0: return profile->outbound ? profile->outbound->name : QString();
-        case 1: return profile->outbound ? profile->outbound->DisplayType() : QString();
-        case 2: return profile->outbound ? profile->outbound->DisplayAddress() : QString();
-        case 3: return profile->DisplayTestResult();
-        case 4: return profile->DisplayTraffic();
-        default: return {};
-        }
-    }
-    if (role == Qt::ForegroundRole) {
-        if (index.column() == 3) {
-            QColor latencyColor = profile->DisplayLatencyColor();
-            if (latencyColor.isValid()) return latencyColor;
-        }
-        if (isRunning && linkColor.isValid()) return linkColor;
+    // =====================================================
+    // Load/cache Profile
+    // =====================================================
+
+    ensureCached(
+        profileId
+    );
+
+
+    const auto it =
+        m_cache.constFind(
+            profileId
+        );
+
+
+    if (it == m_cache.constEnd())
+    {
         return {};
     }
+
+
+    const std::shared_ptr<
+        Configs::Profile
+    >& profile =
+        it.value();
+
+
+    if (!profile)
+    {
+        return {};
+    }
+
+
+    // =====================================================
+    // Running state
+    //
+    // Do NOT read profile->id directly.
+    // profileId is already known from the table model.
+    // =====================================================
+
+    const int startedId =
+        Configs::dataManager
+        ->settingsRepo
+        ->started_id;
+
+
+    const bool isRunning =
+        profileId == startedId;
+
+
+    const QColor linkColor =
+        isRunning
+        ? QColor("#008000")
+        : QColor();
+
+
+    // =====================================================
+    // Display data
+    // =====================================================
+
+    if (role == Qt::DisplayRole)
+    {
+        // Take one immutable configuration snapshot.
+        //
+        // From this point this invocation of data()
+        // does not touch mutable Profile::outbound
+        // configuration directly.
+        const auto config =
+            profile->ConfigSnapshot();
+
+
+        switch (index.column())
+        {
+            // -------------------------------------------------
+            // Name
+            // -------------------------------------------------
+
+        case 0:
+
+            return config.name;
+
+
+            // -------------------------------------------------
+            // Type
+            // -------------------------------------------------
+
+        case 1:
+
+            return config.displayType;
+
+
+            // -------------------------------------------------
+            // Address
+            // -------------------------------------------------
+
+        case 2:
+
+            return config.displayAddress;
+
+
+            // -------------------------------------------------
+            // Test Result
+            //
+            // ProfileTestState already has its own mutex.
+            // -------------------------------------------------
+
+        case 3:
+
+            return profile
+                ->DisplayTestResult();
+
+
+            // -------------------------------------------------
+            // Traffic
+            //
+            // ProfileTrafficCounters already has its own mutex.
+            // -------------------------------------------------
+
+        case 4:
+
+            return profile
+                ->DisplayTraffic();
+
+
+        default:
+
+            return {};
+        }
+    }
+
+    // =====================================================
+    // Text color
+    // =====================================================
+    if (role == Qt::ForegroundRole)
+    {
+        // Latency has its own protected TestSnapshot,
+        // so ConfigSnapshot is unnecessary here.
+        if (index.column() == 3)
+        {
+            const QColor latencyColor =
+                profile
+                ->DisplayLatencyColor();
+
+
+            if (latencyColor.isValid())
+            {
+                return latencyColor;
+            }
+        }
+
+        if (isRunning &&
+            linkColor.isValid())
+        {
+            return linkColor;
+        }
+
+        return {};
+    }
+
     return {};
 }
 

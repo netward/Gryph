@@ -26,6 +26,8 @@
 
 #include "include/global/CountryHelper.hpp"
 
+#include <QReadWriteLock>
+#include <QJsonObject>
 #include <QMutex>
 #include <QMutexLocker>
 
@@ -41,7 +43,6 @@ namespace Configs {
             return downlink + uplink;
         }
     };
-
 
     class ProfileTrafficCounters
     {
@@ -172,6 +173,26 @@ namespace Configs {
         QString ipOut;
     };
 
+    struct ProfileConfigSnapshot
+    {
+        int id = -1;
+        int gid = 0;
+
+        QString type;
+
+        QString name;
+        QString address;
+
+        QString displayName;
+        QString displayType;
+        QString displayAddress;
+
+        bool invalid = false;
+
+        QJsonObject outboundJson;
+
+        quint64 revision = 0;
+    };
 
     class ProfileTestState
     {
@@ -541,18 +562,10 @@ namespace Configs {
         QString ipOut_;
     };
 
-    class Profile {
+    class Profile :
+        public std::enable_shared_from_this<Profile>
+    {
     public:
-        QString type;
-        QString name;
-
-        int id = -1;
-        int gid = 0;
-        
-        std::shared_ptr<Configs::outbound> outbound;
-
-        QString runningCountryInfo; // volatile, not saved to db
-
 
         Profile() = default;
 
@@ -561,32 +574,103 @@ namespace Configs {
             const QString& type_
         );
 
-        // ---------------------------------------------
+        // =====================================================
+        // Identity
+        // =====================================================
+
+        [[nodiscard]]
+        int Id() const;
+
+        [[nodiscard]]
+        int GroupId() const;
+
+        [[nodiscard]]
+        QString Type() const;
+
+        [[nodiscard]]
+        QString Name() const;
+
+        bool TryAssignIdentity(
+            int id,
+            int gid
+        );
+
+        void LoadIdentity(
+            int id,
+            int gid
+        );
+
+
+        // =====================================================
+        // Configuration
+        // =====================================================
+
+        [[nodiscard]]
+        ProfileConfigSnapshot
+            ConfigSnapshot() const;
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::outbound>
+            OutboundSnapshot() const;
+
+        [[nodiscard]]
+        std::shared_ptr<Profile>
+            CloneForEditing() const;
+
+        bool CommitConfigurationFrom(
+            const Profile& edited
+        );
+
+        bool CommitConfigurationFrom(
+            const Profile& edited,
+            quint64 expectedRevision
+        );
+
+
+        // =====================================================
+        // Runtime information
+        // =====================================================
+
+        [[nodiscard]]
+        QString RunningCountryInfo() const;
+
+        void SetRunningCountryInfo(
+            const QString& value
+        );
+
+        void ClearRunningCountryInfo();
+
+
+        // =====================================================
+        // DNS resolution
+        // =====================================================
+
+        void ResolveDomainToIP(
+            const std::function<void()>& onFinished
+        );
+
+
+        // =====================================================
         // Test/runtime state
-        // ---------------------------------------------
+        // =====================================================
 
         [[nodiscard]]
         ProfileTestSnapshot TestSnapshot() const;
-
 
         void SetTestSnapshot(
             const ProfileTestSnapshot& snapshot
         );
 
-
         void SetLatency(
             int latency
         );
-
 
         void SetIpTestResult(
             const QString& ip,
             const QString& country
         );
 
-
         void ClearIpTestResult();
-
 
         void MergeSpeedTestResult(
             const QString& dlSpeed,
@@ -595,7 +679,6 @@ namespace Configs {
             const QString& country
         );
 
-
         void SetSpeedTestResult(
             const QString& dlSpeed,
             const QString& ulSpeed,
@@ -603,139 +686,244 @@ namespace Configs {
             const QString& country
         );
 
-
         void MergeCountryTestResult(
             int measuredLatency,
             const QString& country
         );
 
-
         void SetSpeedTestError();
 
         void ClearTestResults();
 
-
         [[nodiscard]]
         QString DisplayTestResult() const;
-
 
         [[nodiscard]]
         QColor DisplayLatencyColor() const;
 
 
-        // ---------------------------------------------
+        // =====================================================
         // Traffic
-        // ---------------------------------------------
+        // =====================================================
 
         void AddTraffic(
             qint64 downlinkDelta,
             qint64 uplinkDelta
         );
 
-
         void SetTraffic(
             qint64 downlink,
             qint64 uplink
         );
 
-
         [[nodiscard]]
         ProfileTrafficSnapshot TrafficSnapshot() const;
-
 
         [[nodiscard]]
         QString DisplayTraffic() const;
 
-
         void ResetTraffic();
 
-        [[nodiscard]] Configs::socks* Socks() const {
-            return dynamic_cast<Configs::socks*>(outbound.get());
-        };
 
-        [[nodiscard]] Configs::http* Http() const {
-            return dynamic_cast<Configs::http*>(outbound.get());
-        };
+        // =====================================================
+        // Typed outbound access
+        //
+        // Use these mainly while constructing a NEW unpublished
+        // Profile or its detached editing copy.
+        // =====================================================
 
-        [[nodiscard]] Configs::shadowsocks* ShadowSocks() const {
-            return dynamic_cast<Configs::shadowsocks*>(outbound.get());
-        };
-
-        [[nodiscard]] Configs::vmess* VMess() const {
-            return dynamic_cast<Configs::vmess*>(outbound.get());
-        };
-
-        [[nodiscard]] Configs::Trojan* Trojan() const {
-            return dynamic_cast<Configs::Trojan*>(outbound.get());
-        };
-
-        [[nodiscard]] Configs::vless* VLESS() const {
-            return dynamic_cast<Configs::vless*>(outbound.get());
-        };
-
-        [[nodiscard]] Configs::xrayVless* XrayVLESS() const {
-            return dynamic_cast<Configs::xrayVless*>(outbound.get());
+        [[nodiscard]]
+        std::shared_ptr<Configs::socks>
+            Socks() const
+        {
+            return OutboundAs<Configs::socks>();
         }
 
-        [[nodiscard]] Configs::anyTLS* AnyTLS() const {
-            return dynamic_cast<Configs::anyTLS*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::http>
+            Http() const
+        {
+            return OutboundAs<Configs::http>();
+        }
 
-        [[nodiscard]] Configs::hysteria* Hysteria() const {
-            return dynamic_cast<Configs::hysteria*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::shadowsocks>
+            ShadowSocks() const
+        {
+            return OutboundAs<Configs::shadowsocks>();
+        }
 
-        [[nodiscard]] Configs::ssh* SSH() const {
-            return dynamic_cast<Configs::ssh*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::vmess>
+            VMess() const
+        {
+            return OutboundAs<Configs::vmess>();
+        }
 
-        [[nodiscard]] Configs::tailscale* Tailscale() const {
-            return dynamic_cast<Configs::tailscale*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::Trojan>
+            Trojan() const
+        {
+            return OutboundAs<Configs::Trojan>();
+        }
 
-        [[nodiscard]] Configs::tuic* TUIC() const {
-            return dynamic_cast<Configs::tuic*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::vless>
+            VLESS() const
+        {
+            return OutboundAs<Configs::vless>();
+        }
 
-        [[nodiscard]] Configs::juicity* Juicity() const {
-            return dynamic_cast<Configs::juicity*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::xrayVless>
+            XrayVLESS() const
+        {
+            return OutboundAs<Configs::xrayVless>();
+        }
 
-        [[nodiscard]] Configs::trusttunnel* TrustTunnel() const {
-            return dynamic_cast<Configs::trusttunnel*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::hysteria>
+            Hysteria() const
+        {
+            return OutboundAs<Configs::hysteria>();
+        }
 
-        [[nodiscard]] Configs::naive* Naive() const {
-            return dynamic_cast<Configs::naive*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::anyTLS>
+            AnyTLS() const
+        {
+            return OutboundAs<Configs::anyTLS>();
+        }
 
-        [[nodiscard]] Configs::shadowtls* ShadowTLS() const {
-            return dynamic_cast<Configs::shadowtls*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::ssh>
+            SSH() const
+        {
+            return OutboundAs<Configs::ssh>();
+        }
 
-        [[nodiscard]] Configs::wireguard* Wireguard() const {
-            return dynamic_cast<Configs::wireguard*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::tailscale>
+            Tailscale() const
+        {
+            return OutboundAs<Configs::tailscale>();
+        }
 
-        [[nodiscard]] Configs::Custom* Custom() const {
-            return dynamic_cast<Configs::Custom*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::tuic>
+            TUIC() const
+        {
+            return OutboundAs<Configs::tuic>();
+        }
 
-        [[nodiscard]] Configs::chain* Chain() const {
-            return dynamic_cast<Configs::chain*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::juicity>
+            Juicity() const
+        {
+            return OutboundAs<Configs::juicity>();
+        }
 
-        [[nodiscard]] Configs::direct* Direct() const {
-            return dynamic_cast<Configs::direct*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::trusttunnel>
+            TrustTunnel() const
+        {
+            return OutboundAs<Configs::trusttunnel>();
+        }
 
-        [[nodiscard]] Configs::extracore* ExtraCore() const {
-            return dynamic_cast<Configs::extracore*>(outbound.get());
-        };
+        [[nodiscard]]
+        std::shared_ptr<Configs::naive>
+            Naive() const
+        {
+            return OutboundAs<Configs::naive>();
+        }
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::shadowtls>
+            ShadowTLS() const
+        {
+            return OutboundAs<Configs::shadowtls>();
+        }
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::wireguard>
+            Wireguard() const
+        {
+            return OutboundAs<Configs::wireguard>();
+        }
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::Custom>
+            Custom() const
+        {
+            return OutboundAs<Configs::Custom>();
+        }
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::chain>
+            Chain() const
+        {
+            return OutboundAs<Configs::chain>();
+        }
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::direct>
+            Direct() const
+        {
+            return OutboundAs<Configs::direct>();
+        }
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::extracore>
+            ExtraCore() const
+        {
+            return OutboundAs<Configs::extracore>();
+        }
+
+        template <typename T>
+        [[nodiscard]]
+        std::shared_ptr<T> OutboundAs() const
+        {
+            return std::dynamic_pointer_cast<T>(
+                OutboundSnapshot()
+            );
+        }
+
     private:
+
+        // =====================================================
+        // Persistent/configuration state
+        // =====================================================
+
+        mutable QReadWriteLock configLock_;
+
+        QString type_;
+
+        int id_ = -1;
+        int gid_ = 0;
+
+
+        std::shared_ptr<
+            Configs::outbound
+        > outbound_;
+
+
+        quint64 configRevision_ = 0;
+
+
+        // =====================================================
+        // Runtime state
+        // =====================================================
+
+        QString runningCountryInfo_;
+
+
+        // These classes already have their own locks.
         ProfileTrafficCounters traffic_;
         ProfileTestState testState_;
+
+       
     };
+
     class ProfileFilter {
     public:
         static void Uniq(

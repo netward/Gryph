@@ -33,7 +33,7 @@ QString get_outbound_name(int id) {
     if (id == -1) return "proxy";
     if (id == -2) return "direct";
     if (id == Configs::warpBypassID) return "warp-bypass";
-    if (auto profile = Configs::dataManager->profilesRepo->GetProfile(id)) return profile->name;
+    if (auto profile = Configs::dataManager->profilesRepo->GetProfile(id)) return profile->Name();
     return "INVALID OUTBOUND";
 }
 

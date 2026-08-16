@@ -127,7 +127,7 @@ namespace Configs {
                             MW_show_log("The outbound described in the rule chain is missing, maybe your data is corrupted");
                             return {};
                         }
-                        obj["outbound"] = prof->outbound->DisplayName();
+                        obj["outbound"] = prof->OutboundSnapshot()->DisplayName();
                     }
                 } else {
                     if (!outboundTag.isEmpty()) obj["outbound"] = outboundTag;

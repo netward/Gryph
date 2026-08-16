@@ -321,28 +321,28 @@ namespace Stats {
                                     group.profiles)
                                 {
                                     if (!profile ||
-                                        profile->id < 0)
+                                        profile->Id() < 0)
                                     {
                                         continue;
                                     }
 
 
                                     if (seenIds.contains(
-                                        profile->id))
+                                        profile->Id()))
                                     {
                                         continue;
                                     }
 
 
                                     seenIds.insert(
-                                        profile->id
+                                        profile->Id()
                                     );
 
 
                                     Configs::ProfileTrafficRow row;
 
                                     row.id =
-                                        profile->id;
+                                        profile->Id();
 
                                     const auto traffic =
                                         profile->TrafficSnapshot();
@@ -365,7 +365,7 @@ namespace Stats {
 
 
                                     profileIds.append(
-                                        profile->id
+                                        profile->Id()
                                     );
                                 }
                             }
@@ -569,28 +569,28 @@ namespace Stats {
                         group.profiles)
                     {
                         if (!profile ||
-                            profile->id < 0)
+                            profile->Id() < 0)
                         {
                             continue;
                         }
 
 
                         if (seenIds.contains(
-                            profile->id))
+                            profile->Id()))
                         {
                             continue;
                         }
 
 
                         seenIds.insert(
-                            profile->id
+                            profile->Id()
                         );
 
 
-                        Configs::ProfileTrafficRow row;
+                            Configs::ProfileTrafficRow row;
 
                         row.id =
-                            profile->id;
+                            profile->Id();
 
                         const auto traffic =
                             profile->TrafficSnapshot();
