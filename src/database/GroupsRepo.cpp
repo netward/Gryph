@@ -30,6 +30,10 @@ namespace Configs {
                 landing_proxy_id INTEGER NOT NULL DEFAULT -1,
                 column_width_json TEXT,
                 profiles_json TEXT NOT NULL DEFAULT '[]',
+
+                default_profile_order_json
+                    TEXT NOT NULL DEFAULT '[]',
+
                 scroll_last_profile INTEGER NOT NULL DEFAULT -1,
                 auto_clear_unavailable INTEGER NOT NULL DEFAULT 0,
                 test_sort_by INTEGER NOT NULL DEFAULT 0,
@@ -37,8 +41,8 @@ namespace Configs {
                 test_items_to_show INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
                 updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-            )
-        )");
+                )
+            )");
 
         // Create groups_order table to store UI tab order
         db.exec(R"(
@@ -47,6 +51,17 @@ namespace Configs {
                 display_order INTEGER NOT NULL
             )
         )");
+
+        if (!groupsColumnExists(
+            "default_profile_order_json"))
+        {
+            db.exec(
+                "ALTER TABLE groups "
+                "ADD COLUMN "
+                "default_profile_order_json "
+                "TEXT NOT NULL DEFAULT '[]'"
+            );
+        }
     }
 
     QJsonObject GroupsRepo::groupToJson(
@@ -233,6 +248,37 @@ namespace Configs {
 
 
         return group;
+    }
+
+    bool GroupsRepo::groupsColumnExists(
+        const char* columnName) const
+    {
+        auto pragma =
+            db.query(
+                "PRAGMA table_info(groups)"
+            );
+
+
+        if (!pragma)
+        {
+            return false;
+        }
+
+
+        while (pragma->executeStep())
+        {
+            if (pragma
+                ->getColumn(1)
+                .getText()
+                ==
+                std::string(columnName))
+            {
+                return true;
+            }
+        }
+
+
+        return false;
     }
 
     void GroupsRepo::saveToDatabase(

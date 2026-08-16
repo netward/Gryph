@@ -56,6 +56,7 @@ namespace Configs
 
         QList<int> column_width;
         QList<int> profiles;
+        QList<int> default_profile_order;
 
         int scroll_last_profile = -1;
 
@@ -270,6 +271,21 @@ namespace Configs
             testShowItems value
         );
 
+        [[nodiscard]]
+        QList<int> DefaultProfileOrder() const;
+
+
+        void SetDefaultProfileOrder(
+            const QList<int>& order
+        );
+
+
+        void ReplaceProfilesFromSubscription(
+            const QList<int>& order
+        );
+
+
+        bool RestoreDefaultProfileOrder();
 
     private:
 
@@ -294,7 +310,7 @@ namespace Configs
     private:
 
         mutable QMutex mutex;
-
+        mutable QMutex sortMutex_;
 
         // =================================================
         // Persistent state
@@ -327,6 +343,7 @@ namespace Configs
         QList<int> column_width;
 
         QList<int> profiles;
+        QList<int> default_profile_order;
 
 
         int scroll_last_profile = -1;

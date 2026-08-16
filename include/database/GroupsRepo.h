@@ -34,6 +34,10 @@ namespace Configs {
 
         // Get next available group ID
         int NewGroupID() const;
+
+        bool groupsColumnExists(
+            const char* columnName
+        ) const;
     public:
         explicit GroupsRepo(Database& database);
         

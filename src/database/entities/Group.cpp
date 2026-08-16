@@ -4,13 +4,21 @@
 #include "include/global/Configs.hpp"
 
 #include <algorithm>
+#include <utility>
 
+#include <QCollator>
 #include <QHash>
-#include <QSet>
 #include <QMutexLocker>
+#include <QSet>
+
 
 namespace Configs
 {
+
+    // =========================================================
+    // Basic state
+    // =========================================================
+
     int Group::Id() const
     {
         QMutexLocker locker(
@@ -28,66 +36,62 @@ namespace Configs
             &mutex
         );
 
-
         id =
             snapshot.id;
-
 
         archive =
             snapshot.archive;
 
-
         skip_auto_update =
             snapshot.skip_auto_update;
-
 
         auto_clear_unavailable =
             snapshot.auto_clear_unavailable;
 
-
         name =
             snapshot.name;
-
 
         url =
             snapshot.url;
 
-
         info =
             snapshot.info;
-
 
         sub_last_update =
             snapshot.sub_last_update;
 
-
         front_proxy_id =
             snapshot.front_proxy_id;
-
 
         landing_proxy_id =
             snapshot.landing_proxy_id;
 
-
         column_width =
             snapshot.column_width;
-
 
         profiles =
             snapshot.profiles;
 
+        default_profile_order =
+            snapshot.default_profile_order;
+
+
+        // Migration/fallback for groups created by an
+        // older Gryph version.
+        if (default_profile_order.isEmpty())
+        {
+            default_profile_order =
+                profiles;
+        }
 
         scroll_last_profile =
             snapshot.scroll_last_profile;
 
-
         test_sort_by =
             snapshot.test_sort_by;
 
-
         traffic_sort_by =
             snapshot.traffic_sort_by;
-
 
         test_items_to_show =
             snapshot.test_items_to_show;
@@ -97,24 +101,23 @@ namespace Configs
     bool Group::TryAssignId(
         int newId)
     {
-        if (newId < 0) {
+        if (newId < 0)
+        {
             return false;
         }
-
 
         QMutexLocker locker(
             &mutex
         );
 
-
-        if (id >= 0) {
+        // ID is write-once.
+        if (id >= 0)
+        {
             return false;
         }
 
-
         id =
             newId;
-
 
         return true;
     }
@@ -131,7 +134,6 @@ namespace Configs
             &mutex
         );
 
-
         archive =
             value;
     }
@@ -144,7 +146,6 @@ namespace Configs
             &mutex
         );
 
-
         auto_clear_unavailable =
             value;
     }
@@ -156,7 +157,6 @@ namespace Configs
         QMutexLocker locker(
             &mutex
         );
-
 
         skip_auto_update =
             value;
@@ -175,26 +175,20 @@ namespace Configs
             &mutex
         );
 
-
         name =
             newName;
-
 
         url =
             newUrl;
 
-
         auto_clear_unavailable =
             autoClearUnavailable;
-
 
         skip_auto_update =
             skipAutoUpdate;
 
-
         front_proxy_id =
             frontProxyId;
-
 
         landing_proxy_id =
             landingProxyId;
@@ -209,10 +203,8 @@ namespace Configs
             &mutex
         );
 
-
         front_proxy_id =
             frontProxyId;
-
 
         landing_proxy_id =
             landingProxyId;
@@ -230,7 +222,6 @@ namespace Configs
             &mutex
         );
 
-
         column_width =
             widths;
     }
@@ -242,7 +233,6 @@ namespace Configs
             &mutex
         );
 
-
         column_width.clear();
     }
 
@@ -253,7 +243,6 @@ namespace Configs
         QMutexLocker locker(
             &mutex
         );
-
 
         calculated_column_width =
             widths;
@@ -267,7 +256,6 @@ namespace Configs
             &mutex
         );
 
-
         return calculated_column_width;
     }
 
@@ -275,15 +263,14 @@ namespace Configs
     void Group::ResetCalculatedColumnWidth(
         int column)
     {
-        if (column < 0) {
+        if (column < 0)
+        {
             return;
         }
-
 
         QMutexLocker locker(
             &mutex
         );
-
 
         if (column >=
             calculated_column_width.size())
@@ -291,10 +278,19 @@ namespace Configs
             return;
         }
 
-
         calculated_column_width[
             column
         ] = 0;
+    }
+
+
+    void Group::clearCalculatedColumnWidth()
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+        calculated_column_width.clear();
     }
 
 
@@ -308,7 +304,6 @@ namespace Configs
         QMutexLocker locker(
             &mutex
         );
-
 
         scroll_last_profile =
             profileId;
@@ -324,7 +319,6 @@ namespace Configs
             &mutex
         );
 
-
         selectedProfilesIdIdxPairs =
             value;
     }
@@ -337,13 +331,12 @@ namespace Configs
             &mutex
         );
 
-
         return selectedProfilesIdIdxPairs;
     }
 
 
     // =========================================================
-    // Sort/display
+    // Sorting/display settings
     // =========================================================
 
     void Group::SetTestSortBy(
@@ -352,7 +345,6 @@ namespace Configs
         QMutexLocker locker(
             &mutex
         );
-
 
         test_sort_by =
             value;
@@ -366,7 +358,6 @@ namespace Configs
             &mutex
         );
 
-
         traffic_sort_by =
             value;
     }
@@ -379,29 +370,25 @@ namespace Configs
             &mutex
         );
 
-
         test_items_to_show =
             value;
     }
 
-    void Group::clearCalculatedColumnWidth()
-    {
-        QMutexLocker locker(&mutex);
 
-        calculated_column_width.clear();
-    }
+    // =========================================================
+    // Snapshot
+    // =========================================================
 
     GroupSnapshot Group::Snapshot() const
     {
-        QMutexLocker locker(&mutex);
-
+        QMutexLocker locker(
+            &mutex
+        );
 
         GroupSnapshot snapshot;
 
-
         snapshot.id =
             id;
-
 
         snapshot.archive =
             archive;
@@ -412,7 +399,6 @@ namespace Configs
         snapshot.auto_clear_unavailable =
             auto_clear_unavailable;
 
-
         snapshot.name =
             name;
 
@@ -422,10 +408,8 @@ namespace Configs
         snapshot.info =
             info;
 
-
         snapshot.sub_last_update =
             sub_last_update;
-
 
         snapshot.front_proxy_id =
             front_proxy_id;
@@ -433,17 +417,17 @@ namespace Configs
         snapshot.landing_proxy_id =
             landing_proxy_id;
 
-
         snapshot.column_width =
             column_width;
 
         snapshot.profiles =
             profiles;
 
+        snapshot.default_profile_order =
+            default_profile_order;
 
         snapshot.scroll_last_profile =
             scroll_last_profile;
-
 
         snapshot.test_sort_by =
             test_sort_by;
@@ -454,82 +438,347 @@ namespace Configs
         snapshot.test_items_to_show =
             test_items_to_show;
 
-
         return snapshot;
     }
+
+
+    // =========================================================
+    // Subscription
+    // =========================================================
 
     void Group::SetSubscriptionSource(
         const QString& newName,
         const QString& newUrl)
     {
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
 
-        name = newName;
-        url = newUrl;
+        name =
+            newName;
+
+        url =
+            newUrl;
     }
+
 
     void Group::UpdateSubscriptionState(
         qint64 lastUpdate,
         const QString& newInfo)
     {
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
 
-        sub_last_update = lastUpdate;
-        info = newInfo;
+        sub_last_update =
+            lastUpdate;
+
+        info =
+            newInfo;
     }
+
+
+    // =========================================================
+    // Profiles
+    // =========================================================
 
     void Group::ReplaceProfiles(
         const QList<int>& newProfiles)
     {
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
 
-        profiles = newProfiles;
+        profiles =
+            newProfiles;
     }
 
-    QList<int> Group::Profiles() const
+
+    QList<int> 
+        Group::Profiles() const
     {
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
 
         return profiles;
     }
 
-    double bitrateToBps(const QString& str)
+    QList<int>
+        Group::DefaultProfileOrder() const
     {
-        if (str.endsWith("Gbps", Qt::CaseInsensitive)) {
-            double val = str.left(str.size() - 4).toDouble();
-            return val * 1e9;
-        }
-        if (str.endsWith("Mbps", Qt::CaseInsensitive)) {
-            double val = str.left(str.size() - 4).toDouble();
-            return val * 1e6;
-        }
-        if (str.endsWith("Kbps", Qt::CaseInsensitive)) {
-            double val = str.left(str.size() - 4).toDouble();
-            return val * 1e3;
-        }
-        if (str == "N/A") return -1;
-        return 0.0;
+        QMutexLocker locker(
+            &mutex
+        );
+
+        return default_profile_order;
     }
+
+
+    void Group::SetDefaultProfileOrder(
+        const QList<int>& order)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+        default_profile_order =
+            order;
+    }
+
+
+    void Group::ReplaceProfilesFromSubscription(
+        const QList<int>& order)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+        // Current visible/canonical list.
+        profiles =
+            order;
+
+        // Remember exactly the order supplied
+        // by the subscription.
+        default_profile_order =
+            order;
+    }
+
+
+    bool Group::RestoreDefaultProfileOrder()
+    {
+        QMutexLocker sortLocker(
+            &sortMutex_
+        );
+
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        if (default_profile_order.isEmpty())
+        {
+            return false;
+        }
+
+
+        // IDs that currently still exist in the group.
+        const QSet<int> currentIds(
+            profiles.begin(),
+            profiles.end()
+        );
+
+
+        QList<int> restored;
+
+        restored.reserve(
+            profiles.size()
+        );
+
+
+        QSet<int> inserted;
+
+        inserted.reserve(
+            profiles.size()
+        );
+
+
+        // Restore subscription order, but do not restore
+        // profiles that have since been deleted.
+        for (const int id :
+        default_profile_order)
+        {
+            if (!currentIds.contains(id))
+            {
+                continue;
+            }
+
+
+            if (inserted.contains(id))
+            {
+                continue;
+            }
+
+
+            restored.append(id);
+            inserted.insert(id);
+        }
+
+
+        // Profiles added after the subscription update are
+        // appended to the end instead of disappearing.
+        for (const int id :
+        profiles)
+        {
+            if (inserted.contains(id))
+            {
+                continue;
+            }
+
+
+            restored.append(id);
+            inserted.insert(id);
+        }
+
+
+        if (restored == profiles)
+        {
+            return true;
+        }
+
+
+        profiles =
+            std::move(restored);
+
+
+        return true;
+    }
+
+    // =========================================================
+    // Speed-test value parser
+    // =========================================================
+
+    double bitrateToBps(
+        const QString& input)
+    {
+        const QString str =
+            input.trimmed();
+
+        if (str.isEmpty() ||
+            str.compare(
+                QStringLiteral("N/A"),
+                Qt::CaseInsensitive
+            ) == 0)
+        {
+            return -1.0;
+        }
+
+        bool ok =
+            false;
+
+
+        if (str.endsWith(
+            QStringLiteral("Gbps"),
+            Qt::CaseInsensitive))
+        {
+            const double value =
+                str.left(
+                    str.size() - 4
+                )
+                .trimmed()
+                .toDouble(&ok);
+
+            return ok
+                ? value * 1e9
+                : -1.0;
+        }
+
+
+        if (str.endsWith(
+            QStringLiteral("Mbps"),
+            Qt::CaseInsensitive))
+        {
+            const double value =
+                str.left(
+                    str.size() - 4
+                )
+                .trimmed()
+                .toDouble(&ok);
+
+            return ok
+                ? value * 1e6
+                : -1.0;
+        }
+
+
+        if (str.endsWith(
+            QStringLiteral("Kbps"),
+            Qt::CaseInsensitive))
+        {
+            const double value =
+                str.left(
+                    str.size() - 4
+                )
+                .trimmed()
+                .toDouble(&ok);
+
+            return ok
+                ? value * 1e3
+                : -1.0;
+        }
+
+
+        if (str.endsWith(
+            QStringLiteral("bps"),
+            Qt::CaseInsensitive))
+        {
+            const double value =
+                str.left(
+                    str.size() - 3
+                )
+                .trimmed()
+                .toDouble(&ok);
+
+            return ok
+                ? value
+                : -1.0;
+        }
+
+
+        return -1.0;
+    }
+
+
+    // =========================================================
+    // Sort profiles
+    // =========================================================
 
     bool Group::SortProfiles(
         GroupSortAction sortAction)
     {
-        QList<int> idsSnapshot;
+        // Only one sorting operation may work on this
+        // Group at a time.
+        QMutexLocker sortLocker(
+            &sortMutex_
+        );
 
 
-        // -------------------------------------------------
-        // Phase 1:
-        // take Group profile-list snapshot
-        // -------------------------------------------------
+        QList<int>
+            idsSnapshot;
+
+
+        testBy testSortBySnapshot =
+            testBy::latency;
+
+
+        trafficBy trafficSortBySnapshot =
+            trafficBy::total;
+
+
+        // -----------------------------------------------------
+        // Phase 1
+        //
+        // Take a coherent Group snapshot and immediately
+        // release the main Group mutex.
+        // -----------------------------------------------------
 
         {
-            QMutexLocker locker(&mutex);
+            QMutexLocker locker(
+                &mutex
+            );
 
-            idsSnapshot = profiles;
+            idsSnapshot =
+                profiles;
+
+            testSortBySnapshot =
+                test_sort_by;
+
+            trafficSortBySnapshot =
+                traffic_sort_by;
         }
 
 
-        // Raw order means "leave as is".
+        // Raw means "preserve current order".
         if (sortAction.method ==
             GroupSortMethod::Raw)
         {
@@ -537,24 +786,30 @@ namespace Configs
         }
 
 
-        // ID sorting does not require ProfilesRepo.
+        // -----------------------------------------------------
+        // ID sort requires no Profile objects.
+        // -----------------------------------------------------
+
         if (sortAction.method ==
             GroupSortMethod::ById)
         {
-            QMutexLocker locker(&mutex);
+            QMutexLocker locker(
+                &mutex
+            );
 
-
-            // Group may have changed while we were outside
-            // the mutex.
-            if (profiles != idsSnapshot) {
+            // Do not overwrite concurrent modifications.
+            if (profiles != idsSnapshot)
+            {
                 return false;
             }
-
 
             std::ranges::sort(
                 profiles,
 
-                [descending = sortAction.descending](
+                [
+                    descending =
+                        sortAction.descending
+                ](
                     const int a,
                     const int b)
                 {
@@ -562,17 +817,187 @@ namespace Configs
                         ? a > b
                         : a < b;
                 }
-            );
-
+                        );
 
             return true;
         }
 
 
-        // -------------------------------------------------
-        // Phase 2:
-        // obtain Profile objects WITHOUT Group::mutex
-        // -------------------------------------------------
+        // -----------------------------------------------------
+        // Sorting helpers
+        // -----------------------------------------------------
+
+        QCollator textCollator;
+
+        textCollator.setCaseSensitivity(
+            Qt::CaseInsensitive
+        );
+
+        // Natural text ordering:
+        //
+        // node2 < node10
+        // instead of
+        // node10 < node2
+        textCollator.setNumericMode(
+            true
+        );
+
+
+        const auto nameSortKey =
+            [](QString value)
+            {
+                value =
+                    value.trimmed();
+
+                qsizetype pos =
+                    0;
+
+
+                // Ignore leading flags, emoji, punctuation
+                // and spaces when sorting names.
+                //
+                // 🇩🇪 Nuremberg -> Nuremberg
+                // 🇺🇸 Washington -> Washington
+                while (pos < value.size() &&
+                    !value[pos]
+                    .isLetterOrNumber())
+                {
+                    ++pos;
+                }
+
+
+                if (pos > 0)
+                {
+                    value =
+                        value.mid(pos);
+                }
+
+                return value;
+            };
+
+
+        const auto compareIds =
+            [&sortAction](
+                const int idA,
+                const int idB)
+            {
+                return sortAction.descending
+                    ? idA > idB
+                    : idA < idB;
+            };
+
+
+        const auto compareText =
+            [
+                &textCollator,
+                &sortAction,
+                &compareIds
+            ](
+                const QString& valueA,
+                const QString& valueB,
+                const int idA,
+                const int idB)
+            {
+                const bool emptyA =
+                    valueA.isEmpty();
+
+                const bool emptyB =
+                    valueB.isEmpty();
+
+
+                // Empty values always go to the bottom.
+                if (emptyA != emptyB)
+                {
+                    return !emptyA;
+                }
+
+
+                const int cmp =
+                    textCollator.compare(
+                        valueA,
+                        valueB
+                    );
+
+
+                if (cmp != 0)
+                {
+                    return sortAction.descending
+                        ? cmp > 0
+                        : cmp < 0;
+                }
+
+
+                return compareIds(
+                    idA,
+                    idB
+                );
+            };
+
+
+        const auto compareNumber =
+            [
+                &sortAction,
+                &compareIds
+            ](
+                const auto valueA,
+                const auto valueB,
+                const int idA,
+                const int idB)
+            {
+                if (valueA != valueB)
+                {
+                    return sortAction.descending
+                        ? valueA > valueB
+                        : valueA < valueB;
+                }
+
+                return compareIds(
+                    idA,
+                    idB
+                );
+            };
+
+
+        const auto compareOptionalNumber =
+            [
+                &compareNumber
+            ](
+                const auto valueA,
+                const auto valueB,
+                const bool validA,
+                const bool validB,
+                const int idA,
+                const int idB)
+            {
+                // Valid values always stay above missing/N/A
+                // values, regardless of direction.
+                if (validA != validB)
+                {
+                    return validA;
+                }
+
+
+                // Both missing/invalid.
+                if (!validA)
+                {
+                    return idA < idB;
+                }
+
+
+                return compareNumber(
+                    valueA,
+                    valueB,
+                    idA,
+                    idB
+                );
+            };
+
+
+        // -----------------------------------------------------
+        // Phase 2
+        //
+        // Load all Profile objects without holding Group::mutex.
+        // -----------------------------------------------------
 
         const auto loadedProfiles =
             dataManager
@@ -582,10 +1007,12 @@ namespace Configs
             );
 
 
-        QHash<
-            int,
-            std::shared_ptr<Profile>
-        > profileById;
+        QSet<int>
+            loadedProfileIds;
+
+
+        QHash<int, QString>
+            textById;
 
 
         QHash<
@@ -600,9 +1027,22 @@ namespace Configs
         > trafficById;
 
 
-        profileById.reserve(
+        loadedProfileIds.reserve(
             loadedProfiles.size()
         );
+
+
+        if (sortAction.method ==
+            GroupSortMethod::ByName ||
+            sortAction.method ==
+            GroupSortMethod::ByType ||
+            sortAction.method ==
+            GroupSortMethod::ByAddress)
+        {
+            textById.reserve(
+                loadedProfiles.size()
+            );
+        }
 
 
         if (sortAction.method ==
@@ -623,9 +1063,13 @@ namespace Configs
         }
 
 
-        // -------------------------------------------------
-        // Freeze all data required for the sort
-        // -------------------------------------------------
+        // -----------------------------------------------------
+        // Freeze every piece of information required by the
+        // comparator.
+        //
+        // The comparator below therefore does not need to call
+        // ProfilesRepo.
+        // -----------------------------------------------------
 
         for (const auto& profile :
             loadedProfiles)
@@ -637,17 +1081,69 @@ namespace Configs
             }
 
 
-            profileById.insert(
-                profile->id,
-                profile
+            const int profileId =
+                profile->id;
+
+
+            loadedProfileIds.insert(
+                profileId
             );
+
+
+            if (sortAction.method ==
+                GroupSortMethod::ByName)
+            {
+                const QString value =
+                    profile->outbound
+                    ? profile->outbound->name
+                    : QString();
+
+                textById.insert(
+                    profileId,
+                    nameSortKey(value)
+                );
+            }
+
+
+            if (sortAction.method ==
+                GroupSortMethod::ByType)
+            {
+                const QString value =
+                    profile->outbound
+                    ? profile
+                    ->outbound
+                    ->DisplayType()
+                    : QString();
+
+                textById.insert(
+                    profileId,
+                    value
+                );
+            }
+
+
+            if (sortAction.method ==
+                GroupSortMethod::ByAddress)
+            {
+                const QString value =
+                    profile->outbound
+                    ? profile
+                    ->outbound
+                    ->DisplayAddress()
+                    : QString();
+
+                textById.insert(
+                    profileId,
+                    value
+                );
+            }
 
 
             if (sortAction.method ==
                 GroupSortMethod::ByTestResult)
             {
                 testById.insert(
-                    profile->id,
+                    profileId,
                     profile->TestSnapshot()
                 );
             }
@@ -657,66 +1153,31 @@ namespace Configs
                 GroupSortMethod::ByTraffic)
             {
                 trafficById.insert(
-                    profile->id,
+                    profileId,
                     profile->TrafficSnapshot()
                 );
             }
         }
 
 
-        // -------------------------------------------------
-        // Phase 3:
-        // lock Group after all external repository calls
-        // -------------------------------------------------
+        // -----------------------------------------------------
+        // Phase 3
+        //
+        // Apply sorted result while holding Group::mutex.
+        // -----------------------------------------------------
 
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
 
 
-        // Do not overwrite concurrent changes to the group.
-        if (profiles != idsSnapshot) {
+        // If profiles were added/deleted/reordered while data
+        // was being prepared, do not overwrite those changes.
+        if (profiles != idsSnapshot)
+        {
             return false;
         }
 
-
-        const auto getProfile =
-            [&profileById](int id)
-            -> std::shared_ptr<Profile>
-            {
-                const auto it =
-                    profileById.constFind(id);
-
-
-                if (it ==
-                    profileById.constEnd())
-                {
-                    return nullptr;
-                }
-
-
-                return it.value();
-            };
-
-
-        const auto latencyForSort =
-            [](int latency)
-            {
-                // Never tested.
-                if (latency == 0) {
-                    return 100000;
-                }
-
-                // Unavailable.
-                if (latency < 0) {
-                    return 99999;
-                }
-
-                return latency;
-            };
-
-
-        // -------------------------------------------------
-        // Sort
-        // -------------------------------------------------
 
         std::ranges::sort(
             profiles,
@@ -724,110 +1185,53 @@ namespace Configs
             [&](const int a,
                 const int b)
             {
-                const auto profA =
-                    getProfile(a);
+                const bool loadedA =
+                    loadedProfileIds.contains(a);
 
-                const auto profB =
-                    getProfile(b);
+                const bool loadedB =
+                    loadedProfileIds.contains(b);
 
 
-                // Missing profiles are sorted
-                // deterministically by ID.
-                if (!profA ||
-                    !profB)
+                // Existing Profile objects always stay above
+                // missing/corrupted entries.
+                if (loadedA != loadedB)
                 {
-                    return sortAction.descending
-                        ? a > b
-                        : a < b;
+                    return loadedA;
                 }
 
 
-                // -----------------------------------------
-                // Type
-                // -----------------------------------------
-
-                if (sortAction.method ==
-                    GroupSortMethod::ByType)
+                if (!loadedA)
                 {
-                    const QString valueA =
-                        profA->outbound
-                        ? profA
-                        ->outbound
-                        ->DisplayType()
-                        : QString();
-
-
-                    const QString valueB =
-                        profB->outbound
-                        ? profB
-                        ->outbound
-                        ->DisplayType()
-                        : QString();
-
-
-                    return sortAction.descending
-                        ? valueA > valueB
-                        : valueA < valueB;
+                    return compareIds(
+                        a,
+                        b
+                    );
                 }
 
 
-                // -----------------------------------------
-                // Name
-                // -----------------------------------------
+                // =========================================
+                // Name / Type / Address
+                // =========================================
 
                 if (sortAction.method ==
-                    GroupSortMethod::ByName)
-                {
-                    const QString valueA =
-                        profA->outbound
-                        ? profA->outbound->name
-                        : QString();
-
-
-                    const QString valueB =
-                        profB->outbound
-                        ? profB->outbound->name
-                        : QString();
-
-
-                    return sortAction.descending
-                        ? valueA > valueB
-                        : valueA < valueB;
-                }
-
-
-                // -----------------------------------------
-                // Address
-                // -----------------------------------------
-
-                if (sortAction.method ==
+                    GroupSortMethod::ByName ||
+                    sortAction.method ==
+                    GroupSortMethod::ByType ||
+                    sortAction.method ==
                     GroupSortMethod::ByAddress)
                 {
-                    const QString valueA =
-                        profA->outbound
-                        ? profA
-                        ->outbound
-                        ->DisplayAddress()
-                        : QString();
-
-
-                    const QString valueB =
-                        profB->outbound
-                        ? profB
-                        ->outbound
-                        ->DisplayAddress()
-                        : QString();
-
-
-                    return sortAction.descending
-                        ? valueA > valueB
-                        : valueA < valueB;
+                    return compareText(
+                        textById.value(a),
+                        textById.value(b),
+                        a,
+                        b
+                    );
                 }
 
 
-                // -----------------------------------------
-                // Test result
-                // -----------------------------------------
+                // =========================================
+                // Test Result
+                // =========================================
 
                 if (sortAction.method ==
                     GroupSortMethod::ByTestResult)
@@ -838,7 +1242,6 @@ namespace Configs
                             ProfileTestSnapshot{}
                         );
 
-
                     const auto testB =
                         testById.value(
                             b,
@@ -846,30 +1249,43 @@ namespace Configs
                         );
 
 
+                    // -------------------------------------
                     // Latency
-                    if (test_sort_by ==
+                    // -------------------------------------
+
+                    if (testSortBySnapshot ==
                         testBy::latency)
                     {
                         const int valueA =
-                            latencyForSort(
-                                testA.latency
-                            );
-
+                            testA.latency;
 
                         const int valueB =
-                            latencyForSort(
-                                testB.latency
-                            );
+                            testB.latency;
 
 
-                        return sortAction.descending
-                            ? valueA > valueB
-                            : valueA < valueB;
+                        const bool validA =
+                            valueA > 0;
+
+                        const bool validB =
+                            valueB > 0;
+
+
+                        return compareOptionalNumber(
+                            valueA,
+                            valueB,
+                            validA,
+                            validB,
+                            a,
+                            b
+                        );
                     }
 
 
+                    // -------------------------------------
                     // Download speed
-                    if (test_sort_by ==
+                    // -------------------------------------
+
+                    if (testSortBySnapshot ==
                         testBy::dlSpeed)
                     {
                         const double valueA =
@@ -877,21 +1293,35 @@ namespace Configs
                                 testA.dlSpeed
                             );
 
-
                         const double valueB =
                             bitrateToBps(
                                 testB.dlSpeed
                             );
 
 
-                        return sortAction.descending
-                            ? valueA > valueB
-                            : valueA < valueB;
+                        const bool validA =
+                            valueA >= 0.0;
+
+                        const bool validB =
+                            valueB >= 0.0;
+
+
+                        return compareOptionalNumber(
+                            valueA,
+                            valueB,
+                            validA,
+                            validB,
+                            a,
+                            b
+                        );
                     }
 
 
+                    // -------------------------------------
                     // Upload speed
-                    if (test_sort_by ==
+                    // -------------------------------------
+
+                    if (testSortBySnapshot ==
                         testBy::ulSpeed)
                     {
                         const double valueA =
@@ -899,35 +1329,50 @@ namespace Configs
                                 testA.ulSpeed
                             );
 
-
                         const double valueB =
                             bitrateToBps(
                                 testB.ulSpeed
                             );
 
 
-                        return sortAction.descending
-                            ? valueA > valueB
-                            : valueA < valueB;
+                        const bool validA =
+                            valueA >= 0.0;
+
+                        const bool validB =
+                            valueB >= 0.0;
+
+
+                        return compareOptionalNumber(
+                            valueA,
+                            valueB,
+                            validA,
+                            validB,
+                            a,
+                            b
+                        );
                     }
 
 
+                    // -------------------------------------
                     // Outbound IP
-                    if (test_sort_by ==
+                    // -------------------------------------
+
+                    if (testSortBySnapshot ==
                         testBy::ipOut)
                     {
-                        return sortAction.descending
-                            ? testA.ipOut >
-                            testB.ipOut
-                            : testA.ipOut <
-                            testB.ipOut;
+                        return compareText(
+                            testA.ipOut,
+                            testB.ipOut,
+                            a,
+                            b
+                        );
                     }
                 }
 
 
-                // -----------------------------------------
+                // =========================================
                 // Traffic
-                // -----------------------------------------
+                // =========================================
 
                 if (sortAction.method ==
                     GroupSortMethod::ByTraffic)
@@ -938,7 +1383,6 @@ namespace Configs
                             ProfileTrafficSnapshot{}
                         );
 
-
                     const auto trafficB =
                         trafficById.value(
                             b,
@@ -946,47 +1390,51 @@ namespace Configs
                         );
 
 
-                    if (traffic_sort_by ==
+                    if (trafficSortBySnapshot ==
                         trafficBy::total)
                     {
-                        return sortAction.descending
-                            ? trafficA.total() >
-                            trafficB.total()
-                            : trafficA.total() <
-                            trafficB.total();
+                        return compareNumber(
+                            trafficA.total(),
+                            trafficB.total(),
+                            a,
+                            b
+                        );
                     }
 
 
-                    if (traffic_sort_by ==
+                    if (trafficSortBySnapshot ==
                         trafficBy::dl)
                     {
-                        return sortAction.descending
-                            ? trafficA.downlink >
-                            trafficB.downlink
-                            : trafficA.downlink <
-                            trafficB.downlink;
+                        return compareNumber(
+                            trafficA.downlink,
+                            trafficB.downlink,
+                            a,
+                            b
+                        );
                     }
 
 
-                    if (traffic_sort_by ==
+                    if (trafficSortBySnapshot ==
                         trafficBy::ul)
                     {
-                        return sortAction.descending
-                            ? trafficA.uplink >
-                            trafficB.uplink
-                            : trafficA.uplink <
-                            trafficB.uplink;
+                        return compareNumber(
+                            trafficA.uplink,
+                            trafficB.uplink,
+                            a,
+                            b
+                        );
                     }
                 }
 
 
-                // -----------------------------------------
+                // =========================================
                 // Deterministic fallback
-                // -----------------------------------------
+                // =========================================
 
-                return sortAction.descending
-                    ? a > b
-                    : a < b;
+                return compareIds(
+                    a,
+                    b
+                );
             }
         );
 
@@ -994,73 +1442,139 @@ namespace Configs
         return true;
     }
 
-    bool Group::AddProfile(int ID)
-    {
-        QMutexLocker locker(&mutex);
 
-        if (profiles.contains(ID)) {
+    // =========================================================
+    // Profile list modification
+    // =========================================================
+
+    bool Group::AddProfile(
+        int ID)
+    {
+        if (ID < 0)
+        {
             return false;
         }
 
-        profiles.append(ID);
+        QMutexLocker locker(
+            &mutex
+        );
+
+        if (profiles.contains(ID))
+        {
+            return false;
+        }
+
+        profiles.append(
+            ID
+        );
 
         return true;
     }
+
 
     bool Group::AddProfileBatch(
         const QList<int>& IDs)
     {
-        QMutexLocker locker(&mutex);
+        QMutexLocker locker(
+            &mutex
+        );
+
 
         QSet<int> currentProfiles;
 
         currentProfiles.reserve(
-            profiles.size() + IDs.size()
+            profiles.size() +
+            IDs.size()
         );
 
-        for (const int profileID : profiles) {
-            currentProfiles.insert(profileID);
+
+        for (const int profileID :
+        profiles)
+        {
+            currentProfiles.insert(
+                profileID
+            );
         }
 
-        for (const int profileID : IDs) {
 
-            if (currentProfiles.contains(profileID)) {
+        bool changed =
+            false;
+
+
+        for (const int profileID :
+        IDs)
+        {
+            if (profileID < 0)
+            {
                 continue;
             }
 
-            profiles.append(profileID);
 
-            // Важно обновлять set сразу,
-            // чтобы дубликаты внутри IDs тоже
-            // не добавились.
-            currentProfiles.insert(profileID);
+            if (currentProfiles.contains(
+                profileID))
+            {
+                continue;
+            }
+
+
+            profiles.append(
+                profileID
+            );
+
+
+            currentProfiles.insert(
+                profileID
+            );
+
+
+            changed =
+                true;
         }
 
-        return true;
+
+        return changed;
     }
 
-    bool Group::RemoveProfile(int ID)
-    {
-        QMutexLocker locker(&mutex);
 
-        if (!profiles.contains(ID)) {
+    bool Group::RemoveProfile(
+        int ID)
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+        if (!profiles.contains(ID))
+        {
             return false;
         }
 
-        profiles.removeAll(ID);
+        profiles.removeAll(
+            ID
+        );
 
         return true;
     }
+
 
     bool Group::RemoveProfileBatch(
         const QList<int>& IDs)
     {
+        if (IDs.isEmpty())
+        {
+            return false;
+        }
+
+
         const QSet<int> toDelete(
             IDs.begin(),
             IDs.end()
         );
 
-        QMutexLocker locker(&mutex);
+
+        QMutexLocker locker(
+            &mutex
+        );
+
 
         QList<int> newProfiles;
 
@@ -1068,43 +1582,147 @@ namespace Configs
             profiles.size()
         );
 
-        for (const int profileID : profiles) {
 
-            if (!toDelete.contains(profileID)) {
+        bool changed =
+            false;
 
-                newProfiles.append(
-                    profileID
-                );
+
+        for (const int profileID :
+        profiles)
+        {
+            if (toDelete.contains(
+                profileID))
+            {
+                changed =
+                    true;
+
+                continue;
             }
+
+
+            newProfiles.append(
+                profileID
+            );
         }
 
-        profiles = std::move(newProfiles);
+
+        if (!changed)
+        {
+            return false;
+        }
+
+
+        profiles =
+            std::move(
+                newProfiles
+            );
+
 
         return true;
     }
 
-    bool Group::SwapProfiles(int idx1, int idx2)
+
+    bool Group::SwapProfiles(
+        int idx1,
+        int idx2)
     {
-        QMutexLocker locker(&mutex);
-        if (profiles.size() <= idx1 || profiles.size() <= idx2) return false;
-        profiles.swapItemsAt(idx1, idx2);
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        if (idx1 < 0 ||
+            idx2 < 0 ||
+            idx1 >= profiles.size() ||
+            idx2 >= profiles.size())
+        {
+            return false;
+        }
+
+
+        if (idx1 == idx2)
+        {
+            return true;
+        }
+
+
+        profiles.swapItemsAt(
+            idx1,
+            idx2
+        );
+
+
         return true;
     }
 
-    bool Group::EmplaceProfile(int idx, int newIdx)
+
+    bool Group::EmplaceProfile(
+        int idx,
+        int newIdx)
     {
-        QMutexLocker locker(&mutex);
-        if (profiles.size() <= idx || profiles.size() <= newIdx) return false;
-        profiles.insert(newIdx+1, profiles[idx]);
-        if (idx < newIdx) profiles.remove(idx);
-        else profiles.remove(idx+1);
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        if (idx < 0 ||
+            newIdx < 0 ||
+            idx >= profiles.size() ||
+            newIdx >= profiles.size())
+        {
+            return false;
+        }
+
+
+        if (idx == newIdx)
+        {
+            return true;
+        }
+
+
+        const int profileId =
+            profiles.at(idx);
+
+
+        profiles.removeAt(
+            idx
+        );
+
+
+        // After removing an item before the destination,
+        // the destination index shifts left by one.
+        int targetIndex =
+            newIdx;
+
+
+        if (idx < newIdx)
+        {
+            --targetIndex;
+        }
+
+
+        // Insert after the requested target row,
+        // preserving the semantics of the old implementation.
+        profiles.insert(
+            targetIndex + 1,
+            profileId
+        );
+
+
         return true;
     }
 
-    bool Group::HasProfile(int ID) const
-    {
-        QMutexLocker locker(&mutex);
 
-        return profiles.contains(ID);
+    bool Group::HasProfile(
+        int ID) const
+    {
+        QMutexLocker locker(
+            &mutex
+        );
+
+        return profiles.contains(
+            ID
+        );
     }
-}
+
+} // namespace Configs

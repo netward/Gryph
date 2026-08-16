@@ -399,22 +399,435 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         Configs::dataManager->settingsRepo->stats_tab = ui->stats_widget->tabBar()->currentIndex();
     });
     // Изменение критерия сортировки активных соединений при нажатии на заголовок.
-    connect(ui->connections->horizontalHeader(), &QHeaderView::sectionClicked, this, [=,this](int index)
-    {
-            Stats::ConnectionSort sortType;
-
-            switch (index)
+    // Сортировка профилей по нажатию на заголовок.
+    // Повторное нажатие на тот же столбец
+    // переключает направление.
+    const auto sortGroupAsync =
+        [this](
+            const std::shared_ptr<
+            Configs::Group
+            >& group,
+            const GroupSortAction& action)
+        {
+            if (!group)
             {
-            case 1: sortType = Stats::ByProcess; break;
-            case 2: sortType = Stats::ByProtocol; break;
-            case 3: sortType = Stats::ByOutbound; break;
-            case 4: sortType = Stats::ByTraffic; break;
-            default: sortType = Stats::Default; break;
+                return;
             }
 
-            Stats::connection_lister->setSort(sortType);
-            Stats::connection_lister->ForceUpdate();
-    });
+
+            const int groupId =
+                group->Id();
+
+
+            runOnNewThread(
+                [
+                    this,
+                    group,
+                    groupId,
+                    action
+                ]()
+                {
+                    // -------------------------------------
+                    // First attempt
+                    // -------------------------------------
+
+                    if (!group->SortProfiles(action))
+                    {
+                        // The group profile list was
+                        // modified concurrently, e.g.
+                        // subscription update/add/remove.
+                        //
+                        // SortProfiles is now serialized,
+                        // so this is NOT another sort.
+                        //
+                        // Retry once using the new state.
+                        if (!group->SortProfiles(action))
+                        {
+                            MW_show_log(
+                                "Group changed while sorting; "
+                                "sort cancelled."
+                            );
+
+                            return;
+                        }
+                    }
+
+
+                    // Persist exactly the group we sorted.
+                    Configs::dataManager
+                        ->groupsRepo
+                        ->Save(group);
+
+
+                    // -------------------------------------
+                    // UI refresh
+                    // -------------------------------------
+
+                    runOnUiThread(
+                        [
+                            this,
+                            groupId
+                        ]()
+                        {
+                            auto currentGroup =
+                                Configs::dataManager
+                                ->groupsRepo
+                                ->CurrentGroup();
+
+
+                            // User switched to another
+                            // group while sorting.
+                            if (!currentGroup ||
+                                currentGroup->Id() != groupId)
+                            {
+                                return;
+                            }
+
+
+                            refresh_proxy_list(
+                                {},
+                                true
+                            );
+                        }
+                    );
+                }
+            );
+    };
+    
+    // =========================================================
+// Profile table sort state
+//
+// 0 = default subscription order
+// 1 = ascending
+// 2 = descending
+// =========================================================
+
+    struct ProfileSortState
+    {
+        int column = -1;
+        int mode = 0;
+    };
+
+
+    const auto profileSortState =
+        std::make_shared<ProfileSortState>();
+
+
+    const auto restoreDefaultOrderAsync =
+        [this](
+            const std::shared_ptr<
+            Configs::Group
+            >& group)
+        {
+            if (!group)
+            {
+                return;
+            }
+
+
+            const int groupId =
+                group->Id();
+
+
+            runOnNewThread(
+                [
+                    this,
+                    group,
+                    groupId
+                ]()
+                {
+                    // Restore the canonical order received
+                    // from the subscription.
+                    if (!group
+                        ->RestoreDefaultProfileOrder())
+                    {
+                        MW_show_log(
+                            "Default profile order "
+                            "is not available."
+                        );
+
+                        return;
+                    }
+
+
+                    Configs::dataManager
+                        ->groupsRepo
+                        ->Save(group);
+
+
+                    runOnUiThread(
+                        [
+                            this,
+                            groupId
+                        ]()
+                        {
+                            auto currentGroup =
+                                Configs::dataManager
+                                ->groupsRepo
+                                ->CurrentGroup();
+
+
+                            if (!currentGroup ||
+                                currentGroup->Id() !=
+                                groupId)
+                            {
+                                return;
+                            }
+
+
+                            refresh_proxy_list(
+                                {},
+                                true
+                            );
+                        }
+                    );
+                }
+            );
+        };
+
+    connect(
+        ui->profilesTableView->horizontalHeader(),
+        &QHeaderView::sectionClicked,
+        this,
+
+        [
+            this,
+            sortGroupAsync,
+            restoreDefaultOrderAsync,
+            profileSortState
+        ](int logicalIndex)
+        {
+            // We only have five sortable columns.
+            if (logicalIndex < 0 ||
+                logicalIndex > 4)
+            {
+                return;
+            }
+
+
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
+
+
+            if (!group)
+            {
+                return;
+            }
+
+
+            // =================================================
+            // Determine next state
+            // =================================================
+
+            if (profileSortState->column !=
+                logicalIndex)
+            {
+                // First click on another column.
+                profileSortState->column =
+                    logicalIndex;
+
+                profileSortState->mode =
+                    1; // ascending
+            }
+            else
+            {
+                // Same column:
+                //
+                // ascending
+                //     ↓
+                // descending
+                //     ↓
+                // default
+                //     ↓
+                // ascending
+
+                switch (profileSortState->mode)
+                {
+                case 0:
+
+                    profileSortState->mode =
+                        1;
+
+                    break;
+
+
+                case 1:
+
+                    profileSortState->mode =
+                        2;
+
+                    break;
+
+
+                case 2:
+
+                    profileSortState->mode =
+                        0;
+
+                    break;
+
+
+                default:
+
+                    profileSortState->mode =
+                        1;
+
+                    break;
+                }
+            }
+
+
+            auto* header =
+                ui->profilesTableView
+                ->horizontalHeader();
+
+
+            // =================================================
+            // Default subscription order
+            // =================================================
+
+            if (profileSortState->mode == 0)
+            {
+                // No active ascending/descending sort.
+                header->setSortIndicatorShown(
+                    false
+                );
+
+
+                restoreDefaultOrderAsync(
+                    group
+                );
+
+
+                return;
+            }
+
+
+            // =================================================
+            // Ascending / descending
+            // =================================================
+
+            GroupSortAction action;
+
+
+            action.descending =
+                profileSortState->mode == 2;
+
+
+            // -------------------------------------------------
+            // Column mapping
+            //
+            // 0 = Name
+            // 1 = Type
+            // 2 = Address
+            // 3 = Test Result
+            // 4 = Traffic
+            // -------------------------------------------------
+
+            switch (logicalIndex)
+            {
+            case 0:
+
+                action.method =
+                    GroupSortMethod::ByName;
+
+                break;
+
+
+            case 1:
+
+                action.method =
+                    GroupSortMethod::ByType;
+
+                break;
+
+
+            case 2:
+
+                action.method =
+                    GroupSortMethod::ByAddress;
+
+                break;
+
+
+            case 3:
+
+                action.method =
+                    GroupSortMethod::ByTestResult;
+
+                break;
+
+
+            case 4:
+
+                action.method =
+                    GroupSortMethod::ByTraffic;
+
+                break;
+
+
+            default:
+
+                return;
+            }
+
+
+            // =================================================
+            // Visual sort indicator
+            // =================================================
+
+            header->setSortIndicatorShown(
+                true
+            );
+
+
+            header->setSortIndicator(
+                logicalIndex,
+
+                action.descending
+                ? Qt::DescendingOrder
+                : Qt::AscendingOrder
+            );
+
+
+            // =================================================
+            // Execute
+            // =================================================
+
+            sortGroupAsync(
+                group,
+                action
+            );
+        }
+    );
+
+    connect(
+        ui->tabWidget,
+        &QTabWidget::currentChanged,
+        this,
+
+        [
+            this,
+            profileSortState
+        ](int)
+        {
+            profileSortState->column =
+                -1;
+
+            profileSortState->mode =
+                0;
+
+
+            ui->profilesTableView
+                ->horizontalHeader()
+                ->setSortIndicatorShown(
+                    false
+                );
+        }
+    );
+
 
     // График скорости
     speedChartWidget = new SpeedWidget(this);
@@ -434,45 +847,6 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
         profilesTableModel->emplaceProfiles(row1, row2);
         Configs::dataManager->groupsRepo->Save(group);
     };
-    // Сортировка профилей по нажатию на заголовок.
-    // Повторное нажатие на тот же столбец переключает направление.
-    connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionClicked, this, [=, this](int logicalIndex) {
-        GroupSortAction action;
-        if (proxy_last_order == logicalIndex) {
-            action.descending = true;
-            proxy_last_order = -1;
-        } else {
-            proxy_last_order = logicalIndex;
-        }
-        if (logicalIndex == 0) {
-            action.method = GroupSortMethod::ByType;
-        } else if (logicalIndex == 1) {
-            action.method = GroupSortMethod::ByAddress;
-        } else if (logicalIndex == 2) {
-            action.method = GroupSortMethod::ByName;
-        } else if (logicalIndex == 3) {
-            action.method = GroupSortMethod::ByTestResult;
-        } else if (logicalIndex == 4) {
-            action.method = GroupSortMethod::ByTraffic;
-        } else {
-            return;
-        }
-        // Выполнение сортировки и сохранения вне UI-потока.
-        runOnNewThread([=, this] {
-            auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-            if (currGroup == nullptr) return;
-            if (!currGroup->SortProfiles(action)) {
-                runOnUiThread([=] {
-                    MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                });
-                return;
-            }
-            Configs::dataManager->groupsRepo->Save(currGroup);
-            runOnUiThread([=, this] {
-                refresh_proxy_list({}, true);
-            });
-        });
-    });
     // Пользовательская ширина каждого столбца сохраняется отдельно для текущей группы.
     connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionResized, this, [=, this](int, int, int) {
         auto group = Configs::dataManager->groupsRepo->CurrentGroup();
@@ -513,264 +887,453 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     //  столбец 3 — состав и сортировка результатов тестирования;
     //  столбец 4 — способ сортировки трафика.
     ui->profilesTableView->horizontalHeader()->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(ui->profilesTableView->horizontalHeader(), &QWidget::customContextMenuRequested, this, [this](const QPoint& pos) {
-        
-        auto* header = ui->profilesTableView->horizontalHeader();
-        int columnIndex = header->logicalIndexAt(pos);
-        auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-        if (group == nullptr) return;
-        const auto groupSnapshot =
-            group->Snapshot();
-        if (columnIndex == 3) {
-            QMenu menu(this);
-            auto* includeLabel = menu.addAction(tr("Include:"));
-            includeLabel->setEnabled(false);
+    ui->profilesTableView
+        ->horizontalHeader()
+        ->setContextMenuPolicy(
+            Qt::CustomContextMenu
+        );
 
-            auto* actionShowOutIP =
-                menu.addAction(
-                    tr("Out IP")
-                );
+    connect(
+        ui->profilesTableView->horizontalHeader(),
+        &QWidget::customContextMenuRequested,
+        this,
 
-            actionShowOutIP->setCheckable(
-                true
-            );
+        [
+            this,
+            sortGroupAsync,
+            profileSortState
+        ]
+        (const QPoint& pos)
+        {
+            auto* header =
+                ui->profilesTableView
+                ->horizontalHeader();
 
-            actionShowOutIP->setChecked(
-                groupSnapshot.test_items_to_show ==
-                Configs::testShowItems::all
-                ||
-                groupSnapshot.test_items_to_show ==
-                Configs::testShowItems::ipOnly
-            );
+            const int columnIndex =
+                header->logicalIndexAt(pos);
 
 
-            auto* actionShowSpeed =
-                menu.addAction(
-                    tr("Speed")
-                );
-
-            actionShowSpeed->setCheckable(
-                true
-            );
-
-            actionShowSpeed->setChecked(
-                groupSnapshot.test_items_to_show ==
-                Configs::testShowItems::all
-                ||
-                groupSnapshot.test_items_to_show ==
-                Configs::testShowItems::speedOnly
-            );
-
-            // Преобразование состояния двух независимых checkbox-действий в одно перечисление test_items_to_show.
-            auto updateTestItemsToShow =
-                [
-                    this,
-                    group,
-                    actionShowOutIP,
-                    actionShowSpeed
-                ]()
-                {
-                    const bool ip =
-                        actionShowOutIP
-                        ->isChecked();
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
 
 
-                    const bool speed =
-                        actionShowSpeed
-                        ->isChecked();
-
-
-                    Configs::testShowItems value;
-
-
-                    if (ip && speed) {
-
-                        value =
-                            Configs::
-                            testShowItems::all;
-
-                    }
-                    else if (ip) {
-
-                        value =
-                            Configs::
-                            testShowItems::ipOnly;
-
-                    }
-                    else if (speed) {
-
-                        value =
-                            Configs::
-                            testShowItems::speedOnly;
-
-                    }
-                    else {
-
-                        value =
-                            Configs::
-                            testShowItems::none;
-                    }
-
-
-                    group->SetTestItemsToShow(
-                        value
-                    );
-
-
-                    group->ResetCalculatedColumnWidth(
-                        3
-                    );
-
-
-                    Configs::dataManager
-                        ->groupsRepo
-                        ->Save(group);
-
-
-                    refresh_proxy_list();
-                };
-
-            connect(actionShowOutIP, &QAction::triggered, this, updateTestItemsToShow);
-            connect(actionShowSpeed, &QAction::triggered, this, updateTestItemsToShow);
-
-            menu.addSeparator();
-            auto* sortByLabel = menu.addAction(tr("Sort By:"));
-            sortByLabel->setEnabled(false);
-
-            struct SortOption { int value; QString label; };
-            QList<SortOption> options = {
-                { static_cast<int>(Configs::testBy::latency), tr("Latency") },
-                { static_cast<int>(Configs::testBy::dlSpeed), tr("Download Speed") },
-                { static_cast<int>(Configs::testBy::ulSpeed), tr("Upload Speed") },
-                { static_cast<int>(Configs::testBy::ipOut), tr("IP Out") }
-            };
-            for (const auto& opt : options) {
-                auto* act = menu.addAction(opt.label);
-                act->setData(opt.value);
-                act->setCheckable(true);
-                act->setChecked(
-                    static_cast<int>(
-                        groupSnapshot.test_sort_by
-                        ) == opt.value
-                );
-            }
-
-            // exec() показывает модальное контекстное меню и возвращает выбранное действие
-            auto* chosen = menu.exec(header->mapToGlobal(pos));
-            if (chosen == nullptr || !chosen->data().isValid()) return;
-
-            const int testSortBy =
-                chosen->data().toInt();
-
-
-            group->SetTestSortBy(
-                static_cast<Configs::testBy>(
-                    testSortBy
-                    )
-            );
-            Configs::dataManager->groupsRepo->Save(group);
-            GroupSortAction action;
-            action.method = GroupSortMethod::ByTestResult;
-            action.descending = true;
-            runOnNewThread([=, this] {
-                auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-                if (currGroup == nullptr) return;
-                if (!currGroup->SortProfiles(action)) {
-                    runOnUiThread([=] {
-                        MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                        });
-                    return;
-                }
-                Configs::dataManager->groupsRepo->Save(currGroup);
-                runOnUiThread([=, this] {
-                    refresh_proxy_list({}, true);
-                    });
-                });
-            return;
-        }
-        // Контекстное меню столбца накопленного трафика.
-        if (columnIndex == 4) {
-            QMenu menu(this);
-            auto* sortByLabel = menu.addAction(tr("Sort By:"));
-            sortByLabel->setEnabled(false);
-
-            struct TrafficSortOption { int value; QString label; };
-            QList<TrafficSortOption> options = {
-                { 0, tr("Total") },
-                { 1, tr("Downloaded") },
-                { 2, tr("Uploaded") }
-            };
-
-            for (const auto& opt : options)
-            {
-                auto* act =
-                    menu.addAction(
-                        opt.label
-                    );
-
-                act->setData(
-                    opt.value
-                );
-
-                act->setCheckable(
-                    true
-                );
-
-                act->setChecked(
-                    static_cast<int>(
-                        groupSnapshot.traffic_sort_by
-                        ) == opt.value
-                );
-            }
-
-
-            auto* chosen =
-                menu.exec(
-                    header->mapToGlobal(pos)
-                );
-
-            if (chosen == nullptr ||
-                !chosen->data().isValid())
+            if (!group)
             {
                 return;
             }
 
 
-            const int trafficSortBy =
-                chosen->data().toInt();
+            const auto groupSnapshot =
+                group->Snapshot();
 
 
-            group->SetTrafficSortBy(
-                static_cast<Configs::trafficBy>(
-                    trafficSortBy
-                    )
-            );
+            // =================================================
+            // Test Result
+            // =================================================
+            if (columnIndex == 3)
+            {
+                QMenu menu(this);
+
+                auto* includeLabel =
+                    menu.addAction(
+                        tr("Include:")
+                    );
+
+                includeLabel->setEnabled(
+                    false
+                );
 
 
-            Configs::dataManager
-                ->groupsRepo
-                ->Save(group);
+                auto* actionShowOutIP =
+                    menu.addAction(
+                        tr("Out IP")
+                    );
 
-            GroupSortAction action;
-            action.method = GroupSortMethod::ByTraffic;
-            action.descending = false;
-            runOnNewThread([=, this] {
-                auto currGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-                if (currGroup == nullptr) return;
-                if (!currGroup->SortProfiles(action)) {
-                    runOnUiThread([=] {
-                        MessageBoxWarning("Action already in progress", "A sort action is already in progress");
-                        });
+                actionShowOutIP
+                    ->setCheckable(true);
+
+                actionShowOutIP
+                    ->setChecked(
+                        groupSnapshot.test_items_to_show ==
+                        Configs::testShowItems::all
+                        ||
+                        groupSnapshot.test_items_to_show ==
+                        Configs::testShowItems::ipOnly
+                    );
+
+
+                auto* actionShowSpeed =
+                    menu.addAction(
+                        tr("Speed")
+                    );
+
+                actionShowSpeed
+                    ->setCheckable(true);
+
+                actionShowSpeed
+                    ->setChecked(
+                        groupSnapshot.test_items_to_show ==
+                        Configs::testShowItems::all
+                        ||
+                        groupSnapshot.test_items_to_show ==
+                        Configs::testShowItems::speedOnly
+                    );
+
+
+                auto updateTestItemsToShow =
+                    [
+                        this,
+                        group,
+                        actionShowOutIP,
+                        actionShowSpeed
+                    ]()
+                    {
+                        const bool ip =
+                            actionShowOutIP
+                            ->isChecked();
+
+                        const bool speed =
+                            actionShowSpeed
+                            ->isChecked();
+
+
+                        Configs::testShowItems value;
+
+
+                        if (ip && speed)
+                        {
+                            value =
+                                Configs::testShowItems::all;
+                        }
+                        else if (ip)
+                        {
+                            value =
+                                Configs::testShowItems::ipOnly;
+                        }
+                        else if (speed)
+                        {
+                            value =
+                                Configs::testShowItems::speedOnly;
+                        }
+                        else
+                        {
+                            value =
+                                Configs::testShowItems::none;
+                        }
+
+
+                        group->SetTestItemsToShow(
+                            value
+                        );
+
+                        group->ResetCalculatedColumnWidth(
+                            3
+                        );
+
+                        Configs::dataManager
+                            ->groupsRepo
+                            ->Save(group);
+
+                        refresh_proxy_list();
+                    };
+
+
+                connect(
+                    actionShowOutIP,
+                    &QAction::triggered,
+                    this,
+                    updateTestItemsToShow
+                );
+
+                connect(
+                    actionShowSpeed,
+                    &QAction::triggered,
+                    this,
+                    updateTestItemsToShow
+                );
+
+
+                menu.addSeparator();
+
+
+                auto* sortByLabel =
+                    menu.addAction(
+                        tr("Sort By:")
+                    );
+
+                sortByLabel->setEnabled(
+                    false
+                );
+
+
+                struct SortOption
+                {
+                    int value;
+                    QString label;
+                };
+
+
+                const QList<SortOption> options =
+                {
+                    {
+                        static_cast<int>(
+                            Configs::testBy::latency
+                        ),
+                        tr("Latency")
+                    },
+
+                    {
+                        static_cast<int>(
+                            Configs::testBy::dlSpeed
+                        ),
+                        tr("Download Speed")
+                    },
+
+                    {
+                        static_cast<int>(
+                            Configs::testBy::ulSpeed
+                        ),
+                        tr("Upload Speed")
+                    },
+
+                    {
+                        static_cast<int>(
+                            Configs::testBy::ipOut
+                        ),
+                        tr("IP Out")
+                    }
+                };
+
+
+                for (const auto& opt : options)
+                {
+                    auto* act =
+                        menu.addAction(
+                            opt.label
+                        );
+
+                    act->setData(
+                        opt.value
+                    );
+
+                    act->setCheckable(
+                        true
+                    );
+
+                    act->setChecked(
+                        static_cast<int>(
+                            groupSnapshot.test_sort_by
+                            ) == opt.value
+                    );
+                }
+
+
+                auto* chosen =
+                    menu.exec(
+                        header->mapToGlobal(pos)
+                    );
+
+
+                if (!chosen ||
+                    !chosen->data().isValid())
+                {
                     return;
                 }
-                Configs::dataManager->groupsRepo->Save(Configs::dataManager->groupsRepo->CurrentGroup());
-                runOnUiThread([=, this] {
-                    refresh_proxy_list();
-                    });
-                });
-            return;
+
+
+                const int testSortBy =
+                    chosen
+                    ->data()
+                    .toInt();
+
+
+                group->SetTestSortBy(
+                    static_cast<Configs::testBy>(
+                        testSortBy
+                        )
+                );
+
+
+                Configs::dataManager
+                    ->groupsRepo
+                    ->Save(group);
+
+
+                GroupSortAction action;
+
+                action.method =
+                    GroupSortMethod::ByTestResult;
+
+                action.descending =
+                    true;
+
+                profileSortState->column =
+                    3;
+
+                profileSortState->mode =
+                    action.descending
+                    ? 2
+                    : 1;
+
+
+                header->setSortIndicatorShown(
+                    true
+                );
+
+                header->setSortIndicator(
+                    3,
+                    action.descending
+                    ? Qt::DescendingOrder
+                    : Qt::AscendingOrder
+                );
+
+                sortGroupAsync(
+                    group,
+                    action
+                );
+
+
+                return;
+            }
+
+
+            // =================================================
+            // Traffic
+            // =================================================
+
+            if (columnIndex == 4)
+            {
+                QMenu menu(this);
+
+
+                auto* sortByLabel =
+                    menu.addAction(
+                        tr("Sort By:")
+                    );
+
+                sortByLabel->setEnabled(
+                    false
+                );
+
+
+                struct TrafficSortOption
+                {
+                    int value;
+                    QString label;
+                };
+
+
+                const QList<TrafficSortOption> options =
+                {
+                    {
+                        0,
+                        tr("Total")
+                    },
+                    {
+                        1,
+                        tr("Downloaded")
+                    },
+                    {
+                        2,
+                        tr("Uploaded")
+                    }
+                };
+
+
+                for (const auto& opt : options)
+                {
+                    auto* act =
+                        menu.addAction(
+                            opt.label
+                        );
+
+                    act->setData(
+                        opt.value
+                    );
+
+                    act->setCheckable(
+                        true
+                    );
+
+                    act->setChecked(
+                        static_cast<int>(
+                            groupSnapshot.traffic_sort_by
+                            ) == opt.value
+                    );
+                }
+
+
+                auto* chosen =
+                    menu.exec(
+                        header->mapToGlobal(pos)
+                    );
+
+
+                if (!chosen ||
+                    !chosen->data().isValid())
+                {
+                    return;
+                }
+
+
+                const int trafficSortBy =
+                    chosen
+                    ->data()
+                    .toInt();
+
+
+                group->SetTrafficSortBy(
+                    static_cast<Configs::trafficBy>(
+                        trafficSortBy
+                        )
+                );
+
+
+                Configs::dataManager
+                    ->groupsRepo
+                    ->Save(group);
+
+
+                GroupSortAction action;
+
+                action.method =
+                    GroupSortMethod::ByTraffic;
+
+                action.descending =
+                    false;
+
+                profileSortState->column =
+                    4;
+
+                profileSortState->mode =
+                    action.descending
+                    ? 2
+                    : 1;
+
+
+                header->setSortIndicatorShown(
+                    true
+                );
+
+                header->setSortIndicator(
+                    4,
+                    action.descending
+                    ? Qt::DescendingOrder
+                    : Qt::AscendingOrder
+                );
+
+                sortGroupAsync(
+                    group,
+                    action
+                );
+
+
+                return;
+            }
         }
-    });
+    );
     // Фиксированная высота строк 24 px для уменьшения затрат на перерасчёт геометрии большой таблицы.
     ui->profilesTableView->verticalHeader()->setStretchLastSection(false);
     ui->profilesTableView->verticalHeader()->setDefaultSectionSize(24);

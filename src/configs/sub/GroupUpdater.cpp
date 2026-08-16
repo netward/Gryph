@@ -829,7 +829,35 @@ namespace Subscription {
         MW_show_log(">>>>>>>> " + QObject::tr("Processing subscription data..."));
         rawUpdater->update(content);
         content.clear();
-        Configs::dataManager->profilesRepo->AddProfileBatch(rawUpdater->updated_order, rawUpdater->gid_add_to);
+        Configs::dataManager
+            ->profilesRepo
+            ->AddProfileBatch(
+                rawUpdater->updated_order, 
+                rawUpdater->gid_add_to);
+        QList<int> subscriptionOrder;
+
+        subscriptionOrder.reserve(
+            rawUpdater
+            ->updated_order
+            .size()
+        );
+
+
+        for (const auto& profile :
+            rawUpdater->updated_order)
+        {
+            if (!profile ||
+                profile->id < 0)
+            {
+                continue;
+            }
+
+
+            subscriptionOrder.append(
+                profile->id
+            );
+        }
+
         MW_show_log(">>>>>>>> " + QObject::tr("Process complete, applying..."));
 
         if (group != nullptr) {
@@ -840,7 +868,17 @@ namespace Subscription {
 
             QString change_text;
 
-            if (Configs::dataManager->settingsRepo->sub_clear) {
+            if (Configs::dataManager
+                ->settingsRepo
+                ->sub_clear) 
+            {
+                group->ReplaceProfilesFromSubscription(
+                    subscriptionOrder
+                );
+
+                Configs::dataManager
+                    ->groupsRepo
+                    ->Save(group);
                 // all is new profile
                 if (out_all.size() >= 1000) {
                     change_text += "[+] " + Int2String(out_all.size()) + " profiles\n";
@@ -933,14 +971,13 @@ namespace Subscription {
                 }
 
                 // One atomic replacement under Group::mutex.
-                group->ReplaceProfiles(
+                group->ReplaceProfilesFromSubscription(
                     newProfileOrder
                 );
 
                 Configs::dataManager
                     ->groupsRepo
                     ->Save(group);
-                Configs::dataManager->groupsRepo->Save(group);
 
                 // cleanup
                 const QSet<int> finalProfileIds(
