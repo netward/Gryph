@@ -1529,26 +1529,183 @@ void MainWindow::profile_start(int _id) {
         Stats::connection_lister->suspend = false;
 
         Configs::dataManager->settingsRepo->UpdateStartedId(ent->Id());
+        ent->ClearRunningCountryInfo();
         running = ent;
         if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
 
-        runOnUiThread([=, this] {
-            refresh_status();
-            refresh_proxy_list({ent->Id()});
+        // -----------------------------------------------------
+        // Initial UI update
+        // -----------------------------------------------------
 
-            auto resp = NetworkRequestHelper::HttpGet("http://ip-api.com/json/", false, true);
-            if (resp.error.isEmpty()) {
-                QJsonDocument doc = QJsonDocument::fromJson(resp.data);
-                if (doc.isObject()) {
-                    QJsonObject obj = doc.object();
-                    QString city = obj["city"].toString();
-                    QString countryName = obj["country"].toString();
-                    QString countryCode = obj["countryCode"].toString();
-                    if (running) running->RunningCountryInfo() = QString("%1 %2, %3").arg(CountryCodeToFlag(countryCode), countryName, city);
-                    refresh_status();
-                }
+        runOnUiThread(
+            [this, ent]
+            {
+                refresh_status();
+
+                refresh_proxy_list(
+                    {
+                        ent->Id()
+                    }
+                );
             }
-        });
+        );
+
+
+        // -----------------------------------------------------
+        // Resolve public IP/country outside UI thread
+        // -----------------------------------------------------
+
+        runOnNewThread(
+            [this, ent]
+            {
+                if (!ent)
+                {
+                    return;
+                }
+
+
+                const auto resp =
+                    NetworkRequestHelper::HttpGet(
+                        "http://ip-api.com/json/",
+                        false,
+                        true
+                    );
+
+
+                if (!resp.error.isEmpty())
+                {
+                    MW_show_log(
+                        "Failed to get profile country info: "
+                        + resp.error
+                    );
+
+                    return;
+                }
+
+
+                QJsonParseError parseError;
+
+                const auto doc =
+                    QJsonDocument::fromJson(
+                        resp.data,
+                        &parseError
+                    );
+
+                if (parseError.error !=
+                    QJsonParseError::NoError)
+                {
+                    MW_show_log(
+                        "Failed to parse profile "
+                        "country info: "
+                        + parseError.errorString()
+                    );
+
+                    return;
+                }
+
+
+                if (!doc.isObject())
+                {
+                    return;
+                }
+
+
+                const QJsonObject obj =
+                    doc.object();
+
+
+                const QString city =
+                    obj.value(
+                        "city"
+                    )
+                    .toString();
+
+
+                const QString countryName =
+                    obj.value(
+                        "country"
+                    )
+                    .toString();
+
+
+                const QString countryCode =
+                    obj.value(
+                        "countryCode"
+                    )
+                    .toString();
+
+
+                // -------------------------------------------------
+                // Build display string
+                // -------------------------------------------------
+
+                QStringList locationParts;
+
+
+                if (!countryName.isEmpty())
+                {
+                    QString countryText =
+                        countryName;
+
+
+                    if (!countryCode.isEmpty())
+                    {
+                        countryText.prepend(
+                            CountryCodeToFlag(
+                                countryCode
+                            )
+                            + " "
+                        );
+                    }
+
+
+                    locationParts.append(
+                        countryText
+                    );
+                }
+
+
+                if (!city.isEmpty())
+                {
+                    locationParts.append(
+                        city
+                    );
+                }
+
+
+                const QString countryInfo =
+                    locationParts.join(
+                        ", "
+                    );
+
+
+                if (countryInfo.isEmpty())
+                {
+                    return;
+                }
+
+
+                // -------------------------------------------------
+                // Thread-safe Profile runtime state update
+                // -------------------------------------------------
+
+                ent->SetRunningCountryInfo(
+                    countryInfo
+                );
+
+
+                // -------------------------------------------------
+                // UI must only be touched from UI thread
+                // -------------------------------------------------
+
+                runOnUiThread(
+                    [this]
+                    {
+                        refresh_status();
+                    }
+                );
+            }
+        );
 
         return true;
     };
