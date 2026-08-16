@@ -16,14 +16,13 @@
 #include "ui_mainwindow.h"
 
 #include <memory>
+#include <atomic>
 #include <ranges>
 
 #include <QSemaphore>
 #include <QMutexLocker>
 #include <QAbstractItemView>
 #include <QMenu>
-
-
 
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/sys/Process.hpp"
@@ -3319,10 +3318,14 @@ void MainWindow::on_menu_select_all_triggered() {
     ui->profilesTableView->selectAll();
 }
 
-bool mw_sub_updating = false;
+namespace
+{
+    std::atomic_bool mw_sub_updating{
+        false
+    };
+}
 
-void MainWindow::
-on_menu_update_subscription_triggered()
+void MainWindow::on_menu_update_subscription_triggered()
 {
     auto group =
         Configs::dataManager
@@ -3330,7 +3333,8 @@ on_menu_update_subscription_triggered()
         ->CurrentGroup();
 
 
-    if (!group) {
+    if (!group)
+    {
         return;
     }
 
@@ -3339,18 +3343,22 @@ on_menu_update_subscription_triggered()
         group->Snapshot();
 
 
-    if (snapshot.url.isEmpty()) {
+    if (snapshot.url.isEmpty())
+    {
         return;
     }
 
 
-    if (mw_sub_updating) {
+    // Atomically:
+    //
+    // false -> true : this operation acquired the flag
+    // true  -> true : another operation is already running
+    if (mw_sub_updating.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
         return;
     }
-
-
-    mw_sub_updating =
-        true;
 
 
     Subscription::groupUpdater
@@ -3358,10 +3366,12 @@ on_menu_update_subscription_triggered()
             snapshot.url,
             snapshot.id,
 
-            [&]()
+            []
             {
-                mw_sub_updating =
-                    false;
+                mw_sub_updating.store(
+                    false,
+                    std::memory_order_release
+                );
             }
         );
 }
@@ -3461,8 +3471,6 @@ void MainWindow::on_menu_remove_invalid_triggered()
 
 
                 ++taskCount;
-
-
                 parallelCoreCallPool->start(
                     [
                         profile,
@@ -3474,7 +3482,6 @@ void MainWindow::on_menu_remove_invalid_triggered()
                         // -------------------------------------
                         // Validate profile
                         // -------------------------------------
-
                         if (!IsValid(profile))
                         {
                             QMutexLocker locker(
@@ -3486,8 +3493,6 @@ void MainWindow::on_menu_remove_invalid_triggered()
                                 profile
                             );
                         }
-
-
                         // -------------------------------------
                         // Signal task completion.
                         //
@@ -3500,39 +3505,26 @@ void MainWindow::on_menu_remove_invalid_triggered()
                     }
                 );
             }
-
-
             // -------------------------------------------------
             // Wait until every actually started task finishes.
             // -------------------------------------------------
-
             if (taskCount > 0)
             {
                 completion->acquire(
                     taskCount
                 );
             }
-
-
             // No pool task can touch invalidProfiles anymore
             // after acquire(taskCount) returns.
-
-
             if (invalidProfiles.isEmpty())
             {
                 return;
             }
-
-
             // -------------------------------------------------
             // Prepare confirmation text outside UI thread
             // -------------------------------------------------
-
             QString removeDisplay;
-
             int removeDisplayCount = 0;
-
-
             for (const auto& profile :
                 invalidProfiles)
             {
@@ -3541,19 +3533,14 @@ void MainWindow::on_menu_remove_invalid_triggered()
                 {
                     continue;
                 }
-
-
+                
                 removeDisplay +=
                     profile
                     ->outbound
                     ->DisplayTypeAndName()
                     +
                     "\n";
-
-
                 ++removeDisplayCount;
-
-
                 if (removeDisplayCount == 20)
                 {
                     removeDisplay +=
@@ -3563,11 +3550,9 @@ void MainWindow::on_menu_remove_invalid_triggered()
                 }
             }
 
-
             // -------------------------------------------------
             // UI interaction + deletion
             // -------------------------------------------------
-
             runOnUiThread(
                 [
                     this,
@@ -3579,17 +3564,13 @@ void MainWindow::on_menu_remove_invalid_triggered()
                     {
                         return;
                     }
-
-
                     const bool skipConfirmation =
                         Configs::dataManager
                         ->settingsRepo
                         ->skip_delete_confirmation;
 
-
                     bool confirmed =
                         skipConfirmation;
-
 
                     if (!confirmed)
                     {
@@ -3615,24 +3596,19 @@ void MainWindow::on_menu_remove_invalid_triggered()
                             StandardButton::Yes;
                     }
 
-
                     if (!confirmed)
                     {
                         return;
                     }
 
-
                     // -----------------------------------------
                     // Convert Profile objects to IDs
                     // -----------------------------------------
-
                     QList<int> deleteIDs;
-
 
                     deleteIDs.reserve(
                         invalidProfiles.size()
                     );
-
 
                     for (const auto& profile :
                         invalidProfiles)
@@ -3641,32 +3617,25 @@ void MainWindow::on_menu_remove_invalid_triggered()
                         {
                             continue;
                         }
-
-
                         deleteIDs.append(
                             profile->id
                         );
                     }
-
 
                     if (deleteIDs.isEmpty())
                     {
                         return;
                     }
 
-
                     // -----------------------------------------
                     // Delete
                     // -----------------------------------------
-
                     Configs::dataManager
                         ->profilesRepo
                         ->BatchDeleteProfiles(
                             deleteIDs,
                             true
                         );
-
-
                     refresh_proxy_list(
                         {},
                         true
@@ -3677,51 +3646,275 @@ void MainWindow::on_menu_remove_invalid_triggered()
     );
 }
 
-void MainWindow::on_menu_resolve_selected_triggered() {
-    auto profiles = get_now_selected_list();
-    if (profiles.isEmpty()) return;
+void MainWindow::on_menu_resolve_selected_triggered()
+{
+    const auto profileIDs =
+        get_now_selected_list();
 
-    if (mw_sub_updating) return;
-    mw_sub_updating = true;
-    auto resolve_count = std::atomic<int>(0);
-    Configs::dataManager->settingsRepo->resolve_count = profiles.count();
 
-    auto ents = Configs::dataManager->profilesRepo->GetProfileBatch(profiles);
-    for (const auto &profile: ents) {
-        profile->outbound->ResolveDomainToIP([=,this] {
-            Configs::dataManager->profilesRepo->Save(profile);
-            refresh_proxy_list({profile->id});
-            if (--Configs::dataManager->settingsRepo->resolve_count != 0) return;
-            mw_sub_updating = false;
-        });
+    if (profileIDs.isEmpty())
+    {
+        return;
+    }
+
+
+    const auto loadedProfiles =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfileBatch(
+            profileIDs
+        );
+
+
+    QList<
+        std::shared_ptr<
+        Configs::Profile
+        >
+    > profiles;
+
+
+    profiles.reserve(
+        loadedProfiles.size()
+    );
+
+
+    // Exclude objects that cannot actually start
+    // an asynchronous resolve operation.
+    for (const auto& profile :
+        loadedProfiles)
+    {
+        if (!profile ||
+            !profile->outbound)
+        {
+            continue;
+        }
+
+
+        profiles.append(
+            profile
+        );
+    }
+
+
+    if (profiles.isEmpty())
+    {
+        return;
+    }
+
+
+    // Acquire global operation flag atomically.
+    if (mw_sub_updating.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
+        return;
+    }
+
+
+    auto* settings =
+        Configs::dataManager
+        ->settingsRepo
+        .get();
+
+
+    settings
+        ->resolve_count
+        .store(
+            profiles.size(),
+            std::memory_order_release
+        );
+
+
+    for (const auto& profile :
+        profiles)
+    {
+        profile
+            ->outbound
+            ->ResolveDomainToIP(
+                [this, profile, settings]()
+                {
+                    Configs::dataManager
+                        ->profilesRepo
+                        ->Save(profile);
+
+
+                    refresh_proxy_list(
+                        {
+                            profile->id
+                        }
+                    );
+
+
+                    // fetch_sub() returns the OLD value.
+                    //
+                    // old == 1 means:
+                    // this callback completed the final
+                    // outstanding resolve operation.
+                    if (settings
+                        ->resolve_count
+                        .fetch_sub(
+                            1,
+                            std::memory_order_acq_rel
+                        )
+                        != 1)
+                    {
+                        return;
+                    }
+
+
+                    mw_sub_updating.store(
+                        false,
+                        std::memory_order_release
+                    );
+                }
+            );
     }
 }
 
-void MainWindow::on_menu_resolve_domain_triggered() {
-    auto currGroup = Configs::dataManager->groupsRepo->GetGroup(Configs::dataManager->settingsRepo->current_group);
-    if (currGroup == nullptr) return;
+void MainWindow::
+on_menu_resolve_domain_triggered()
+{
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
 
-    auto profiles = currGroup->Profiles();
-    if (profiles.isEmpty()) return;
 
-    if (QMessageBox::question(this,
-                              tr("Confirmation"),
-                              tr("Replace domain server addresses with their resolved IPs?")) != QMessageBox::StandardButton::Yes) {
+    if (!group)
+    {
         return;
     }
-    if (mw_sub_updating) return;
-    mw_sub_updating = true;
-    auto resolve_count = std::atomic<int>(0);
-    Configs::dataManager->settingsRepo->resolve_count = profiles.count();
 
-    for (const auto id: profiles) {
-        auto profile = Configs::dataManager->profilesRepo->GetProfile(id);
-        profile->outbound->ResolveDomainToIP([=,this] {
-            Configs::dataManager->profilesRepo->Save(profile);
-            refresh_proxy_list({profile->id});
-            if (--Configs::dataManager->settingsRepo->resolve_count != 0) return;
-            mw_sub_updating = false;
-        });
+
+    const auto profileIDs =
+        group->Profiles();
+
+
+    if (profileIDs.isEmpty())
+    {
+        return;
+    }
+
+
+    if (QMessageBox::question(
+        this,
+        tr("Confirmation"),
+        tr(
+            "Replace domain server "
+            "addresses with their "
+            "resolved IPs?"
+        )
+    )
+        != QMessageBox::StandardButton::Yes)
+    {
+        return;
+    }
+
+
+    // Load profiles in one batch instead of calling
+    // GetProfile() for every ID separately.
+    const auto loadedProfiles =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfileBatch(
+            profileIDs
+        );
+
+
+    QList<
+        std::shared_ptr<
+        Configs::Profile
+        >
+    > profiles;
+
+
+    profiles.reserve(
+        loadedProfiles.size()
+    );
+
+
+    for (const auto& profile :
+        loadedProfiles)
+    {
+        if (!profile ||
+            !profile->outbound)
+        {
+            continue;
+        }
+
+
+        profiles.append(
+            profile
+        );
+    }
+
+
+    if (profiles.isEmpty())
+    {
+        return;
+    }
+
+
+    if (mw_sub_updating.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
+        return;
+    }
+
+    auto* settings =
+        Configs::dataManager
+        ->settingsRepo
+        .get();
+
+
+    settings
+        ->resolve_count
+        .store(
+            profiles.size(),
+            std::memory_order_release
+        );
+
+
+    for (const auto& profile :
+        profiles)
+    {
+        profile
+            ->outbound
+            ->ResolveDomainToIP(
+                [this, profile, settings]()
+                {
+                    Configs::dataManager
+                        ->profilesRepo
+                        ->Save(profile);
+
+
+                    refresh_proxy_list(
+                        {
+                            profile->id
+                        }
+                    );
+
+
+                    if (settings
+                        ->resolve_count
+                        .fetch_sub(
+                            1,
+                            std::memory_order_acq_rel
+                        )
+                        != 1)
+                    {
+                        return;
+                    }
+
+
+                    // Last resolve completed.
+                    mw_sub_updating.store(
+                        false,
+                        std::memory_order_release
+                    );
+                }
+            );
     }
 }
 
