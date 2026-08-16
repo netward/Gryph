@@ -86,7 +86,26 @@ namespace Configs
         [[nodiscard]]
         GroupSnapshot Snapshot() const;
 
-        [[nodiscard]] QList<int> Profiles() const;
+        // Subscription-specific state updates.
+        // All mutable Group state is protected by Group::mutex.
+        void SetSubscriptionSource(
+            const QString& newName,
+            const QString& newUrl
+        );
+
+
+        void UpdateSubscriptionState(
+            qint64 lastUpdate,
+            const QString& newInfo
+        );
+
+
+        void ReplaceProfiles(
+            const QList<int>& newProfiles
+        );
+
+        [[nodiscard]] 
+        QList<int> Profiles() const;
 
         bool SortProfiles(GroupSortAction method);
 

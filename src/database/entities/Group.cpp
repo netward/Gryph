@@ -79,6 +79,34 @@ namespace Configs
         return snapshot;
     }
 
+    void Group::SetSubscriptionSource(
+        const QString& newName,
+        const QString& newUrl)
+    {
+        QMutexLocker locker(&mutex);
+
+        name = newName;
+        url = newUrl;
+    }
+
+    void Group::UpdateSubscriptionState(
+        qint64 lastUpdate,
+        const QString& newInfo)
+    {
+        QMutexLocker locker(&mutex);
+
+        sub_last_update = lastUpdate;
+        info = newInfo;
+    }
+
+    void Group::ReplaceProfiles(
+        const QList<int>& newProfiles)
+    {
+        QMutexLocker locker(&mutex);
+
+        profiles = newProfiles;
+    }
+
     QList<int> Group::Profiles() const
     {
         QMutexLocker locker(&mutex);

@@ -4,6 +4,10 @@
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/configs/sub/clash.hpp"
 
+#include <atomic>
+
+#include <QDateTime>
+#include <QSet>
 #include <QInputDialog>
 #include <QUrlQuery>
 #include <QJsonDocument>
@@ -693,38 +697,83 @@ namespace Subscription {
             }
         }
 
-        runOnNewThread([=,this] {
-            auto gid = _sub_gid;
+        runOnNewThread([=, this] {
+            auto gid =
+                _sub_gid;
+
             if (createNewGroup) {
-                auto group = Configs::GroupsRepo::NewGroup();
-                group->name = QUrl(str).host();
-                group->url = str;
-                Configs::dataManager->groupsRepo->AddGroup(group);
-                gid = group->id;
-                MW_dialog_message(MwMessage::SubscriptionNewGroup, {});
+                auto group =
+                    Configs::GroupsRepo::NewGroup();
+
+                group->SetSubscriptionSource(
+                    QUrl(str).host(),
+                    str
+                );
+
+                Configs::dataManager
+                    ->groupsRepo
+                    ->AddGroup(group);
+
+                gid =
+                    group
+                    ->Snapshot()
+                    .id;
+
+                MW_dialog_message(
+                    MwMessage::SubscriptionNewGroup,
+                    {}
+                );
             }
-            Update(str, gid, asURL);
-            emit asyncUpdateCallback(gid);
-            if (finish != nullptr) finish();
+
+            Update(
+                str,
+                gid,
+                asURL
+            );
+
+            emit asyncUpdateCallback(
+                gid
+            );
+
+            if (finish != nullptr) {
+                finish();
+            }
         });
     }
 
     void GroupUpdater::Update(const QString &_str, int _sub_gid, bool _not_sub_as_url) {
-        // 创建 rawUpdater
+        // Create rawUpdater
         Configs::dataManager->settingsRepo->imported_count = 0;
         auto rawUpdater = std::make_unique<RawUpdater>();
         rawUpdater->gid_add_to = _sub_gid;
 
-        // 准备
+        // Preparation
         QString sub_user_info;
         bool asURL = _sub_gid >= 0 || _not_sub_as_url; // 把 _str 当作 url 处理（下载内容）
         auto content = _str.trimmed();
-        auto group = Configs::dataManager->groupsRepo->GetGroup(_sub_gid);
-        if (group != nullptr && group->archive) return;
+        auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(_sub_gid);
 
-        // 网络请求
+        Configs::GroupSnapshot groupSnapshot;
+
+        if (group) {
+
+            groupSnapshot =
+                group->Snapshot();
+
+            if (groupSnapshot.archive) {
+                return;
+            }
+        }
+
+        // Network Request
         if (asURL) {
-            auto groupName = group == nullptr ? content : group->name;
+            const QString groupName =
+                group
+                ? groupSnapshot.name
+                : content;
             MW_show_log(">>>>>>>> " + QObject::tr("Requesting subscription: %1").arg(groupName));
 
             auto resp = NetworkRequestHelper::HttpGet(content, Configs::dataManager->settingsRepo->sub_send_hwid);
@@ -739,23 +788,41 @@ namespace Subscription {
             MW_show_log("<<<<<<<< " + QObject::tr("Subscription request fininshed: %1").arg(groupName));
         }
 
-        QList<std::shared_ptr<Configs::Profile>> in;
+        QList<std::shared_ptr<Configs::Profile>> 
+            in;
 
         if (group != nullptr) {
-            group->sub_last_update = QDateTime::currentMSecsSinceEpoch() / 1000;
-            group->info = sub_user_info;
-            Configs::dataManager->groupsRepo->Save(group);
+            group->UpdateSubscriptionState(
+                QDateTime::currentMSecsSinceEpoch()
+                / 1000,
+                sub_user_info
+            );
+
+            Configs::dataManager
+                ->groupsRepo
+                ->Save(group);
             //
-            if (Configs::dataManager->settingsRepo->sub_clear) {
-                MW_show_log(QObject::tr("Clearing servers..."));
-                if (!Configs::dataManager->profilesRepo->BatchDeleteProfiles(group->profiles, Configs::dataManager->settingsRepo->allow_stopping_active_profile)) {
-                    runOnUiThread([=] {
-                        MessageBoxWarning("Internal Error", "DB Error when deleting profiles, Please try again.");
+            auto profilesToDelete =
+                group->Profiles();
+
+            if (!Configs::dataManager
+                ->profilesRepo
+                ->BatchDeleteProfiles(
+                    profilesToDelete,
+                    Configs::dataManager
+                    ->settingsRepo
+                    ->allow_stopping_active_profile))
+            {
+                runOnUiThread([=] {
+
+                    MessageBoxWarning(
+                        "Internal Error",
+                        "DB Error when deleting profiles, "
+                        "Please try again."
+                    );
                     });
-                    return;
-                }
-            } else {
-                in = Configs::dataManager->profilesRepo->GetProfileBatch(group->Profiles());
+
+                return;
             }
         }
 
@@ -766,6 +833,8 @@ namespace Subscription {
         MW_show_log(">>>>>>>> " + QObject::tr("Process complete, applying..."));
 
         if (group != nullptr) {
+            const auto currentProfileIds =
+                group->Profiles();
             QList<std::shared_ptr<Configs::Profile>> out_all;
             out_all = Configs::dataManager->profilesRepo->GetProfileBatch(group->Profiles());;
 
@@ -814,24 +883,84 @@ namespace Subscription {
 
 
                 // sort according to order in remote
-                group->profiles.clear();
-                for (const auto &ent: rawUpdater->updated_order) {
-                    auto deleted_index = update_del.indexOf(ent);
-                    if (deleted_index >= 0) {
-                        if (deleted_index >= update_keep.count()) continue; // should not happen
-                        const auto& ent2 = update_keep[deleted_index];
-                        group->profiles.append(ent2->id);
-                    } else {
-                        group->profiles.append(ent->id);
+                QList<int> newProfileOrder;
+
+                newProfileOrder.reserve(
+                    rawUpdater
+                    ->updated_order
+                    .size()
+                );
+
+                for (const auto& ent :
+                    rawUpdater->updated_order)
+                {
+                    if (!ent) {
+                        continue;
+                    }
+
+                    const auto deletedIndex =
+                        update_del.indexOf(ent);
+
+                    if (deletedIndex >= 0) {
+
+                        if (deletedIndex >=
+                            update_keep.count())
+                        {
+                            continue;
+                        }
+
+
+                        const auto& keptProfile =
+                            update_keep[
+                                deletedIndex
+                            ];
+
+
+                        if (keptProfile) {
+
+                            newProfileOrder.append(
+                                keptProfile->id
+                            );
+                        }
+                    }
+
+                    else {
+
+                        newProfileOrder.append(
+                            ent->id
+                        );
                     }
                 }
+
+                // One atomic replacement under Group::mutex.
+                group->ReplaceProfiles(
+                    newProfileOrder
+                );
+
+                Configs::dataManager
+                    ->groupsRepo
+                    ->Save(group);
                 Configs::dataManager->groupsRepo->Save(group);
 
                 // cleanup
+                const QSet<int> finalProfileIds(
+                    newProfileOrder.begin(),
+                    newProfileOrder.end()
+                );
+
                 QList<int> del_ids;
-                for (const auto &ent: out_all) {
-                    if (!group->HasProfile(ent->id)) {
-                        del_ids.append(ent->id);
+
+                for (const auto& ent : out_all) {
+                    if (!ent) {
+                        continue;
+                    }
+
+                    if (!finalProfileIds.contains(
+                        ent->id))
+                    {
+                        del_ids.append(
+                            ent->id
+                        );
                     }
                 }
                 if (!Configs::dataManager->profilesRepo->BatchDeleteProfiles(del_ids, Configs::dataManager->settingsRepo->allow_stopping_active_profile)) {
@@ -848,7 +977,20 @@ namespace Subscription {
                 if (only_out.length() + only_in.length() == 0) change_text = QObject::tr("Nothing");
             }
 
-            MW_show_log("<<<<<<<< " + QObject::tr("Change of %1:").arg(group->name) + "\n" + change_text);
+            const auto finalGroupSnapshot =
+                group->Snapshot();
+
+            MW_show_log(
+                "<<<<<<<< "
+                + QObject::tr(
+                    "Change of %1:"
+                )
+                .arg(
+                    finalGroupSnapshot.name
+                )
+                + "\n"
+                + change_text
+            );
             MW_dialog_message(MwMessage::SubscriptionFinished, {MwArg::Quiet});
         } else {
             Configs::dataManager->settingsRepo->imported_count = rawUpdater->updated_order.count();
@@ -857,46 +999,165 @@ namespace Subscription {
     }
 } // namespace Subscription
 
-bool UI_update_all_groups_Updating = false;
+std::atomic_bool
+UI_update_all_groups_Updating{
+    false
+};
 
-#define should_skip_group(g) (g == nullptr || g->url.isEmpty() || g->archive || (onlyAllowed && g->skip_auto_update))
-
-void serialUpdateSubscription(const QList<int> &groupsTabOrder, int _order, bool onlyAllowed) {
-    if (_order >= groupsTabOrder.size()) {
-        UI_update_all_groups_Updating = false;
-        return;
+static bool shouldSkipGroup(
+    const std::shared_ptr<Configs::Group>& group,
+    bool onlyAllowed)
+{
+    if (!group) {
+        return true;
     }
 
-    // calculate this group
-    auto group = Configs::dataManager->groupsRepo->GetGroup(groupsTabOrder[_order]);
-    if (group == nullptr || should_skip_group(group)) {
-        serialUpdateSubscription(groupsTabOrder, _order + 1, onlyAllowed);
-        return;
-    }
+    const auto snapshot =
+        group->Snapshot();
 
-    int nextOrder = _order + 1;
-    while (nextOrder < groupsTabOrder.size()) {
-        auto nextGid = groupsTabOrder[nextOrder];
-        auto nextGroup = Configs::dataManager->groupsRepo->GetGroup(nextGid);
-        if (!should_skip_group(nextGroup)) {
-            break;
-        }
-        nextOrder += 1;
-    }
-
-    // Async update current group
-    UI_update_all_groups_Updating = true;
-    Subscription::groupUpdater->AsyncUpdate(group->url, group->id, [=] {
-        serialUpdateSubscription(groupsTabOrder, nextOrder, onlyAllowed);
-    });
+    return
+        snapshot.url.isEmpty()
+        ||
+        snapshot.archive
+        ||
+        (
+            onlyAllowed
+            &&
+            snapshot.skip_auto_update
+            );
 }
 
-void UI_update_all_groups(bool onlyAllowed) {
-    if (UI_update_all_groups_Updating) {
-        MW_show_log("The last subscription update has not exited.");
+void serialUpdateSubscription(
+    const QList<int>& groupsTabOrder,
+    int order,
+    bool onlyAllowed)
+{
+    if (order >=
+        groupsTabOrder.size())
+    {
+        UI_update_all_groups_Updating.store(
+            false,
+            std::memory_order_release
+        );
+
         return;
     }
 
-    auto groupsTabOrder = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
-    serialUpdateSubscription(groupsTabOrder, 0, onlyAllowed);
+    // -------------------------------------------------
+    // Current group
+    // -------------------------------------------------
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroup(
+            groupsTabOrder[order]
+        );
+
+    if (shouldSkipGroup(
+        group,
+        onlyAllowed))
+    {
+        serialUpdateSubscription(
+            groupsTabOrder,
+            order + 1,
+            onlyAllowed
+        );
+
+        return;
+    }
+
+    // -------------------------------------------------
+    // Find next eligible group
+    // -------------------------------------------------
+    int nextOrder =
+        order + 1;
+
+    while (nextOrder <
+        groupsTabOrder.size())
+    {
+        const int nextGid =
+            groupsTabOrder[
+                nextOrder
+            ];
+
+        auto nextGroup =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(
+                nextGid
+            );
+
+        if (!shouldSkipGroup(
+            nextGroup,
+            onlyAllowed))
+        {
+            break;
+        }
+
+        ++nextOrder;
+    }
+
+    // -------------------------------------------------
+    // Snapshot before worker starts
+    // -------------------------------------------------
+
+    const auto groupSnapshot =
+        group->Snapshot();
+
+    // Update itself performs another archive check,
+    // so a later state change is still handled.
+    Subscription::groupUpdater
+        ->AsyncUpdate(
+            groupSnapshot.url,
+            groupSnapshot.id,
+
+            [=] {
+
+                serialUpdateSubscription(
+                    groupsTabOrder,
+                    nextOrder,
+                    onlyAllowed
+                );
+            }
+        );
+}
+
+void UI_update_all_groups(
+    bool onlyAllowed)
+{
+    // Atomically test AND set.
+    //
+    // Only one update chain may enter.
+    if (UI_update_all_groups_Updating.exchange(
+        true,
+        std::memory_order_acq_rel))
+    {
+        MW_show_log(
+            "The last subscription "
+            "update has not exited."
+        );
+
+        return;
+    }
+
+    const auto groupsTabOrder =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroupsTabOrder();
+
+    if (groupsTabOrder.isEmpty()) {
+
+        UI_update_all_groups_Updating.store(
+            false,
+            std::memory_order_release
+        );
+
+        return;
+    }
+
+    serialUpdateSubscription(
+        groupsTabOrder,
+        0,
+        onlyAllowed
+    );
 }
