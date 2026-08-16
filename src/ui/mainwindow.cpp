@@ -837,15 +837,55 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     profilesTableModel = new ProfilesTableModel(this);
     ui->profilesTableView->setModel(profilesTableModel);
     // Callback вызывается пользовательским представлением после перетаскивания строк.
-    ui->profilesTableView->rowsSwapped = [=,this](int row1, int row2)
-    {
-        // Во время фильтрации видимые индексы не соответствуют исходному порядку группы, поэтому ручная перестановка запрещена.
-        if (!addressFilterString.isEmpty() || !nameFilterString.isEmpty() || !typeFilterString.isEmpty() || !countryFilterString.isEmpty()) return;
-        if (row1 == row2) return;
-        auto group = Configs::dataManager->groupsRepo->CurrentGroup();
-        group->EmplaceProfile(row1, row2);
-        profilesTableModel->emplaceProfiles(row1, row2);
-        Configs::dataManager->groupsRepo->Save(group);
+    ui->profilesTableView
+        ->rowsSwapped =
+        [this](int row1, int row2)
+        {
+            if (!addressFilterString.isEmpty() ||
+                !nameFilterString.isEmpty() ||
+                !typeFilterString.isEmpty() ||
+                !countryFilterString.isEmpty())
+            {
+                return;
+            }
+
+
+            if (row1 == row2)
+            {
+                return;
+            }
+
+
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
+
+
+            if (!group)
+            {
+                return;
+            }
+
+
+            if (!group->EmplaceProfile(
+                row1,
+                row2))
+            {
+                return;
+            }
+
+
+            profilesTableModel
+                ->emplaceProfiles(
+                    row1,
+                    row2
+                );
+
+
+            Configs::dataManager
+                ->groupsRepo
+                ->Save(group);
     };
     // Пользовательская ширина каждого столбца сохраняется отдельно для текущей группы.
     connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionResized, this, [=, this](int, int, int) {
@@ -1407,9 +1447,30 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
             groupIds = reordered;
         }
         QList<int> allProfileIDs;
-        for (auto gid : groupIds) {
-            auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
-            allProfileIDs.append(group->Profiles());
+        for (const int gid :
+        groupIds)
+        {
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->GetGroup(
+                    gid
+                );
+            if (!group)
+            {
+                MW_show_log(
+                    QString(
+                        "Tray menu: group %1 "
+                        "does not exist."
+                    )
+                    .arg(gid)
+                );
+
+                continue;
+            }
+            allProfileIDs.append(
+                group->Profiles()
+            );
         }
         int totalProfiles = allProfileIDs.size();
         // Ограничение номера страницы допустимым диапазоном после добавления или удаления профилей.
@@ -1797,9 +1858,31 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->actionUrl_Test_Selected, &QAction::triggered, this, [=,this]() {
         urltest_current_group(get_now_selected_list());
     });
-    connect(ui->actionUrl_Test_Group, &QAction::triggered, this, [=,this]() {
-        urltest_current_group(Configs::dataManager->groupsRepo->CurrentGroup()->Profiles());
-    });
+    connect(
+        ui->actionUrl_Test_Group,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
+            if (!group)
+            {
+                return;
+            }
+            const auto profileIDs =
+                group->Profiles();
+            if (profileIDs.isEmpty())
+            {
+                return;
+            }
+            urltest_current_group(
+                profileIDs
+            );
+        }
+    );
     connect(ui->actionSpeedtest_Current, &QAction::triggered, this, [=,this]()
     {
         if (running != nullptr)
@@ -1811,16 +1894,59 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent), ui(new Ui::MainWi
     {
         speedtest_current_group(get_now_selected_list());
     });
-    connect(ui->actionSpeedtest_Group, &QAction::triggered, this, [=,this]()
-    {
-        speedtest_current_group(Configs::dataManager->groupsRepo->CurrentGroup()->Profiles());
-    });
+    connect(
+        ui->actionSpeedtest_Group,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
+            if (!group)
+            {
+                return;
+            }
+            const auto profileIDs =
+                group->Profiles();
+            if (profileIDs.isEmpty())
+            {
+                return;
+            }
+            speedtest_current_group(
+                profileIDs
+            );
+        }
+    );
     connect(ui->actionResolve_Selected_Out_IP, &QAction::triggered, this, [=,this]() {
         iptest_current_group(get_now_selected_list());
     });
-    connect(ui->actionResolve_Out_IP, &QAction::triggered, this, [=,this]() {
-        iptest_current_group(Configs::dataManager->groupsRepo->CurrentGroup()->Profiles());
-    });
+    connect(
+        ui->actionResolve_Out_IP,
+        &QAction::triggered,
+        this,
+        [this]()
+        {
+            auto group =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
+            if (!group)
+            {
+                return;
+            }
+            const auto profileIDs =
+                group->Profiles();
+            if (profileIDs.isEmpty())
+            {
+                return;
+            }
+            iptest_current_group(
+                profileIDs
+            );
+        }
+    );
     connect(ui->menu_stop_testing, &QAction::triggered, this, [=,this]() { stopTests(); });
     // Свойство selected_or_group сообщает общим обработчикам, к чему относится команда меню:
     //  0 — ко всей группе;
@@ -3490,32 +3616,156 @@ void MainWindow::on_menu_clone_triggered() {
     Subscription::groupUpdater->AsyncUpdate(sls.join("\n"));
 }
 
-void  MainWindow::on_menu_delete_repeat_triggered () {
-    QList<std::shared_ptr<Configs::Profile>> out;
-    QList<std::shared_ptr<Configs::Profile>> out_del;
+void MainWindow::on_menu_delete_repeat_triggered()
+{
+    // =====================================================
+    // Current group
+    // =====================================================
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
+    if (!group)
+    {
+        return;
+    }
+    // Take one immutable profile ID snapshot.
+    const auto profileIDs =
+        group->Profiles();
+    if (profileIDs.isEmpty())
+    {
+        return;
+    }
+    // Load profiles only once.
+    const auto profiles =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfileBatch(
+            profileIDs
+        );
+    if (profiles.isEmpty())
+    {
+        return;
+    }
+    QList<
+        std::shared_ptr<
+        Configs::Profile
+        >
+    > uniqueProfiles;
 
-    Configs::ProfileFilter::Uniq (Configs::dataManager->profilesRepo->GetProfileBatch(Configs::dataManager->groupsRepo->CurrentGroup()->Profiles()), out,  false );
-    Configs::ProfileFilter::OnlyInSrc_ByPointer (Configs::dataManager->profilesRepo->GetProfileBatch(Configs::dataManager->groupsRepo->CurrentGroup()->Profiles()), out, out_del);
+    QList<
+        std::shared_ptr<
+        Configs::Profile
+        >
+    > duplicateProfiles;
+    // =====================================================
+    // Find duplicates
+    // =====================================================
+    Configs::ProfileFilter::Uniq(
+        profiles,
+        uniqueProfiles,
+        false
+    );
+    Configs::ProfileFilter::
+        OnlyInSrc_ByPointer(
+            profiles,
+            uniqueProfiles,
+            duplicateProfiles
+        );
+    if (duplicateProfiles.isEmpty())
+    {
+        return;
+    }
+    // =====================================================
+    // Confirmation text
+    // =====================================================
+    QString removeDisplay;
+    int removeDisplayCount = 0;
+    for (const auto& profile :
+        duplicateProfiles)
+    {
+        if (!profile ||
+            !profile->outbound)
+        {
+            continue;
+        }
+        removeDisplay +=
+            profile
+            ->outbound
+            ->DisplayTypeAndName()
+            +
+            "\n";
+        ++removeDisplayCount;
+        if (removeDisplayCount >= 20)
+        {
+            removeDisplay +=
+                "...";
 
-    int  remove_display_count =  0 ;
-    QString remove_display;
-    for  ( const  auto  &ent: out_del) {
-        remove_display += ent-> outbound -> DisplayTypeAndName () +  " \n " ;
-        if  (++remove_display_count ==  20 ) {
-            remove_display +=  " ... " ;
-            break ;
+            break;
         }
     }
-
-    if  (!out_del.empty()  &&
-        (Configs::dataManager->settingsRepo->skip_delete_confirmation || QMessageBox::question( this , tr("Confirmation"),tr( "Remove %1 item(s) ?").arg(out_del.length()) + "\n" + remove_display)==QMessageBox::StandardButton::Yes)) {
-        QList<int> del_ids;
-        for (const auto &ent: out_del) {
-            del_ids += ent->id;
+    // =====================================================
+    // Confirmation
+    // =====================================================
+    if (!Configs::dataManager
+        ->settingsRepo
+        ->skip_delete_confirmation)
+    {
+        const auto answer =
+            QMessageBox::question(
+                this,
+                tr("Confirmation"),
+                tr("Remove %1 item(s) ?")
+                .arg(duplicateProfiles.size()
+                )
+                +
+                "\n"
+                +
+                removeDisplay
+            );
+        if (answer !=
+            QMessageBox::
+            StandardButton::Yes)
+        {
+            return;
         }
-        Configs::dataManager->profilesRepo->BatchDeleteProfiles(del_ids, true);
-        refresh_proxy_list({}, true);
     }
+    // =====================================================
+    // IDs to delete
+    // =====================================================
+    QList<int> deleteIDs;
+    deleteIDs.reserve(
+        duplicateProfiles.size()
+    );
+    for (const auto& profile :
+        duplicateProfiles)
+    {
+        if (!profile ||
+            profile->id < 0)
+        {
+            continue;
+        }
+        deleteIDs.append(
+            profile->id
+        );
+    }
+    if (deleteIDs.isEmpty())
+    {
+        return;
+    }
+    // =====================================================
+    // Delete
+    // =====================================================
+    Configs::dataManager
+        ->profilesRepo
+        ->BatchDeleteProfiles(
+            deleteIDs,
+            true
+        );
+    refresh_proxy_list(
+        {},
+        true
+    );
 }
 
 void MainWindow::on_menu_delete_triggered() {
@@ -4496,16 +4746,48 @@ QList<int> MainWindow::get_now_selected_list() {
     return list;
 }
 
-QList<int> MainWindow::get_selected_or_group() {
-    auto selected_or_group = ui->menu_server->property("selected_or_group").toInt();
-    QList<int> profileIDs;
-    if (selected_or_group > 0) {
-        profileIDs = get_now_selected_list();
-        if (profileIDs.isEmpty() && selected_or_group == 2) profileIDs = Configs::dataManager->groupsRepo->CurrentGroup()->Profiles();
-    } else {
-        profileIDs = Configs::dataManager->groupsRepo->CurrentGroup()->Profiles();
+QList<int>
+MainWindow::get_selected_or_group()
+{
+    const int selectedOrGroup =
+        ui->menu_server
+        ->property(
+            "selected_or_group"
+        )
+        .toInt();
+    // =====================================================
+    // Explicit selection
+    // =====================================================
+    if (selectedOrGroup > 0)
+    {
+        auto profileIDs =
+            get_now_selected_list();
+        if (!profileIDs.isEmpty())
+        {
+            return profileIDs;
+        }
+        // Mode 1 means selected profiles only.
+        //
+        // There is no selection, therefore return
+        // an empty list instead of falling back to
+        // the whole group.
+        if (selectedOrGroup != 2)
+        {
+            return {};
+        }
     }
-    return profileIDs;
+    // =====================================================
+    // Whole current group
+    // =====================================================
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
+    if (!group)
+    {
+        return {};
+    }
+    return group->Profiles();
 }
 
 void MainWindow::saveProfileFocusState()
