@@ -147,26 +147,64 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                 dataViewHtmlGenerator_.addTestProgress();
                 UpdateDataView();
                 int entid = -1;
-                if (!tag2entID.empty()) {
-                    entid = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
-                }
-                if (entid == -1) {
-                    continue;
-                }
-                profileIDs << entID;
-                auto ent = Configs::dataManager->profilesRepo->GetProfile(entid);
-                if (ent == nullptr) {
-                    continue;
-                }
-                if (res.error.value().empty()) {
 
+
+                if (!tag2entID.empty())
+                {
+                    const QString outboundTag =
+                        QString::fromStdString(
+                            res.outbound_tag.value()
+                        );
+
+
+                    const auto it =
+                        tag2entID.constFind(
+                            outboundTag
+                        );
+
+
+                    if (it != tag2entID.constEnd())
+                    {
+                        entid =
+                            it.value();
+                    }
+                }
+
+
+                if (entid == -1)
+                {
+                    continue;
+                }
+
+
+                // IMPORTANT:
+                // refresh exactly the profile whose result
+                // was returned by QueryURLTest().
+                profileIDs << entid;
+
+
+                auto ent =
+                    Configs::dataManager
+                    ->profilesRepo
+                    ->GetProfile(
+                        entid
+                    );
+
+
+                if (!ent)
+                {
+                    continue;
+                }
+
+
+                if (res.error.value().empty())
+                {
                     ent->SetLatency(
                         res.latency_ms.value()
                     );
                 }
-
-                else {
-
+                else
+                {
                     const QString error =
                         QString::fromStdString(
                             res.error.value()
@@ -181,9 +219,8 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                     {
                         ent->SetLatency(0);
                     }
-
-                    else {
-
+                    else
+                    {
                         ent->SetLatency(-1);
 
 
@@ -197,9 +234,16 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                         );
                     }
                 }
-                Configs::dataManager->profilesRepo->Save(ent);
+
+
+                Configs::dataManager
+                    ->profilesRepo
+                    ->Save(ent);
+
+
                 needRefresh = true;
             }
+
             if (needRefresh)
             {
                 UpdateDataView(true);
