@@ -1,65 +1,166 @@
 #pragma once
 
 #include <QString>
+#include <QIcon>
+#include <QMutex>
+
 #include "include/global/HTTPRequestHelper.hpp"
+
 #ifndef Q_MOC_RUN
 #include <core/server/gen/libcore.pb.h>
 #endif
-#include <QIcon>
 
-class DataViewHtmlGenerator {
+
+class DataViewHtmlGenerator
+{
 public:
-    struct DownloadPanelState {
+
+    struct DownloadPanelState
+    {
         bool visible = false;
+
         DownloadProgressReport report;
     };
 
-    struct SpeedtestPanelState {
-        enum class Kind { Speed, Country };
+
+    struct SpeedtestPanelState
+    {
+        enum class Kind
+        {
+            Speed,
+            Country
+        };
+
+
         bool visible = false;
-        Kind kind = Kind::Speed;
+
+        Kind kind =
+            Kind::Speed;
+
+
         QString profileName;
+
         QString dlSpeed;
         QString ulSpeed;
+
         QString serverCountryFlag;
         QString serverCountry;
         QString serverName;
+
+
         int totalProfiles = 0;
     };
 
-    struct LatencyTestPanelState {
-        enum class Kind { Url, Ip };
+
+    struct LatencyTestPanelState
+    {
+        enum class Kind
+        {
+            Url,
+            Ip
+        };
+
+
         bool visible = false;
-        Kind kind = Kind::Url;
+
+        Kind kind =
+            Kind::Url;
+
+
         int totalProfiles = 0;
     };
 
-    void setDownloadReport(const DownloadProgressReport &report, bool show);
 
-    void seedSpeedTest(int totalProfiles);
+    // -------------------------------------------------
+    // Thread-safe state modification
+    // -------------------------------------------------
 
-    void setSpeedtestProgress(const QString &profileName, const libcore::SpeedTestResult &result);
+    void setDownloadReport(
+        const DownloadProgressReport& report,
+        bool show
+    );
 
-    void seedLatencyTest(LatencyTestPanelState::Kind kind, int totalProfiles);
+
+    void seedSpeedTest(
+        int totalProfiles
+    );
+
+
+    void setSpeedtestProgress(
+        const QString& profileName,
+        const libcore::SpeedTestResult& result
+    );
+
+
+    void seedLatencyTest(
+        LatencyTestPanelState::Kind kind,
+        int totalProfiles
+    );
+
 
     void clearTestSections();
 
-    void addTestProgress(int count = 1);
 
+    void addTestProgress(
+        int count = 1
+    );
+
+
+    // -------------------------------------------------
+    // Thread-safe rendering
+    // -------------------------------------------------
+
+    [[nodiscard]]
     QString buildHtml();
 
+
 private:
-    static QString getProgressBar(long long current, long long total);
 
-    QString downloadSectionHtml();
+    static QString getProgressBar(
+        long long current,
+        long long total
+    );
 
-    QString speedtestSectionHtml();
 
-    QString latencyTestSectionHtml();
+    // These methods must only be called while
+    // stateMutex_ is locked.
+    [[nodiscard]]
+    QString downloadSectionHtml() const;
 
-    DownloadPanelState download_ = {};
-    SpeedtestPanelState speedtest_ = {};
-    LatencyTestPanelState latencyTest_ = {};
 
-    std::atomic<int> testProgress;
+    [[nodiscard]]
+    QString speedtestSectionHtml() const;
+
+
+    [[nodiscard]]
+    QString latencyTestSectionHtml() const;
+
+
+private:
+
+    // Protects ALL state below.
+    //
+    // A single mutex guarantees that buildHtml()
+    // sees one consistent state instead of a mix
+    // of values from different worker updates.
+    mutable QMutex stateMutex_;
+
+
+    DownloadPanelState
+        download_{};
+
+
+    SpeedtestPanelState
+        speedtest_{};
+
+
+    LatencyTestPanelState
+        latencyTest_{};
+
+
+    // No atomic is required anymore.
+    //
+    // This value is protected by stateMutex_
+    // together with the rest of the state.
+    int testProgress_ = 0;
 };

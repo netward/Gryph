@@ -1863,17 +1863,42 @@ void MainWindow::set_spmode_vpn(bool enable, bool save) {
     if (Configs::dataManager->settingsRepo->started_id >= 0) profile_start(Configs::dataManager->settingsRepo->started_id);
 }
 
-void MainWindow::UpdateDataView(bool force)
+void MainWindow::UpdateDataView(
+    bool force)
 {
-    if (!force && lastUpdated.msecsTo(QDateTime::currentDateTime()) < 100)
-    {
-        return;
-    }
-    auto html = dataViewHtmlGenerator_.buildHtml();
-    runOnUiThread([=, this] {
-        ui->data_view->setHtml(html);
-    }, true);
-    lastUpdated = QDateTime::currentDateTime();
+    runOnUiThread(
+        [this, force]()
+        {
+            const auto now =
+                QDateTime::
+                currentDateTime();
+
+
+            if (!force &&
+                lastUpdated
+                .msecsTo(now) < 100)
+            {
+                return;
+            }
+
+
+            const QString html =
+                dataViewHtmlGenerator_
+                .buildHtml();
+
+
+            ui->data_view
+                ->setHtml(
+                    html
+                );
+
+
+            lastUpdated =
+                now;
+        },
+
+        true
+    );
 }
 
 void MainWindow::setDownloadReport(const DownloadProgressReport& report, bool show)
