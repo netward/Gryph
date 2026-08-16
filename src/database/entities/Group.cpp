@@ -12,6 +12,73 @@ namespace Configs
         calculated_column_width.clear();
     }
 
+    GroupSnapshot Group::Snapshot() const
+    {
+        QMutexLocker locker(&mutex);
+
+
+        GroupSnapshot snapshot;
+
+
+        snapshot.id =
+            id;
+
+
+        snapshot.archive =
+            archive;
+
+        snapshot.skip_auto_update =
+            skip_auto_update;
+
+        snapshot.auto_clear_unavailable =
+            auto_clear_unavailable;
+
+
+        snapshot.name =
+            name;
+
+        snapshot.url =
+            url;
+
+        snapshot.info =
+            info;
+
+
+        snapshot.sub_last_update =
+            sub_last_update;
+
+
+        snapshot.front_proxy_id =
+            front_proxy_id;
+
+        snapshot.landing_proxy_id =
+            landing_proxy_id;
+
+
+        snapshot.column_width =
+            column_width;
+
+        snapshot.profiles =
+            profiles;
+
+
+        snapshot.scroll_last_profile =
+            scroll_last_profile;
+
+
+        snapshot.test_sort_by =
+            test_sort_by;
+
+        snapshot.traffic_sort_by =
+            traffic_sort_by;
+
+        snapshot.test_items_to_show =
+            test_items_to_show;
+
+
+        return snapshot;
+    }
+
     QList<int> Group::Profiles() const
     {
         QMutexLocker locker(&mutex);

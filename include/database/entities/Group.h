@@ -27,6 +27,34 @@ namespace Configs
         ul
     };
 
+    struct GroupSnapshot
+    {
+        int id = -1;
+
+        bool archive = false;
+        bool skip_auto_update = false;
+        bool auto_clear_unavailable = false;
+
+        QString name;
+        QString url;
+        QString info;
+
+        qint64 sub_last_update = 0;
+
+        int front_proxy_id = -1;
+        int landing_proxy_id = -1;
+
+        QList<int> column_width;
+        QList<int> profiles;
+
+        int scroll_last_profile = -1;
+
+        testBy test_sort_by = testBy::latency;
+        trafficBy traffic_sort_by = trafficBy::total;
+        testShowItems test_items_to_show =
+            testShowItems::all;
+    };
+
     class Group {
     public:
         mutable QMutex mutex;
@@ -54,6 +82,9 @@ namespace Configs
         Group() = default;
 
         void clearCalculatedColumnWidth();
+
+        [[nodiscard]]
+        GroupSnapshot Snapshot() const;
 
         [[nodiscard]] QList<int> Profiles() const;
 

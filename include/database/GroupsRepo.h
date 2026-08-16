@@ -15,14 +15,17 @@ namespace Configs {
         mutable std::map<int, std::shared_ptr<Group>> memMap;
 
         // Helper to serialize Group to JSON
-        QJsonObject groupToJson(const Group* group) const;
+        QJsonObject groupToJson(
+            const GroupSnapshot& group) const;
         
         // Helper to deserialize Group from JSON
         std::shared_ptr<Group> groupFromJson(const QJsonObject& json) const;
         
         // Save group to database (internal helper)
-        void saveToDatabase(const Group* group, int id) const;
-        
+        // void saveToDatabase(const Group* group, int id) const;
+        void saveToDatabase(
+            const GroupSnapshot& group) const;
+
         // Load group from database
         std::shared_ptr<Group> loadFromDatabase(int id) const;
         

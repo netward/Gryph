@@ -49,26 +49,79 @@ namespace Configs {
         )");
     }
 
-    QJsonObject GroupsRepo::groupToJson(const Group* group) const {
+    QJsonObject GroupsRepo::groupToJson(
+        const GroupSnapshot& group) const
+    {
         QJsonObject json;
-        
-        json["id"] = group->id;
-        json["archive"] = group->archive;
-        json["skip_auto_update"] = group->skip_auto_update;
-        json["auto_clear_unavailable"] = group->auto_clear_unavailable;
-        json["name"] = group->name;
-        json["url"] = group->url;
-        json["info"] = group->info;
-        json["sub_last_update"] = static_cast<qint64>(group->sub_last_update);
-        json["front_proxy_id"] = group->front_proxy_id;
-        json["landing_proxy_id"] = group->landing_proxy_id;
-        json["column_width"] = QListInt2QJsonArray(group->column_width);
-        json["profiles"] = QListInt2QJsonArray(group->profiles);
-        json["scroll_last_profile"] = group->scroll_last_profile;
-        json["test_sort_by"] = static_cast<int>(group->test_sort_by);
-        json["traffic_sort_by"] = static_cast<int>(group->traffic_sort_by);
-        json["test_items_to_show"] = static_cast<int>(group->test_items_to_show);
-        
+
+
+        json["id"] =
+            group.id;
+
+        json["archive"] =
+            group.archive;
+
+        json["skip_auto_update"] =
+            group.skip_auto_update;
+
+        json["auto_clear_unavailable"] =
+            group.auto_clear_unavailable;
+
+
+        json["name"] =
+            group.name;
+
+        json["url"] =
+            group.url;
+
+        json["info"] =
+            group.info;
+
+
+        json["sub_last_update"] =
+            static_cast<qint64>(
+                group.sub_last_update
+                );
+
+
+        json["front_proxy_id"] =
+            group.front_proxy_id;
+
+        json["landing_proxy_id"] =
+            group.landing_proxy_id;
+
+
+        json["column_width"] =
+            QListInt2QJsonArray(
+                group.column_width
+            );
+
+        json["profiles"] =
+            QListInt2QJsonArray(
+                group.profiles
+            );
+
+
+        json["scroll_last_profile"] =
+            group.scroll_last_profile;
+
+
+        json["test_sort_by"] =
+            static_cast<int>(
+                group.test_sort_by
+                );
+
+        json["traffic_sort_by"] =
+            static_cast<int>(
+                group.traffic_sort_by
+                );
+
+        json["test_items_to_show"] =
+            static_cast<int>(
+                group.test_items_to_show
+                );
+
+
         return json;
     }
 
@@ -95,75 +148,231 @@ namespace Configs {
         return group;
     }
 
-    void GroupsRepo::saveToDatabase(const Group* group, int id) const {
-        // Serialize lists to JSON strings
-        QJsonArray columnWidthArray = QListInt2QJsonArray(group->column_width);
-        QJsonArray profilesArray = QListInt2QJsonArray(group->profiles);
-        
-        QJsonDocument columnWidthDoc(columnWidthArray);
-        QJsonDocument profilesDoc(profilesArray);
-        
-        QString columnWidthJson = QString::fromUtf8(columnWidthDoc.toJson(QJsonDocument::Compact));
-        QString profilesJson = QString::fromUtf8(profilesDoc.toJson(QJsonDocument::Compact));
-        
-        // Check if group exists
-        auto checkQuery = db.query("SELECT id FROM groups WHERE id = ?", id);
-        bool exists = checkQuery && checkQuery->executeStep();
-        
+    void GroupsRepo::saveToDatabase(
+        const GroupSnapshot& group) const
+    {
+        // -------------------------------------------------
+        // Serialize immutable snapshot
+        // -------------------------------------------------
+
+        const QJsonArray columnWidthArray =
+            QListInt2QJsonArray(
+                group.column_width
+            );
+
+
+        const QJsonArray profilesArray =
+            QListInt2QJsonArray(
+                group.profiles
+            );
+
+
+        const QJsonDocument columnWidthDoc(
+            columnWidthArray
+        );
+
+        const QJsonDocument profilesDoc(
+            profilesArray
+        );
+
+
+        const QString columnWidthJson =
+            QString::fromUtf8(
+                columnWidthDoc.toJson(
+                    QJsonDocument::Compact
+                )
+            );
+
+
+        const QString profilesJson =
+            QString::fromUtf8(
+                profilesDoc.toJson(
+                    QJsonDocument::Compact
+                )
+            );
+
+
+        // -------------------------------------------------
+        // Check existence
+        // -------------------------------------------------
+
+        bool exists = false;
+
+
+        {
+            auto checkQuery =
+                db.query(
+                    "SELECT id "
+                    "FROM groups "
+                    "WHERE id = ?",
+                    group.id
+                );
+
+
+            exists =
+                checkQuery &&
+                checkQuery->executeStep();
+        }
+
+
+        // -------------------------------------------------
+        // UPDATE
+        // -------------------------------------------------
+
         if (exists) {
-            // Update
-            db.exec(R"(
-                UPDATE groups 
-                SET archive = ?, skip_auto_update = ?, auto_clear_unavailable = ?, name = ?, url = ?, info = ?,
-                    sub_last_update = ?, front_proxy_id = ?, landing_proxy_id = ?,
-                    column_width_json = ?, profiles_json = ?, scroll_last_profile = ?, test_sort_by = ?, traffic_sort_by = ?, test_items_to_show = ?,
+
+            db.exec(
+                R"(
+                UPDATE groups
+                SET archive = ?,
+                    skip_auto_update = ?,
+                    auto_clear_unavailable = ?,
+                    name = ?,
+                    url = ?,
+                    info = ?,
+                    sub_last_update = ?,
+                    front_proxy_id = ?,
+                    landing_proxy_id = ?,
+                    column_width_json = ?,
+                    profiles_json = ?,
+                    scroll_last_profile = ?,
+                    test_sort_by = ?,
+                    traffic_sort_by = ?,
+                    test_items_to_show = ?,
                     updated_at = strftime('%s', 'now')
                 WHERE id = ?
             )",
-                group->archive ? 1 : 0,
-                group->skip_auto_update ? 1 : 0,
-                group->auto_clear_unavailable ? 1 : 0,
-                group->name.toStdString(),
-                group->url.toStdString(),
-                group->info.toStdString(),
-                static_cast<long long>(group->sub_last_update),
-                group->front_proxy_id,
-                group->landing_proxy_id,
+
+                group.archive
+                ? 1
+                : 0,
+
+                group.skip_auto_update
+                ? 1
+                : 0,
+
+                group.auto_clear_unavailable
+                ? 1
+                : 0,
+
+                group.name.toStdString(),
+
+                group.url.toStdString(),
+
+                group.info.toStdString(),
+
+                static_cast<long long>(
+                    group.sub_last_update
+                    ),
+
+                group.front_proxy_id,
+
+                group.landing_proxy_id,
+
                 columnWidthJson.toStdString(),
+
                 profilesJson.toStdString(),
-                group->scroll_last_profile,
-                static_cast<int>(group->test_sort_by),
-                static_cast<int>(group->traffic_sort_by),
-                static_cast<int>(group->test_items_to_show),
-                id
+
+                group.scroll_last_profile,
+
+                static_cast<int>(
+                    group.test_sort_by
+                    ),
+
+                static_cast<int>(
+                    group.traffic_sort_by
+                    ),
+
+                static_cast<int>(
+                    group.test_items_to_show
+                    ),
+
+                group.id
             );
-        } else {
-            // Insert
-            db.exec(R"(
-                INSERT INTO groups 
-                (id, archive, skip_auto_update, auto_clear_unavailable, name, url, info, sub_last_update,
-                 front_proxy_id, landing_proxy_id,
-                 column_width_json, profiles_json, scroll_last_profile, test_sort_by, traffic_sort_by, test_items_to_show)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            )",
-                id,
-                group->archive ? 1 : 0,
-                group->skip_auto_update ? 1 : 0,
-                group->auto_clear_unavailable ? 1 : 0,
-                group->name.toStdString(),
-                group->url.toStdString(),
-                group->info.toStdString(),
-                static_cast<long long>(group->sub_last_update),
-                group->front_proxy_id,
-                group->landing_proxy_id,
-                columnWidthJson.toStdString(),
-                profilesJson.toStdString(),
-                group->scroll_last_profile,
-                static_cast<int>(group->test_sort_by),
-                static_cast<int>(group->traffic_sort_by),
-                static_cast<int>(group->test_items_to_show)
-            );
+
+
+            return;
         }
+
+
+        // -------------------------------------------------
+        // INSERT
+        // -------------------------------------------------
+
+        db.exec(
+            R"(
+            INSERT INTO groups
+            (
+                id,
+                archive,
+                skip_auto_update,
+                auto_clear_unavailable,
+                name,
+                url,
+                info,
+                sub_last_update,
+                front_proxy_id,
+                landing_proxy_id,
+                column_width_json,
+                profiles_json,
+                scroll_last_profile,
+                test_sort_by,
+                traffic_sort_by,
+                test_items_to_show
+            )
+            VALUES
+            (
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?
+            )
+        )",
+
+            group.id,
+
+            group.archive
+            ? 1
+            : 0,
+
+            group.skip_auto_update
+            ? 1
+            : 0,
+
+            group.auto_clear_unavailable
+            ? 1
+            : 0,
+
+            group.name.toStdString(),
+
+            group.url.toStdString(),
+
+            group.info.toStdString(),
+
+            static_cast<long long>(
+                group.sub_last_update
+                ),
+
+            group.front_proxy_id,
+
+            group.landing_proxy_id,
+
+            columnWidthJson.toStdString(),
+
+            profilesJson.toStdString(),
+
+            group.scroll_last_profile,
+
+            static_cast<int>(
+                group.test_sort_by
+                ),
+
+            static_cast<int>(
+                group.traffic_sort_by
+                ),
+
+            static_cast<int>(
+                group.test_items_to_show
+                )
+        );
     }
 
     std::shared_ptr<Group> GroupsRepo::loadFromDatabase(int id) const {
@@ -218,22 +427,124 @@ namespace Configs {
         return std::make_shared<Group>();
     }
 
-    bool GroupsRepo::AddGroup(std::shared_ptr<Group>& group) {
-        QMutexLocker locker(&mutex);
-        if (group->id >= 0) return false;
-        int newId = NewGroupID();
-        group->id = newId;
-        memMap[newId] = group;
-        saveToDatabase(group.get(), group->id);
-        int maxOrder = -1;
-        auto maxOrderQuery = db.query("SELECT MAX(display_order) FROM groups_order");
-        if (maxOrderQuery && maxOrderQuery->executeStep()) {
-            maxOrder = maxOrderQuery->getColumn(0).getInt();
+    bool GroupsRepo::AddGroup(
+        std::shared_ptr<Group>& group)
+    {
+        if (!group) {
+            return false;
         }
-        db.exec("INSERT INTO groups_order (group_id, display_order) VALUES (?, ?)",
-            group->id,
-            maxOrder + 1
-        );
+
+
+        // -------------------------------------------------
+        // Check current Group state
+        // -------------------------------------------------
+
+        {
+            const auto snapshot =
+                group->Snapshot();
+
+            if (snapshot.id >= 0) {
+                return false;
+            }
+        }
+
+
+        // -------------------------------------------------
+        // Allocate ID.
+        //
+        // Database serializes this internally.
+        // -------------------------------------------------
+
+        const int newId =
+            NewGroupID();
+
+
+        if (newId <= 0) {
+            return false;
+        }
+
+
+        // -------------------------------------------------
+        // Assign ID under Group::mutex
+        // -------------------------------------------------
+
+        {
+            QMutexLocker groupLocker(
+                &group->mutex
+            );
+
+
+            // Another caller theoretically could have
+            // assigned this object meanwhile.
+            if (group->id >= 0) {
+                return false;
+            }
+
+
+            group->id =
+                newId;
+        }
+
+
+        // -------------------------------------------------
+        // Immutable snapshot
+        // -------------------------------------------------
+
+        const GroupSnapshot snapshot =
+            group->Snapshot();
+
+
+        // -------------------------------------------------
+        // GroupsRepo state + DB
+        // -------------------------------------------------
+
+        {
+            std::lock_guard<std::mutex>
+                locker(mutex);
+
+
+            memMap[newId] =
+                group;
+
+
+            saveToDatabase(
+                snapshot
+            );
+
+
+            int maxOrder = -1;
+
+
+            {
+                auto maxOrderQuery =
+                    db.query(
+                        "SELECT MAX(display_order) "
+                        "FROM groups_order"
+                    );
+
+
+                if (maxOrderQuery &&
+                    maxOrderQuery->executeStep())
+                {
+                    maxOrder =
+                        maxOrderQuery
+                        ->getColumn(0)
+                        .getInt();
+                }
+            }
+
+
+            db.exec(
+                "INSERT INTO groups_order "
+                "(group_id, display_order) "
+                "VALUES (?, ?)",
+
+                newId,
+                maxOrder + 1
+            );
+        }
+
+
         return true;
     }
 
@@ -314,19 +625,50 @@ namespace Configs {
         }
     }
 
-    bool GroupsRepo::Save(const std::shared_ptr<Group>& group) {
+    bool GroupsRepo::Save(
+        const std::shared_ptr<Group>& group)
+    {
         if (!group) {
             return false;
         }
-        
-        if (group->id < 0) {
-            return false; // Group doesn't have an ID, use AddGroup instead
+
+
+        // -------------------------------------------------
+        // Snapshot Group first.
+        //
+        // Only Group::mutex is held inside Snapshot().
+        // -------------------------------------------------
+
+        const GroupSnapshot snapshot =
+            group->Snapshot();
+
+
+        if (snapshot.id < 0) {
+            return false;
         }
-        
-        QMutexLocker locker(&mutex);
-        saveToDatabase(group.get(), group->id);
-        memMap[group->id] = group;
-        
+
+
+        // -------------------------------------------------
+        // Group::mutex is ALREADY released.
+        //
+        // Now it is safe to acquire GroupsRepo::mutex.
+        // -------------------------------------------------
+
+        {
+            std::lock_guard<std::mutex>
+                locker(mutex);
+
+
+            saveToDatabase(
+                snapshot
+            );
+
+
+            memMap[snapshot.id] =
+                group;
+        }
+
+
         return true;
     }
 }
