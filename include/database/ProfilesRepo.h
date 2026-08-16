@@ -88,7 +88,12 @@ namespace Configs {
         void SaveTrafficBatch(
             const std::vector<ProfileTrafficRow>& rows);
 
-        // Batch save: runs on a new thread, filters to non-null and id >= 0, then batch replace (same chunking as AddProfileBatch).
-        void SaveBatch(const QList<std::shared_ptr<Profile>>& profiles);
+        // Batch-save existing profiles.
+        //
+        // Creates immutable ProfileInsertRow snapshots and
+        // persists them as one serialized batch operation.
+        // Does not create a worker thread.
+        void SaveBatch(
+            const QList<std::shared_ptr<Profile>>& profiles);
     };
 }

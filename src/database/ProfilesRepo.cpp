@@ -947,24 +947,124 @@ namespace Configs {
         return true;
     }
 
-    void ProfilesRepo::SaveBatch(const QList<std::shared_ptr<Profile>>& profiles) {
-        runOnNewThread([=, this] {
-            QList<std::shared_ptr<Profile>> valid;
-            for (const auto& p : profiles) {
-                if (p && p->id >= 0) valid.append(p);
+    void ProfilesRepo::SaveBatch(
+        const QList<std::shared_ptr<Profile>>& profiles)
+    {
+        if (profiles.isEmpty()) {
+            return;
+        }
+
+
+        // -------------------------------------------------
+        // SaveBatch is synchronous now.
+        //
+        // No new QThread is created.
+        //
+        // The repository mutex is acquired BEFORE creating
+        // ProfileInsertRow snapshots so that SaveTrafficBatch()
+        // cannot persist a newer traffic value between
+        // snapshot creation and the batch write.
+        // -------------------------------------------------
+
+        std::lock_guard<std::mutex>
+            locker(mutex);
+
+
+        std::vector<ProfileInsertRow>
+            rows;
+
+        rows.reserve(
+            static_cast<size_t>(
+                profiles.size()
+                )
+        );
+
+
+        // Keep the exact ID associated with each snapshot.
+        //
+        // Do not read profile->id again after the DB operation.
+        std::vector<
+            std::pair<
+            int,
+            std::weak_ptr<Profile>
+            >
+        > identityUpdates;
+
+        identityUpdates.reserve(
+            static_cast<size_t>(
+                profiles.size()
+                )
+        );
+
+
+        // -------------------------------------------------
+        // Build immutable persistence snapshots
+        // -------------------------------------------------
+
+        for (const auto& profile : profiles) {
+
+            if (!profile) {
+                continue;
             }
-            if (valid.isEmpty()) return;
-            std::vector<ProfileInsertRow> rows;
-            rows.reserve(valid.size());
-            for (const auto& p : valid) {
-                rows.push_back(profileToInsertRow(p.get(), p->id, p->gid));
+
+
+            const int id =
+                profile->id;
+
+
+            if (id < 0) {
+                continue;
             }
-            QMutexLocker locker(&mutex);
-            db.execBatchReplaceProfiles(rows);
-            for (const auto& p : valid) {
-                identityMap[p->id] = std::weak_ptr<Profile>(p);
-            }
-        });
+
+
+            const int gid =
+                profile->gid;
+
+
+            rows.push_back(
+                profileToInsertRow(
+                    profile.get(),
+                    id,
+                    gid
+                )
+            );
+
+
+            identityUpdates.emplace_back(
+                id,
+                std::weak_ptr<Profile>(
+                    profile
+                )
+            );
+        }
+
+
+        if (rows.empty()) {
+            return;
+        }
+
+
+        // -------------------------------------------------
+        // Persist immutable rows
+        // -------------------------------------------------
+
+        db.execBatchReplaceProfiles(
+            rows
+        );
+
+
+        // -------------------------------------------------
+        // Refresh identity map
+        // -------------------------------------------------
+
+        for (const auto& [
+            id,
+            weakProfile
+        ] : identityUpdates)
+        {
+            identityMap[id] =
+                weakProfile;
+        }
     }
 
     void ProfilesRepo::SaveTrafficBatch(
