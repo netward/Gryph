@@ -15,9 +15,15 @@
 #include "include/ui/mainwindow.h"
 #include "ui_mainwindow.h"
 
+#include <memory>
+#include <ranges>
+
+#include <QSemaphore>
+#include <QMutexLocker>
 #include <QAbstractItemView>
 #include <QMenu>
-#include <ranges>
+
+
 
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/sys/Process.hpp"
@@ -3364,60 +3370,311 @@ void MainWindow::on_menu_remove_unavailable_triggered() {
     clearUnavailableProfiles();
 }
 
-void MainWindow::on_menu_remove_invalid_triggered() {
-    runOnNewThread([=,this]
-    {
-        QList<std::shared_ptr<Configs::Profile>> out_del;
+void MainWindow::on_menu_remove_invalid_triggered()
+{
+    runOnNewThread(
+        [this]()
+        {
+            // -------------------------------------------------
+            // Get current group
+            // -------------------------------------------------
 
-     auto currentGroup = Configs::dataManager->groupsRepo->CurrentGroup();
-     if (currentGroup == nullptr) return;
-     std::atomic counter(0);
-     QMutex mu;
-     QMutex access;
-     int profileSize = currentGroup->Profiles().size();
-     // Empty group: no worker is ever queued, so the join-mutex would never be
-     // unlocked and the worker thread would block forever on mu.lock() below.
-     if (profileSize == 0) return;
-     mu.lock();
-     for (const auto& profileID : currentGroup->Profiles()) {
-         auto profile = Configs::dataManager->profilesRepo->GetProfile(profileID);
-         parallelCoreCallPool->start([&out_del, profile, &counter, &mu, profileSize, &access]
-         {
-             if (!IsValid(profile))
-             {
-                 access.lock();
-                 out_del += profile;
-                 access.unlock();
-             }
-             if (++counter == profileSize) mu.unlock();
-         });
-     }
-     mu.lock();
-     mu.unlock();
+            auto currentGroup =
+                Configs::dataManager
+                ->groupsRepo
+                ->CurrentGroup();
 
-     int remove_display_count = 0;
-     QString remove_display;
-     for (const auto &ent: out_del) {
-         remove_display += ent->outbound->DisplayTypeAndName() + "\n";
-         if (++remove_display_count == 20) {
-             remove_display += "...";
-             break;
-         }
-     }
 
-     runOnUiThread([=,this]
-     {
-         if (!out_del.empty() &&
-         (Configs::dataManager->settingsRepo->skip_delete_confirmation || QMessageBox::question(this, tr("Confirmation"), tr("Remove %1 Invalid item(s) ?").arg(out_del.length()) + "\n" + remove_display) == QMessageBox::StandardButton::Yes)) {
-         QList<int> del_ids;
-         for (const auto &ent: out_del) {
-             del_ids += ent->id;
-         }
-         Configs::dataManager->profilesRepo->BatchDeleteProfiles(del_ids, true);
-         refresh_proxy_list({}, true);
-     }
-     });
-    });
+            if (!currentGroup)
+            {
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Take ONE immutable profile ID snapshot.
+            //
+            // Do not call Profiles() again below.
+            // Otherwise the group could change between calls.
+            // -------------------------------------------------
+
+            const QList<int> profileIDs =
+                currentGroup->Profiles();
+
+
+            if (profileIDs.isEmpty())
+            {
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Result storage
+            // -------------------------------------------------
+
+            QList<
+                std::shared_ptr<
+                Configs::Profile
+                >
+            > invalidProfiles;
+
+
+            QMutex invalidProfilesMutex;
+
+
+            // -------------------------------------------------
+            // Completion semaphore.
+            //
+            // Every started task releases exactly one permit.
+            // The outer worker waits for all permits.
+            // -------------------------------------------------
+
+            auto completion =
+                std::make_shared<QSemaphore>(
+                    0
+                );
+
+
+            int taskCount = 0;
+
+
+            // -------------------------------------------------
+            // Start validation tasks
+            // -------------------------------------------------
+
+            for (const int profileID :
+            profileIDs)
+            {
+                auto profile =
+                    Configs::dataManager
+                    ->profilesRepo
+                    ->GetProfile(
+                        profileID
+                    );
+
+
+                // Profile may have been deleted meanwhile.
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                ++taskCount;
+
+
+                parallelCoreCallPool->start(
+                    [
+                        profile,
+                        completion,
+                        &invalidProfiles,
+                        &invalidProfilesMutex
+                    ]()
+                    {
+                        // -------------------------------------
+                        // Validate profile
+                        // -------------------------------------
+
+                        if (!IsValid(profile))
+                        {
+                            QMutexLocker locker(
+                                &invalidProfilesMutex
+                            );
+
+
+                            invalidProfiles.append(
+                                profile
+                            );
+                        }
+
+
+                        // -------------------------------------
+                        // Signal task completion.
+                        //
+                        // IMPORTANT:
+                        // QSemaphore may be released by
+                        // another thread. QMutex may not.
+                        // -------------------------------------
+
+                        completion->release();
+                    }
+                );
+            }
+
+
+            // -------------------------------------------------
+            // Wait until every actually started task finishes.
+            // -------------------------------------------------
+
+            if (taskCount > 0)
+            {
+                completion->acquire(
+                    taskCount
+                );
+            }
+
+
+            // No pool task can touch invalidProfiles anymore
+            // after acquire(taskCount) returns.
+
+
+            if (invalidProfiles.isEmpty())
+            {
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Prepare confirmation text outside UI thread
+            // -------------------------------------------------
+
+            QString removeDisplay;
+
+            int removeDisplayCount = 0;
+
+
+            for (const auto& profile :
+                invalidProfiles)
+            {
+                if (!profile ||
+                    !profile->outbound)
+                {
+                    continue;
+                }
+
+
+                removeDisplay +=
+                    profile
+                    ->outbound
+                    ->DisplayTypeAndName()
+                    +
+                    "\n";
+
+
+                ++removeDisplayCount;
+
+
+                if (removeDisplayCount == 20)
+                {
+                    removeDisplay +=
+                        "...";
+
+                    break;
+                }
+            }
+
+
+            // -------------------------------------------------
+            // UI interaction + deletion
+            // -------------------------------------------------
+
+            runOnUiThread(
+                [
+                    this,
+                    invalidProfiles,
+                    removeDisplay
+                ]()
+                {
+                    if (invalidProfiles.isEmpty())
+                    {
+                        return;
+                    }
+
+
+                    const bool skipConfirmation =
+                        Configs::dataManager
+                        ->settingsRepo
+                        ->skip_delete_confirmation;
+
+
+                    bool confirmed =
+                        skipConfirmation;
+
+
+                    if (!confirmed)
+                    {
+                        confirmed =
+                            QMessageBox::question(
+                                this,
+                                tr("Confirmation"),
+
+                                tr(
+                                    "Remove %1 Invalid "
+                                    "item(s) ?"
+                                )
+                                .arg(
+                                    invalidProfiles.size()
+                                )
+                                +
+                                "\n"
+                                +
+                                removeDisplay
+                            )
+                            ==
+                            QMessageBox::
+                            StandardButton::Yes;
+                    }
+
+
+                    if (!confirmed)
+                    {
+                        return;
+                    }
+
+
+                    // -----------------------------------------
+                    // Convert Profile objects to IDs
+                    // -----------------------------------------
+
+                    QList<int> deleteIDs;
+
+
+                    deleteIDs.reserve(
+                        invalidProfiles.size()
+                    );
+
+
+                    for (const auto& profile :
+                        invalidProfiles)
+                    {
+                        if (!profile)
+                        {
+                            continue;
+                        }
+
+
+                        deleteIDs.append(
+                            profile->id
+                        );
+                    }
+
+
+                    if (deleteIDs.isEmpty())
+                    {
+                        return;
+                    }
+
+
+                    // -----------------------------------------
+                    // Delete
+                    // -----------------------------------------
+
+                    Configs::dataManager
+                        ->profilesRepo
+                        ->BatchDeleteProfiles(
+                            deleteIDs,
+                            true
+                        );
+
+
+                    refresh_proxy_list(
+                        {},
+                        true
+                    );
+                }
+            );
+        }
+    );
 }
 
 void MainWindow::on_menu_resolve_selected_triggered() {
