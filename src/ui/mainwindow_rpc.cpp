@@ -96,13 +96,42 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                     continue;
                 }
                 if (res.error.value().empty()) {
-                ent->latency = res.latency_ms.value();
-                } else {
-                    if (QString::fromStdString(res.error.value()).contains("test aborted") ||
-                        QString::fromStdString(res.error.value()).contains("context canceled")) ent->latency=0;
+
+                    ent->SetLatency(
+                        res.latency_ms.value()
+                    );
+                }
+
+                else {
+
+                    const QString error =
+                        QString::fromStdString(
+                            res.error.value()
+                        );
+
+
+                    if (error.contains(
+                        "test aborted")
+                        ||
+                        error.contains(
+                            "context canceled"))
+                    {
+                        ent->SetLatency(0);
+                    }
+
                     else {
-                        ent->latency = -1;
-                        MW_show_log(tr("[%1] test error: %2").arg(ent->outbound->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
+
+                        ent->SetLatency(-1);
+
+
+                        MW_show_log(
+                            tr("[%1] test error: %2")
+                            .arg(
+                                ent->outbound
+                                ->DisplayTypeAndName(),
+                                error
+                            )
+                        );
                     }
                 }
                 Configs::dataManager->profilesRepo->Save(ent);
@@ -141,13 +170,42 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
         }
 
         if (res.error.value().empty()) {
-            ent->latency = res.latency_ms.value();
-        } else {
-            if (QString::fromStdString(res.error.value()).contains("test aborted") ||
-                QString::fromStdString(res.error.value()).contains("context canceled")) ent->latency=0;
+
+            ent->SetLatency(
+                res.latency_ms.value()
+            );
+        }
+
+        else {
+
+            const QString error =
+                QString::fromStdString(
+                    res.error.value()
+                );
+
+
+            if (error.contains(
+                "test aborted")
+                ||
+                error.contains(
+                    "context canceled"))
+            {
+                ent->SetLatency(0);
+            }
+
             else {
-                ent->latency = -1;
-                MW_show_log(tr("[%1] test error: %2").arg(ent->outbound->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
+
+                ent->SetLatency(-1);
+
+
+                MW_show_log(
+                    tr("[%1] test error: %2")
+                    .arg(
+                        ent->outbound
+                        ->DisplayTypeAndName(),
+                        error
+                    )
+                );
             }
         }
         Configs::dataManager->profilesRepo->Save(ent);
@@ -205,15 +263,21 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
                     continue;
                 }
                 if (res.error.value().empty()) {
-                    ent->ip_out = QString::fromStdString(res.ip.value());
-                    ent->test_country = QString::fromStdString(res.country_code.value());
+                    ent->SetIpTestResult(
+                        QString::fromStdString(
+                            res.ip.value()
+                        ),
+
+                        QString::fromStdString(
+                            res.country_code.value()
+                        )
+                    );
                 } else {
                     if (!QString::fromStdString(res.error.value()).contains("test aborted") &&
                         !QString::fromStdString(res.error.value()).contains("context canceled")) {
                         MW_show_log(tr("[%1] IP test error: %2").arg(ent->outbound->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
                     }
-                    ent->ip_out.clear();
-                    ent->test_country.clear();
+                    ent->ClearIpTestResult();
                 }
                 Configs::dataManager->profilesRepo->Save(ent);
                 needRefresh = true;
@@ -251,15 +315,41 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
         }
 
         if (res.error.value().empty()) {
-            ent->ip_out = QString::fromStdString(res.ip.value());
-            ent->test_country = QString::fromStdString(res.country_code.value());
-        } else {
-            if (!QString::fromStdString(res.error.value()).contains("test aborted") &&
-                !QString::fromStdString(res.error.value()).contains("context canceled")) {
-                MW_show_log(tr("[%1] IP test error: %2").arg(ent->outbound->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
+
+            ent->SetIpTestResult(
+                QString::fromStdString(
+                    res.ip.value()
+                ),
+
+                QString::fromStdString(
+                    res.country_code.value()
+                )
+            );
+
+        }
+        else {
+
+            const QString error =
+                QString::fromStdString(
+                    res.error.value()
+                );
+
+
+            if (!error.contains("test aborted") &&
+                !error.contains("context canceled"))
+            {
+                MW_show_log(
+                    tr("[%1] IP test error: %2")
+                    .arg(
+                        ent->outbound
+                        ->DisplayTypeAndName(),
+                        error
+                    )
+                );
             }
-            ent->ip_out.clear();
-            ent->test_country.clear();
+
+
+            ent->ClearIpTestResult();
         }
         Configs::dataManager->profilesRepo->Save(ent);
     }
@@ -524,10 +614,31 @@ void MainWindow::querySpeedtest(const QMap<QString, int>& tag2entID, bool testCu
 
         if (res.result.value().error.value().empty() && !res.result.value().cancelled.value())
         {
-            if (!res.result.value().dl_speed.value().empty()) profile->dl_speed = QString::fromStdString(res.result.value().dl_speed.value());
-            if (!res.result.value().ul_speed.value().empty()) profile->ul_speed = QString::fromStdString(res.result.value().ul_speed.value());
-            if (profile->latency <= 0 && res.result.value().latency.value() > 0) profile->latency = res.result.value().latency.value();
-            if (!res.result->server_country.value().empty()) profile->test_country = CountryNameToCode(QString::fromStdString(res.result.value().server_country.value()));
+            profile->MergeSpeedTestResult(
+                QString::fromStdString(
+                    res.result.value()
+                    .dl_speed.value()
+                ),
+
+                QString::fromStdString(
+                    res.result.value()
+                    .ul_speed.value()
+                ),
+
+                res.result.value()
+                .latency.value(),
+
+                res.result.value()
+                .server_country.value()
+                .empty()
+                ? QString()
+                : CountryNameToCode(
+                    QString::fromStdString(
+                        res.result.value()
+                        .server_country.value()
+                    )
+                )
+            );
             refresh_proxy_list({profile->id});
         }
     });
@@ -554,8 +665,18 @@ void MainWindow::queryCountryTest(const QMap<QString, int>& tag2entID, bool test
         {
             if (result.error.value().empty() && !result.cancelled.value())
             {
-                if (profile->latency <= 0 && result.latency.value() > 0) profile->latency = result.latency.value();
-                if (!result.server_country.value().empty()) profile->test_country = CountryNameToCode(QString::fromStdString(result.server_country.value()));
+                profile->MergeCountryTestResult(
+                    result.latency.value(),
+
+                    result.server_country.value()
+                    .empty()
+                    ? QString()
+                    : CountryNameToCode(
+                        QString::fromStdString(
+                            result.server_country.value()
+                        )
+                    )
+                );
                 refresh_proxy_list({profile->id});
             }
         });
@@ -641,16 +762,45 @@ void MainWindow::runSpeedTest(const QString& config, const QString& xrayConfig, 
         if (res.cancelled.value()) continue;
 
         if (res.error.value().empty()) {
-            ent->dl_speed = QString::fromStdString(res.dl_speed.value());
-            ent->ul_speed = QString::fromStdString(res.ul_speed.value());
-            if (ent->latency <= 0 && res.latency.value() > 0) ent->latency = res.latency.value();
-            if (!res.server_country.value().empty()) ent->test_country = CountryNameToCode(QString::fromStdString(res.server_country.value()));
-        } else {
-            ent->dl_speed = "N/A";
-            ent->ul_speed = "N/A";
-            ent->latency = -1;
-            ent->test_country = "";
-            MW_show_log(tr("[%1] speed test error: %2").arg(ent->outbound->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
+
+            ent->SetSpeedTestResult(
+                QString::fromStdString(
+                    res.dl_speed.value()
+                ),
+
+                QString::fromStdString(
+                    res.ul_speed.value()
+                ),
+
+                res.latency.value(),
+
+                res.server_country.value()
+                .empty()
+                ? QString()
+                : CountryNameToCode(
+                    QString::fromStdString(
+                        res.server_country.value()
+                    )
+                )
+            );
+        }
+
+        else {
+
+            ent->SetSpeedTestError();
+
+
+            MW_show_log(
+                tr("[%1] speed test error: %2")
+                .arg(
+                    ent->outbound
+                    ->DisplayTypeAndName(),
+
+                    QString::fromStdString(
+                        res.error.value()
+                    )
+                )
+            );
         }
         Configs::dataManager->profilesRepo->Save(ent);
     }

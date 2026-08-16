@@ -2011,11 +2011,56 @@ QList<int> MainWindow::filterProfilesList(const QList<int>& profileIDs)
             bool maxOk = (p.size() < 2 || p[1].isEmpty()) || profile->outbound->server_port <= p[1].toInt();
             return minOk && maxOk;
         };
-        if ((addressFilterString.isEmpty() || (addressFilterString.startsWith("port=") ? portMatches() : profile->outbound->server.contains(addressFilterString, Qt::CaseInsensitive)))
-            && (nameFilterString.isEmpty() || profile->outbound->name.contains(nameFilterString, Qt::CaseInsensitive))
-            && (typeFilterString.isEmpty() || profile->type.contains(typeFilterString, Qt::CaseInsensitive))
-            && (countryFilterString.isEmpty() || profile->test_country.contains(countryFilterString, Qt::CaseInsensitive)))
-            res.append(profile->id);
+        const auto test =
+            profile->TestSnapshot();
+
+
+        if (
+            (
+                addressFilterString.isEmpty()
+                ||
+                (
+                    addressFilterString.startsWith("port=")
+                    ? portMatches()
+                    : profile->outbound->server.contains(
+                        addressFilterString,
+                        Qt::CaseInsensitive
+                    )
+                    )
+                )
+            &&
+            (
+                nameFilterString.isEmpty()
+                ||
+                profile->outbound->name.contains(
+                    nameFilterString,
+                    Qt::CaseInsensitive
+                )
+                )
+            &&
+            (
+                typeFilterString.isEmpty()
+                ||
+                profile->type.contains(
+                    typeFilterString,
+                    Qt::CaseInsensitive
+                )
+                )
+            &&
+            (
+                countryFilterString.isEmpty()
+                ||
+                test.testCountry.contains(
+                    countryFilterString,
+                    Qt::CaseInsensitive
+                )
+                )
+            )
+        {
+            res.append(
+                profile->id
+            );
+        }
     }
     return res;
 }
@@ -2841,12 +2886,26 @@ void MainWindow::clearUnavailableProfiles(bool confirm, QList<int> profileIDs) {
     if (profileIDs.isEmpty()) profileIDs = group->Profiles();
 
     auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(profileIDs);
-    for (const auto &profile: profiles) {
-        if (profile->latency < 0) {
-            del_ids += profile->id;
+    for (const auto& profile : profiles) {
+        if (!profile) {
+            continue;
+        }
+        const auto test =
+            profile->TestSnapshot();
+        if (test.latency < 0) {
+            del_ids +=
+                profile->id;
             if (++remove_display_count == 20) {
-                remove_display += "...";
-            }else if (remove_display_count < 20) remove_display += profile->outbound->DisplayTypeAndName() + "\n";
+                remove_display +=
+                    "...";
+            }
+            else if (remove_display_count < 20) {
+                remove_display +=
+                    profile
+                    ->outbound
+                    ->DisplayTypeAndName()
+                    + "\n";
+            }
         }
     }
 

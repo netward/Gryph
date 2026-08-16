@@ -15,48 +15,218 @@ namespace Configs
         }
     }
 
-    void Profile::ClearTestResults() {
-        test_country.clear();
-        ip_out.clear();
-        latency = 0;
-        dl_speed.clear();
-        ul_speed.clear();
+    ProfileTestSnapshot
+        Profile::TestSnapshot() const
+    {
+        return testState_.Snapshot();
     }
 
-    QString Profile::DisplayTestResult() const {
-        auto group = dataManager->groupsRepo->GetGroup(gid);
-        if (group == nullptr) return "";
-        QString result;
-        if (!test_country.isEmpty()) result += UNICODE_LRO + CountryCodeToFlag(test_country) + " ";
-        if (latency < 0) {
-            result = "Unavailable";
-            return result;
-        } else if (latency > 0) {
-            result += QString("%1 ms").arg(latency);
+
+    void Profile::SetTestSnapshot(
+        const ProfileTestSnapshot& snapshot)
+    {
+        testState_.SetSnapshot(
+            snapshot
+        );
+    }
+
+
+    void Profile::SetLatency(
+        int latency)
+    {
+        testState_.SetLatency(
+            latency
+        );
+    }
+
+
+    void Profile::SetIpTestResult(
+        const QString& ip,
+        const QString& country)
+    {
+        testState_.SetIpResult(
+            ip,
+            country
+        );
+    }
+
+
+    void Profile::ClearIpTestResult()
+    {
+        testState_.ClearIpResult();
+    }
+
+
+    void Profile::MergeSpeedTestResult(
+        const QString& dlSpeed,
+        const QString& ulSpeed,
+        int measuredLatency,
+        const QString& country)
+    {
+        testState_.MergeSpeedResult(
+            dlSpeed,
+            ulSpeed,
+            measuredLatency,
+            country
+        );
+    }
+
+
+    void Profile::SetSpeedTestResult(
+        const QString& dlSpeed,
+        const QString& ulSpeed,
+        int measuredLatency,
+        const QString& country)
+    {
+        testState_.SetSpeedResult(
+            dlSpeed,
+            ulSpeed,
+            measuredLatency,
+            country
+        );
+    }
+
+
+    void Profile::MergeCountryTestResult(
+        int measuredLatency,
+        const QString& country)
+    {
+        testState_.MergeCountryResult(
+            measuredLatency,
+            country
+        );
+    }
+
+
+    void Profile::SetSpeedTestError()
+    {
+        testState_.SetSpeedError();
+    }
+
+    void Profile::ClearTestResults()
+    {
+        testState_.Clear();
+    }
+
+    QString Profile::DisplayTestResult() const
+    {
+        const auto test =
+            TestSnapshot();
+
+
+        auto group =
+            dataManager
+            ->groupsRepo
+            ->GetGroup(gid);
+
+        if (!group) {
+            return {};
         }
-        bool showSpeed = group->test_items_to_show == testShowItems::all || group->test_items_to_show == testShowItems::speedOnly;
-        bool showIP = group->test_items_to_show == testShowItems::all || group->test_items_to_show == testShowItems::ipOnly;
-        if (!dl_speed.isEmpty() && dl_speed != "N/A" && showSpeed) result += " ↓" + dl_speed;
-        if (!ul_speed.isEmpty() && ul_speed != "N/A" && showSpeed) result += " ↑" + ul_speed;
-        if (!ip_out.isEmpty() && showIP) result += " 🌐" + ip_out;
+
+        const auto groupSnapshot =
+            group->Snapshot();
+
+
+        QString result;
+
+        if (!test.testCountry.isEmpty()) {
+
+            result +=
+                UNICODE_LRO
+                +
+                CountryCodeToFlag(
+                    test.testCountry
+                )
+                +
+                " ";
+        }
+
+        if (test.latency < 0) {
+
+            return "Unavailable";
+        }
+
+        if (test.latency > 0) {
+
+            result +=
+                QString("%1 ms")
+                .arg(
+                    test.latency
+                );
+        }
+
+        const bool showSpeed =
+            groupSnapshot.test_items_to_show ==
+            testShowItems::all
+            ||
+            groupSnapshot.test_items_to_show ==
+            testShowItems::speedOnly;
+
+        const bool showIP =
+            groupSnapshot.test_items_to_show ==
+            testShowItems::all
+            ||
+            groupSnapshot.test_items_to_show ==
+            testShowItems::ipOnly;
+
+        if (!test.dlSpeed.isEmpty() &&
+            test.dlSpeed != "N/A" &&
+            showSpeed)
+        {
+            result +=
+                " ↓"
+                +
+                test.dlSpeed;
+        }
+
+        if (!test.ulSpeed.isEmpty() &&
+            test.ulSpeed != "N/A" &&
+            showSpeed)
+        {
+            result +=
+                " ↑"
+                +
+                test.ulSpeed;
+        }
+
+        if (!test.ipOut.isEmpty() &&
+            showIP)
+        {
+            result +=
+                " 🌐"
+                +
+                test.ipOut;
+        }
+
         return result;
     }
 
-    QColor Profile::DisplayLatencyColor() const {
-        if (latency < 0) {
+    QColor Profile::DisplayLatencyColor() const
+    {
+        const auto test =
+            TestSnapshot();
+
+        if (test.latency < 0) {
+
             return Qt::darkGray;
-        } else if (latency > 0) {
-            if (latency <= 100) {
-                return Qt::darkGreen;
-            } else if (latency <= 300)
-            {
-                return Qt::darkYellow;
-            } else {
-                return Qt::red;
-            }
-        } else {
+        }
+
+        if (test.latency <= 0) {
+
             return {};
         }
+
+        if (test.latency <= 100) {
+
+            return Qt::darkGreen;
+        }
+
+        if (test.latency <= 300) {
+
+            return Qt::darkYellow;
+        }
+
+        return Qt::red;
     }
 
     void Profile::AddTraffic(

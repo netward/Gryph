@@ -45,7 +45,8 @@ namespace Configs {
         const Profile* profile) const
     {
         QJsonObject json;
-
+        const auto test =
+            profile->TestSnapshot();
 
         json["type"] =
             profile->type;
@@ -62,19 +63,19 @@ namespace Configs {
             profile->gid;
 
         json["latency"] =
-            profile->latency;
+            test.latency;
 
         json["dl_speed"] =
-            profile->dl_speed;
+            test.dlSpeed;
 
         json["ul_speed"] =
-            profile->ul_speed;
+            test.ulSpeed;
 
         json["test_country"] =
-            profile->test_country;
+            test.testCountry;
 
         json["ip_out"] =
-            profile->ip_out;
+            test.ipOut;
 
 
         if (profile->outbound) {
@@ -108,11 +109,26 @@ namespace Configs {
         profile->name = json["name"].toString();
         profile->id = json["id"].toInt();
         profile->gid = json["gid"].toInt();
-        profile->latency = json["latency"].toInt();
-        profile->dl_speed = json["dl_speed"].toString();
-        profile->ul_speed = json["ul_speed"].toString();
-        profile->test_country = json["test_country"].toString();
-        profile->ip_out = json["ip_out"].toString();
+        ProfileTestSnapshot test;
+        test.latency =
+            json["latency"]
+            .toInt();
+        test.dlSpeed =
+            json["dl_speed"]
+            .toString();
+        test.ulSpeed =
+            json["ul_speed"]
+            .toString();
+        test.testCountry =
+            json["test_country"]
+            .toString();
+        test.ipOut =
+            json["ip_out"]
+            .toString();
+
+        profile->SetTestSnapshot(
+            test
+        );
         
         // Reconstruct outbound (bean is not needed in new implementation)
         QString type = profile->type;
@@ -220,9 +236,10 @@ namespace Configs {
             outboundJson = QString::fromUtf8(outboundDoc.toJson(QJsonDocument::Compact));
         }
         QString name = profile->outbound ? profile->outbound->name : QString();
+        const auto test =
+            profile->TestSnapshot();
         const auto traffic =
             profile->TrafficSnapshot();
-
 
         const long long traffic_dl =
             static_cast<long long>(
@@ -249,32 +266,47 @@ namespace Configs {
                 profile->type.toStdString(),
                 name.toStdString(),
                 profile->gid,
-                profile->latency,
-                profile->dl_speed.toStdString(),
-                profile->ul_speed.toStdString(),
-                profile->test_country.toStdString(),
-                profile->ip_out.toStdString(),
+                test.latency,
+                test.dlSpeed.toStdString(),
+                test.ulSpeed.toStdString(),
+                test.testCountry.toStdString(),
+                test.ipOut.toStdString(),
                 outboundJson.toStdString(),
                 traffic_dl,
                 traffic_up,
                 id
             );
-        } else {
+        }
+        else {
             db.exec(R"(
-                INSERT INTO profiles 
-                (id, type, name, gid, latency, dl_speed, ul_speed, test_country, 
-                ip_out, outbound_json, traffic_dl, traffic_up)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            )",
+        INSERT INTO profiles 
+        (
+            id,
+            type,
+            name,
+            gid,
+            latency,
+            dl_speed,
+            ul_speed,
+            test_country,
+            ip_out,
+            outbound_json,
+            traffic_dl,
+            traffic_up
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    )",
                 id,
                 profile->type.toStdString(),
                 name.toStdString(),
                 profile->gid,
-                profile->latency,
-                profile->dl_speed.toStdString(),
-                profile->ul_speed.toStdString(),
-                profile->test_country.toStdString(),
-                profile->ip_out.toStdString(),
+
+                test.latency,
+                test.dlSpeed.toStdString(),
+                test.ulSpeed.toStdString(),
+                test.testCountry.toStdString(),
+                test.ipOut.toStdString(),
+
                 outboundJson.toStdString(),
                 traffic_dl,
                 traffic_up
@@ -311,8 +343,9 @@ namespace Configs {
             profile->outbound
             ? profile->outbound->name
             : QString();
-
-
+        
+        const auto test =
+            profile->TestSnapshot();
         const auto traffic =
             profile->TrafficSnapshot();
 
@@ -331,20 +364,15 @@ namespace Configs {
         row.gid = gid;
 
         row.latency =
-            profile->latency;
-
+            test.latency;
         row.dl_speed =
-            profile->dl_speed.toStdString();
-
+            test.dlSpeed.toStdString();
         row.ul_speed =
-            profile->ul_speed.toStdString();
-
+            test.ulSpeed.toStdString();
         row.test_country =
-            profile->test_country.toStdString();
-
+            test.testCountry.toStdString();
         row.ip_out =
-            profile->ip_out.toStdString();
-
+            test.ipOut.toStdString();
         row.outbound_json =
             outboundJson.toStdString();
 

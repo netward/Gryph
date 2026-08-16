@@ -161,6 +161,386 @@ namespace Configs {
         qint64 uplink_ = 0;
     };
 
+    struct ProfileTestSnapshot
+    {
+        int latency = 0;
+
+        QString dlSpeed;
+        QString ulSpeed;
+
+        QString testCountry;
+        QString ipOut;
+    };
+
+
+    class ProfileTestState
+    {
+    public:
+        ProfileTestState() = default;
+
+
+        ProfileTestState(
+            const ProfileTestState& other)
+        {
+            const auto snapshot =
+                other.Snapshot();
+
+            latency_ =
+                snapshot.latency;
+
+            dlSpeed_ =
+                snapshot.dlSpeed;
+
+            ulSpeed_ =
+                snapshot.ulSpeed;
+
+            testCountry_ =
+                snapshot.testCountry;
+
+            ipOut_ =
+                snapshot.ipOut;
+        }
+
+
+        ProfileTestState&
+            operator=(
+                const ProfileTestState& other)
+        {
+            if (this == &other) {
+                return *this;
+            }
+
+
+            const auto snapshot =
+                other.Snapshot();
+
+
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            latency_ =
+                snapshot.latency;
+
+            dlSpeed_ =
+                snapshot.dlSpeed;
+
+            ulSpeed_ =
+                snapshot.ulSpeed;
+
+            testCountry_ =
+                snapshot.testCountry;
+
+            ipOut_ =
+                snapshot.ipOut;
+
+
+            return *this;
+        }
+
+
+        ProfileTestState(
+            ProfileTestState&& other) noexcept
+        {
+            const auto snapshot =
+                other.Snapshot();
+
+            latency_ =
+                snapshot.latency;
+
+            dlSpeed_ =
+                snapshot.dlSpeed;
+
+            ulSpeed_ =
+                snapshot.ulSpeed;
+
+            testCountry_ =
+                snapshot.testCountry;
+
+            ipOut_ =
+                snapshot.ipOut;
+        }
+
+
+        ProfileTestState&
+            operator=(
+                ProfileTestState&& other) noexcept
+        {
+            if (this == &other) {
+                return *this;
+            }
+
+
+            const auto snapshot =
+                other.Snapshot();
+
+
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            latency_ =
+                snapshot.latency;
+
+            dlSpeed_ =
+                snapshot.dlSpeed;
+
+            ulSpeed_ =
+                snapshot.ulSpeed;
+
+            testCountry_ =
+                snapshot.testCountry;
+
+            ipOut_ =
+                snapshot.ipOut;
+
+
+            return *this;
+        }
+
+
+        [[nodiscard]]
+        ProfileTestSnapshot Snapshot() const
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            return {
+                latency_,
+                dlSpeed_,
+                ulSpeed_,
+                testCountry_,
+                ipOut_
+            };
+        }
+
+
+        void SetSnapshot(
+            const ProfileTestSnapshot& snapshot)
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            latency_ =
+                snapshot.latency;
+
+            dlSpeed_ =
+                snapshot.dlSpeed;
+
+            ulSpeed_ =
+                snapshot.ulSpeed;
+
+            testCountry_ =
+                snapshot.testCountry;
+
+            ipOut_ =
+                snapshot.ipOut;
+        }
+
+
+        void Clear()
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            latency_ = 0;
+
+            dlSpeed_.clear();
+            ulSpeed_.clear();
+
+            testCountry_.clear();
+            ipOut_.clear();
+        }
+
+
+        void SetLatency(
+            int latency)
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+            latency_ =
+                latency;
+        }
+
+
+        void SetIpResult(
+            const QString& ip,
+            const QString& country)
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            ipOut_ =
+                ip;
+
+            testCountry_ =
+                country;
+        }
+
+
+        void ClearIpResult()
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            ipOut_.clear();
+
+            testCountry_.clear();
+        }
+
+
+        // Used by intermediate speed-test polling.
+        //
+        // Empty values do not overwrite
+        // already collected values.
+        void MergeSpeedResult(
+            const QString& dlSpeed,
+            const QString& ulSpeed,
+            int measuredLatency,
+            const QString& country)
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            if (!dlSpeed.isEmpty()) {
+
+                dlSpeed_ =
+                    dlSpeed;
+            }
+
+
+            if (!ulSpeed.isEmpty()) {
+
+                ulSpeed_ =
+                    ulSpeed;
+            }
+
+
+            if (latency_ <= 0 &&
+                measuredLatency > 0)
+            {
+                latency_ =
+                    measuredLatency;
+            }
+
+
+            if (!country.isEmpty()) {
+
+                testCountry_ =
+                    country;
+            }
+        }
+
+
+        // Used for the final successful
+        // speed-test result.
+        void SetSpeedResult(
+            const QString& dlSpeed,
+            const QString& ulSpeed,
+            int measuredLatency,
+            const QString& country)
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            dlSpeed_ =
+                dlSpeed;
+
+            ulSpeed_ =
+                ulSpeed;
+
+
+            if (latency_ <= 0 &&
+                measuredLatency > 0)
+            {
+                latency_ =
+                    measuredLatency;
+            }
+
+
+            if (!country.isEmpty()) {
+
+                testCountry_ =
+                    country;
+            }
+        }
+
+
+        void MergeCountryResult(
+            int measuredLatency,
+            const QString& country)
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            if (latency_ <= 0 &&
+                measuredLatency > 0)
+            {
+                latency_ =
+                    measuredLatency;
+            }
+
+
+            if (!country.isEmpty()) {
+
+                testCountry_ =
+                    country;
+            }
+        }
+
+        void SetSpeedError()
+        {
+            QMutexLocker locker(
+                &mutex_
+            );
+
+
+            dlSpeed_ =
+                "N/A";
+
+            ulSpeed_ =
+                "N/A";
+
+            latency_ =
+                -1;
+
+            testCountry_.clear();
+        }
+
+
+    private:
+        mutable QMutex mutex_;
+
+
+        int latency_ = 0;
+
+        QString dlSpeed_;
+        QString ulSpeed_;
+
+        QString testCountry_;
+        QString ipOut_;
+    };
+
     class Profile {
     public:
         QString type;
@@ -168,13 +548,8 @@ namespace Configs {
 
         int id = -1;
         int gid = 0;
-        int latency = 0;
-        QString dl_speed;
-        QString ul_speed;
-        QString test_country;
+        
         std::shared_ptr<Configs::outbound> outbound;
-
-        QString ip_out;
 
         QString runningCountryInfo; // volatile, not saved to db
 
@@ -186,6 +561,56 @@ namespace Configs {
             const QString& type_
         );
 
+        // ---------------------------------------------
+        // Test/runtime state
+        // ---------------------------------------------
+
+        [[nodiscard]]
+        ProfileTestSnapshot TestSnapshot() const;
+
+
+        void SetTestSnapshot(
+            const ProfileTestSnapshot& snapshot
+        );
+
+
+        void SetLatency(
+            int latency
+        );
+
+
+        void SetIpTestResult(
+            const QString& ip,
+            const QString& country
+        );
+
+
+        void ClearIpTestResult();
+
+
+        void MergeSpeedTestResult(
+            const QString& dlSpeed,
+            const QString& ulSpeed,
+            int measuredLatency,
+            const QString& country
+        );
+
+
+        void SetSpeedTestResult(
+            const QString& dlSpeed,
+            const QString& ulSpeed,
+            int measuredLatency,
+            const QString& country
+        );
+
+
+        void MergeCountryTestResult(
+            int measuredLatency,
+            const QString& country
+        );
+
+
+        void SetSpeedTestError();
 
         void ClearTestResults();
 
@@ -309,6 +734,7 @@ namespace Configs {
         };
     private:
         ProfileTrafficCounters traffic_;
+        ProfileTestState testState_;
     };
     class ProfileFilter {
     public:

@@ -1691,7 +1691,7 @@ namespace Configs {
             }
             if (!IsValid(item)) {
                 MW_show_log("Skipping invalid config: " + item->outbound->name);
-                item->latency = -1;
+                item->SetLatency(-1);
                 continue;
             }
             if (item->type == "custom")
