@@ -130,9 +130,9 @@ set(PROJECT_SOURCES
         src/ui/profile/dialog_edit_profile.cpp
         src/ui/profile/dialog_edit_profile_xhttp.cpp
         include/ui/profile/dialog_edit_profile.ui
-        include/ui/group/dialog_edit_group.h
-        src/ui/group/dialog_edit_group.cpp
-        include/ui/group/dialog_edit_group.ui
+        include/ui/group/DialogEditGroup.h
+        src/ui/group/DialogEditGroup.cpp
+        include/ui/group/DialogEditGroup.ui
 
         include/ui/profile/edit_chain.h
         src/ui/profile/edit_chain.cpp
@@ -196,9 +196,9 @@ set(PROJECT_SOURCES
         include/ui/setting/dialog_basic_settings.h
         include/ui/setting/dialog_basic_settings.ui
 
-        src/ui/group/dialog_manage_groups.cpp
-        include/ui/group/dialog_manage_groups.h
-        include/ui/group/dialog_manage_groups.ui
+        src/ui/group/DialogManageGroups.cpp
+        include/ui/group/DialogManageGroups.h
+        include/ui/group/DialogManageGroups.ui
 
         src/ui/setting/dialog_manage_routes.cpp
         include/ui/setting/dialog_manage_routes.h
@@ -236,8 +236,8 @@ set(PROJECT_SOURCES
         src/sys/macos/MacOS.cpp
 
         src/sys/Process.cpp
-        include/stats/connections/connectionLister.hpp
-        src/stats/connectionLister/connectionLister.cpp
+        include/stats/connections/ConnectionLister.hpp
+        src/stats/connectionLister/ConnectionLister.cpp
         include/sys/windows/eventHandler.h
         include/configs/baseConfig.h
         include/configs/common/DialFields.h

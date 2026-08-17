@@ -1,6 +1,6 @@
 #include "include/ui/group/GroupItem.h"
 
-#include "include/ui/group/dialog_edit_group.h"
+#include "include/ui/group/DialogEditGroup.h"
 #include "include/global/GuiUtils.hpp"
 #include "include/configs/sub/GroupUpdater.hpp"
 

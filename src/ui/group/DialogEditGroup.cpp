@@ -1,6 +1,6 @@
-#include "include/ui/group/dialog_edit_group.h"
+#include "include/ui/group/DialogEditGroup.h"
 
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 
 #include <QClipboard>
 #include <QHash>

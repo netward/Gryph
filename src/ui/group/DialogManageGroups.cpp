@@ -1,9 +1,9 @@
-#include "include/ui/group/dialog_manage_groups.h"
+#include "include/ui/group/DialogManageGroups.h"
 
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/global/GuiUtils.hpp"
 #include "include/ui/group/GroupItem.h"
-#include "include/ui/group/dialog_edit_group.h"
+#include "include/ui/group/DialogEditGroup.h"
 
 #include <QInputDialog>
 #include <QListWidgetItem>

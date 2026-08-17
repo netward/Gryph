@@ -1,8 +1,8 @@
 #include <QThread>
 #include <core/server/gen/libcore.pb.h>
 #include <include/api/RPC.h>
-#include "include/ui/mainwindowapi.h"
-#include <include/stats/connections/connectionLister.hpp>
+#include "include/ui/MainWindowAPI.h"
+#include <include/stats/connections/ConnectionLister.hpp>
 
 
 

@@ -5,7 +5,7 @@
 #include <QMenu>
 #include <QTableWidgetItem>
 
-#include "ui_dialog_manage_groups.h"
+#include "ui_DialogManageGroups.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {

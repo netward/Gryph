@@ -2,7 +2,7 @@
 
 #include <QDialog>
 #include <QHash>
-#include "ui_dialog_edit_group.h"
+#include "ui_DialogEditGroup.h"
 #include "include/database/entities/Group.h"
 
 class QComboBox;
