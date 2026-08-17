@@ -2084,6 +2084,300 @@ bool MainWindow::set_system_dns(bool set, bool save_set) {
     return true;
 }
 
+void MainWindow::resolveRunningProfileCountryAsync(
+    const std::shared_ptr<Configs::Profile>& profile,
+    const quint64 sessionGeneration)
+{
+    if (!profile)
+    {
+        return;
+    }
+
+
+    // ---------------------------------------------------------
+    // IMPORTANT
+    //
+    // HttpGet() is blocking.
+    //
+    // Therefore absolutely no network operation is performed
+    // on the UI thread.
+    // ---------------------------------------------------------
+
+    runOnNewThread(
+        [
+            this,
+            profile,
+            sessionGeneration
+        ]()
+        {
+            // -------------------------------------------------
+            // Blocking HTTP request.
+            //
+            // We are on a worker thread here.
+            // -------------------------------------------------
+
+            const auto response =
+                NetworkRequestHelper::HttpGet(
+                    "http://ip-api.com/json/",
+                    false,
+                    true
+                );
+
+
+            // -------------------------------------------------
+            // Check session BEFORE doing anything with result.
+            //
+            // The profile could have been:
+            //
+            //   stopped;
+            //   replaced;
+            //   restarted;
+            //
+            // while HttpGet() was waiting.
+            // -------------------------------------------------
+
+            const quint64 currentGeneration =
+                runningSessionGeneration_.load(
+                    std::memory_order_acquire
+                );
+
+
+            if (currentGeneration !=
+                sessionGeneration)
+            {
+                return;
+            }
+
+
+            const auto currentProfile =
+                runningProfileSnapshot();
+
+
+            if (currentProfile != profile)
+            {
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // HTTP error
+            // -------------------------------------------------
+
+            if (!response.error.isEmpty())
+            {
+                MW_show_log(
+                    "Failed to get profile country info: "
+                    +
+                    response.error
+                );
+
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Parse JSON
+            // -------------------------------------------------
+
+            QJsonParseError parseError;
+
+
+            const QJsonDocument document =
+                QJsonDocument::fromJson(
+                    response.data,
+                    &parseError
+                );
+
+
+            if (parseError.error !=
+                QJsonParseError::NoError)
+            {
+                MW_show_log(
+                    "Failed to parse profile country info: "
+                    +
+                    parseError.errorString()
+                );
+
+                return;
+            }
+
+
+            if (!document.isObject())
+            {
+                MW_show_log(
+                    "Failed to parse profile country info: "
+                    "root JSON value is not an object."
+                );
+
+                return;
+            }
+
+
+            const QJsonObject object =
+                document.object();
+
+
+            // -------------------------------------------------
+            // Extract location
+            // -------------------------------------------------
+
+            const QString city =
+                object.value(
+                    "city"
+                )
+                .toString();
+
+
+            const QString countryName =
+                object.value(
+                    "country"
+                )
+                .toString();
+
+
+            const QString countryCode =
+                object.value(
+                    "countryCode"
+                )
+                .toString();
+
+
+            // -------------------------------------------------
+            // Build display string
+            //
+            // Example:
+            //
+            // 🇳🇱 Netherlands, Amsterdam
+            // -------------------------------------------------
+
+            QStringList locationParts;
+
+
+            if (!countryName.isEmpty())
+            {
+                QString countryText =
+                    countryName;
+
+
+                if (!countryCode.isEmpty())
+                {
+                    const QString flag =
+                        CountryCodeToFlag(
+                            countryCode
+                        );
+
+
+                    if (!flag.isEmpty())
+                    {
+                        countryText.prepend(
+                            flag
+                            +
+                            " "
+                        );
+                    }
+                }
+
+
+                locationParts.append(
+                    countryText
+                );
+            }
+
+
+            if (!city.isEmpty())
+            {
+                locationParts.append(
+                    city
+                );
+            }
+
+
+            const QString countryInfo =
+                locationParts.join(
+                    ", "
+                );
+
+
+            if (countryInfo.isEmpty())
+            {
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Check session AGAIN.
+            //
+            // Although JSON parsing is fast, keeping this check
+            // here makes ownership of the async result explicit.
+            // -------------------------------------------------
+
+            if (runningSessionGeneration_.load(
+                std::memory_order_acquire)
+                !=
+                sessionGeneration)
+            {
+                return;
+            }
+
+
+            if (runningProfileSnapshot() !=
+                profile)
+            {
+                return;
+            }
+
+
+            // -------------------------------------------------
+            // Thread-safe runtime Profile state
+            // -------------------------------------------------
+
+            profile->SetRunningCountryInfo(
+                countryInfo
+            );
+
+
+            // -------------------------------------------------
+            // UI update
+            //
+            // Only UI work is posted to the UI thread.
+            // -------------------------------------------------
+
+            runOnUiThread(
+                [
+                    this,
+                    profile,
+                    sessionGeneration
+                ]()
+                {
+                    // -----------------------------------------
+                    // The queued UI callback may execute later.
+                    //
+                    // Check session one final time.
+                    // -----------------------------------------
+
+                    if (runningSessionGeneration_.load(
+                        std::memory_order_acquire)
+                        !=
+                        sessionGeneration)
+                    {
+                        return;
+                    }
+
+
+                    if (runningProfileSnapshot() !=
+                        profile)
+                    {
+                        return;
+                    }
+
+
+                    refresh_status();
+                }
+            );
+        }
+    );
+}
+
 void MainWindow::profile_start(int _id) {
     if (Configs::dataManager->settingsRepo->prepare_exit) return;
 #ifdef Q_OS_LINUX
@@ -2132,303 +2426,395 @@ void MainWindow::profile_start(int _id) {
         return;
     }
 
-    auto profile_start_stage2 = [=, this] {
-        libcore::LoadConfigReq req;
-        req.core_config = QJsonObject2QString(result->coreConfig, true).toStdString();
-        req.tun_ipv4_cidr = result->tunIPv4CIDR.toStdString();
-        req.disable_stats = Configs::dataManager->settingsRepo->disable_traffic_stats;
-        req.xray_config = QJsonObject2QString(result->xrayConfig, true).toStdString();
-        req.need_xray = !result->xrayConfig.isEmpty();
-        if (!result->extraCoreData->path.isEmpty())
+    auto profile_start_stage2 =
+        [
+            this,
+            ent,
+            result
+        ]() -> bool
         {
-            req.need_extra_process = true;
-            req.extra_process_path = result->extraCoreData->path.toStdString();
-            req.extra_process_args = result->extraCoreData->args.toStdString();
-            req.extra_process_conf = result->extraCoreData->config.toStdString();
-            req.extra_no_out = result->extraCoreData->noLog;
-        }
-        //
-        bool rpcOK;
-        QString error = defaultClient->Start(&rpcOK, req);
-        Stats::trafficLooper
-            ->SetChainGroups(
-                result->chainGroups
-            );
-
-
-        Stats::trafficLooper
-            ->loop_enabled.store(
-                true,
-                std::memory_order_release
-            );
-
-
-        Stats::connection_lister
-            ->suspend =
-            false;
-
-
-        // -----------------------------------------------------
-        // Persist ID
-        // -----------------------------------------------------
-
-        Configs::dataManager
-            ->settingsRepo
-            ->UpdateStartedId(
-                ent->Id()
-            );
-
-
-        // -----------------------------------------------------
-        // New runtime session
-        // -----------------------------------------------------
-
-        ent->ClearRunningCountryInfo();
-
-
-        // -----------------------------------------------------
-        // Atomically publish Profile
-        // -----------------------------------------------------
-
-        publishRunningProfile(
-            ent
-        );
-
-
-        // -----------------------------------------------------
-        // System proxy
-        // -----------------------------------------------------
-
-        if (Configs::dataManager
-            ->settingsRepo
-            ->spmode_system_proxy)
-        {
-            set_system_proxy(
-                true
-            );
-        }
-
-
-        // -----------------------------------------------------
-        // Initial UI
-        // -----------------------------------------------------
-
-        runOnUiThread(
-            [this, ent]
+            if (!ent ||
+                !result)
             {
-                refresh_status();
-
-                refresh_proxy_list(
-                    {
-                        ent->Id()
-                    }
-                );
-            }
-        );
-        if (!rpcOK) {
-            return false;
-        }
-        if (!error.isEmpty()) {
-            if (error.contains("configure tun interface")) {
-                runOnUiThread([=, this] {
-
-                    QMessageBox msg(
-                        QMessageBox::Information,
-                        tr("Tun device misbehaving"),
-                        tr("If you have trouble starting VPN, you can force reset Core process here and then try starting the profile again. The error is %1").arg(error),
-                        QMessageBox::NoButton,
-                        this
-                    );
-                    msg.addButton(tr("Reset"), QMessageBox::ActionRole);
-                    auto cancel = msg.addButton(tr("Cancel"), QMessageBox::ActionRole);
-
-                    msg.setDefaultButton(cancel);
-                    msg.setEscapeButton(cancel);
-
-                    int r = msg.exec() - 2;
-                    if (r == 0) {
-                        StopVPNProcess();
-                    }
-                    });
                 return false;
             }
-            runOnUiThread([=] { MessageBoxWarning("LoadConfig return error", error); });
-            return false;
-        }
-        //
-        Stats::trafficLooper->SetChainGroups(
-            result->chainGroups
-        );
-        Stats::trafficLooper->loop_enabled.store(
-            true,
-            std::memory_order_release
-        );
-        Stats::connection_lister->suspend = false;
-        Configs::dataManager
-            ->settingsRepo
-            ->UpdateStartedId(
-                ent->Id()
-            );
-        // Runtime information belongs to one connection session.
-        ent->ClearRunningCountryInfo();
-        // Atomically publish the active profile.
-        publishRunningProfile(
-            ent
-        );
-        if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
 
-        // -----------------------------------------------------
-        // Initial UI update
-        // -----------------------------------------------------
-        runOnUiThread(
-            [this, ent]
+
+            // =====================================================
+            // Build Core request
+            // =====================================================
+
+            libcore::LoadConfigReq req;
+
+
+            req.core_config =
+                QJsonObject2QString(
+                    result->coreConfig,
+                    true
+                )
+                .toStdString();
+
+
+            req.tun_ipv4_cidr =
+                result
+                ->tunIPv4CIDR
+                .toStdString();
+
+
+            req.disable_stats =
+                Configs::dataManager
+                ->settingsRepo
+                ->disable_traffic_stats;
+
+
+            req.xray_config =
+                QJsonObject2QString(
+                    result->xrayConfig,
+                    true
+                )
+                .toStdString();
+
+
+            req.need_xray =
+                !result
+                ->xrayConfig
+                .isEmpty();
+
+
+            // =====================================================
+            // Extra Core
+            // =====================================================
+
+            if (result->extraCoreData &&
+                !result
+                ->extraCoreData
+                ->path
+                .isEmpty())
             {
-                refresh_status();
+                req.need_extra_process =
+                    true;
 
-                refresh_proxy_list(
-                    {
-                        ent->Id()
-                    }
-                );
+
+                req.extra_process_path =
+                    result
+                    ->extraCoreData
+                    ->path
+                    .toStdString();
+
+
+                req.extra_process_args =
+                    result
+                    ->extraCoreData
+                    ->args
+                    .toStdString();
+
+
+                req.extra_process_conf =
+                    result
+                    ->extraCoreData
+                    ->config
+                    .toStdString();
+
+
+                req.extra_no_out =
+                    result
+                    ->extraCoreData
+                    ->noLog;
             }
-        );
 
-        // -----------------------------------------------------
-        // Resolve public IP/country outside UI thread
-        // -----------------------------------------------------
-        runOnNewThread(
-            [this, ent]
+
+            // =====================================================
+            // Start Core
+            //
+            // This is blocking RPC, but profile_start_stage2 itself
+            // is executed by profile_start() on a worker thread.
+            // =====================================================
+
+            bool rpcOK =
+                false;
+
+
+            const QString error =
+                defaultClient
+                ->Start(
+                    &rpcOK,
+                    req
+                );
+
+
+            // =====================================================
+            // RPC transport failure
+            //
+            // IMPORTANT:
+            //
+            // Do not publish ANY running state before this check.
+            // =====================================================
+
+            if (!rpcOK)
             {
-                if (!ent)
+                MW_show_log(
+                    "Failed to start profile: "
+                    "RPC request failed."
+                );
+
+                return false;
+            }
+
+
+            // =====================================================
+            // Core returned configuration error
+            // =====================================================
+
+            if (!error.isEmpty())
+            {
+                // -------------------------------------------------
+                // Special TUN error
+                // -------------------------------------------------
+
+                if (error.contains(
+                    "configure tun interface"))
                 {
-                    return;
-                }
-                const auto resp =
-                    NetworkRequestHelper::HttpGet(
-                        "http://ip-api.com/json/",
-                        false,
-                        true
-                    );
-                if (!resp.error.isEmpty())
-                {
-                    MW_show_log(
-                        "Failed to get profile country info: "
-                        + resp.error
+                    runOnUiThread(
+                        [
+                            this,
+                            error
+                        ]()
+                        {
+                            QMessageBox msg(
+                                QMessageBox::Information,
+
+                                tr(
+                                    "Tun device misbehaving"
+                                ),
+
+                                tr(
+                                    "If you have trouble starting VPN, "
+                                    "you can force reset Core process "
+                                    "here and then try starting the "
+                                    "profile again. The error is %1"
+                                )
+                                .arg(
+                                    error
+                                ),
+
+                                QMessageBox::NoButton,
+
+                                this
+                            );
+
+
+                            msg.addButton(
+                                tr("Reset"),
+                                QMessageBox::ActionRole
+                            );
+
+
+                            auto* cancel =
+                                msg.addButton(
+                                    tr("Cancel"),
+                                    QMessageBox::ActionRole
+                                );
+
+
+                            msg.setDefaultButton(
+                                cancel
+                            );
+
+
+                            msg.setEscapeButton(
+                                cancel
+                            );
+
+
+                            const int result =
+                                msg.exec()
+                                -
+                                2;
+
+
+                            if (result == 0)
+                            {
+                                StopVPNProcess();
+                            }
+                        }
                     );
 
-                    return;
-                }
-                QJsonParseError parseError;
-                const auto doc =
-                    QJsonDocument::fromJson(
-                        resp.data,
-                        &parseError
-                    );
-                if (parseError.error !=
-                    QJsonParseError::NoError)
-                {
-                    MW_show_log(
-                        "Failed to parse profile "
-                        "country info: "
-                        + parseError.errorString()
-                    );
 
-                    return;
+                    return false;
                 }
-                if (!doc.isObject())
-                {
-                    return;
-                }
-                const QJsonObject obj =
-                    doc.object();
-                const QString city =
-                    obj.value(
-                        "city"
-                    )
-                    .toString();
-                const QString countryName =
-                    obj.value(
-                        "country"
-                    )
-                    .toString();
-                const QString countryCode =
-                    obj.value(
-                        "countryCode"
-                    )
-                    .toString();
+
+
                 // -------------------------------------------------
-                // Build display string
+                // Generic Core configuration error
                 // -------------------------------------------------
-                QStringList locationParts;
-                if (!countryName.isEmpty())
-                {
-                    QString countryText =
-                        countryName;
-                    if (!countryCode.isEmpty())
+
+                runOnUiThread(
+                    [
+                        error
+                    ]()
                     {
-                        countryText.prepend(
-                            CountryCodeToFlag(
-                                countryCode
-                            )
-                            + " "
+                        MessageBoxWarning(
+                            "LoadConfig return error",
+                            error
                         );
                     }
-                    locationParts.append(
-                        countryText
-                    );
-                }
-                if (!city.isEmpty())
-                {
-                    locationParts.append(
-                        city
-                    );
-                }
-                const QString countryInfo =
-                    locationParts.join(
-                        ", "
-                    );
-                if (countryInfo.isEmpty())
-                {
-                    return;
-                }
+                            );
 
-                // -------------------------------------------------
-                // Thread-safe Profile runtime state update
-                // -------------------------------------------------
-                ent->SetRunningCountryInfo(
-                    countryInfo
+
+                return false;
+            }
+
+
+            // =====================================================
+            // From this point Core profile is really running.
+            //
+            // Only NOW publish application runtime state.
+            // =====================================================
+
+
+            // -----------------------------------------------------
+            // Traffic groups
+            // -----------------------------------------------------
+
+            Stats::trafficLooper
+                ->SetChainGroups(
+                    result->chainGroups
                 );
 
-                const auto current =
-                    runningProfileSnapshot();
+
+            Stats::trafficLooper
+                ->loop_enabled
+                .store(
+                    true,
+                    std::memory_order_release
+                );
 
 
-                if (current != ent)
-                {
-                    // Profile was stopped/replaced while HTTP
-                    // request was running.
-                    return;
-                }
-                runOnUiThread(
-                    [this, ent]
-                    {
-                        const auto current =
-                            runningProfileSnapshot();
+            // -----------------------------------------------------
+            // Connection lister
+            // -----------------------------------------------------
+
+            Stats::connection_lister
+                ->suspend =
+                false;
 
 
-                        if (current != ent)
-                        {
-                            return;
-                        }
+            // -----------------------------------------------------
+            // Persist running ID
+            // -----------------------------------------------------
+
+            Configs::dataManager
+                ->settingsRepo
+                ->UpdateStartedId(
+                    ent->Id()
+                );
 
 
-                        refresh_status();
-                    }
+            // =====================================================
+            // Create new runtime session
+            //
+            // Increment BEFORE asynchronous operations are launched.
+            // =====================================================
+
+            const quint64 sessionGeneration =
+                runningSessionGeneration_
+                .fetch_add(
+                    1,
+                    std::memory_order_acq_rel
+                )
+                +
+                1;
+
+
+            // -----------------------------------------------------
+            // Runtime country data belongs to this connection
+            // session, not permanently to Profile configuration.
+            // -----------------------------------------------------
+
+            ent->ClearRunningCountryInfo();
+
+
+            // -----------------------------------------------------
+            // Atomically publish running Profile
+            // -----------------------------------------------------
+
+            publishRunningProfile(
+                ent
+            );
+
+
+            // -----------------------------------------------------
+            // System proxy
+            // -----------------------------------------------------
+
+            if (Configs::dataManager
+                ->settingsRepo
+                ->spmode_system_proxy)
+            {
+                set_system_proxy(
+                    true
                 );
             }
-        );
 
-        return true;
+
+            // =====================================================
+            // Initial UI update
+            // =====================================================
+
+            runOnUiThread(
+                [
+                    this,
+                    ent,
+                    sessionGeneration
+                ]()
+                {
+                    // Do not refresh status for a session which
+                    // was already replaced before this queued
+                    // callback reached the UI thread.
+
+                    if (runningSessionGeneration_.load(
+                        std::memory_order_acquire)
+                        !=
+                        sessionGeneration)
+                    {
+                        return;
+                    }
+
+
+                    if (runningProfileSnapshot() !=
+                        ent)
+                    {
+                        return;
+                    }
+
+
+                    refresh_status();
+
+
+                    refresh_proxy_list(
+                        {
+                            ent->Id()
+                        }
+                    );
+                }
+            );
+
+
+            // =====================================================
+            // Public IP/country lookup
+            //
+            // Fire-and-forget.
+            //
+            // profile_start_stage2 DOES NOT wait for HTTP.
+            // =====================================================
+
+            resolveRunningProfileCountryAsync(
+                ent,
+                sessionGeneration
+            );
+
+
+            return true;
         };
 
     if (!mu_starting.tryLock()) {
@@ -2756,7 +3142,24 @@ void MainWindow::profile_stop(
                     clearRunningProfileIf(
                         stoppingProfile
                     );
-                if (!cleared)
+
+
+                if (cleared)
+                {
+                    // ---------------------------------------------------------
+                    // Invalidate all asynchronous operations which belonged
+                    // to the stopped runtime session.
+                    //
+                    // For example an outstanding ip-api HTTP request.
+                    // ---------------------------------------------------------
+
+                    runningSessionGeneration_
+                        .fetch_add(
+                            1,
+                            std::memory_order_acq_rel
+                        );
+                }
+                else
                 {
                     MW_show_log(
                         "Running profile changed while "

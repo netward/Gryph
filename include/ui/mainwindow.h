@@ -184,6 +184,23 @@ private:
         std::shared_ptr<Configs::Profile>
     > runningProfile_{ nullptr };
 
+    // -----------------------------------------------------
+    // Running profile session generation
+    //
+    // Every successful start receives a new generation.
+    //
+    // This allows asynchronous operations belonging to an
+    // old connection session to detect that their result
+    // is stale.
+    //
+    // This is especially important when the SAME Profile
+    // object is stopped and started again while an older
+    // HTTP request is still running.
+    // -----------------------------------------------------
+
+    std::atomic<quint64>
+        runningSessionGeneration_{ 0 };
+
     [[nodiscard]]
     std::shared_ptr<Configs::Profile>
         runningProfileSnapshot() const noexcept;
@@ -198,6 +215,13 @@ private:
         const std::shared_ptr<Configs::Profile>& expected
     ) noexcept;
 
+    // -----------------------------------------------------
+    // Asynchronous public IP/country lookup
+    // -----------------------------------------------------
+    void resolveRunningProfileCountryAsync(
+        const std::shared_ptr<Configs::Profile>& profile,
+        quint64 sessionGeneration
+    );
 
     ProfilesTableModel* profilesTableModel = nullptr;
     QSystemTrayIcon *tray;

@@ -1,18 +1,16 @@
 #include "include/stats/traffic/TrafficLooper.hpp"
 
+#include "include/database/ProfilesRepo.h"
 #include "include/api/RPC.h"
-#include "include/ui/mainwindowapi.h"
-
-#include <QThread>
-#include <QElapsedTimer>
-#include <QSet>
+#include "include/ui/MainWindowAPI.h"
 
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "include/database/ProfilesRepo.h"
-
+#include <QThread>
+#include <QElapsedTimer>
+#include <QSet>
 
 namespace Stats {
 

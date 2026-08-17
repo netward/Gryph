@@ -1,5 +1,8 @@
 #pragma once
 
+#include "include/database/entities/Profile.h"
+#include "include/configs/generate.h"
+
 #include <atomic>
 #include <map>
 #include <memory>
@@ -9,10 +12,6 @@
 #include <QString>
 #include <QList>
 #include <QMutex>
-
-#include "include/database/entities/Profile.h"
-#include "include/configs/generate.h"
-
 
 namespace Stats
 {
