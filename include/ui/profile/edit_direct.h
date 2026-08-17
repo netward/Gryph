@@ -2,7 +2,6 @@
 
 #include <QWidget>
 #include "profile_editor.h"
-#include "ui_edit_direct.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {

@@ -56,10 +56,10 @@ list(APPEND NKR_EXTERNAL_TARGETS qhotkey)
 set(PROJECT_SOURCES
         ${PLATFORM_SOURCES}
         # Main window public API
-        include/ui/mainwindowapi.h
-        src/ui/mainwindowapi.cpp
+        include/ui/MainWindowAPI.h
+        src/ui/MainWindowAPI.cpp
 
-        src/main.cpp
+        src/Main.cpp
         src/global/Configs.cpp
         src/global/Utils.cpp
         src/global/HTTPRequestHelper.cpp
@@ -112,10 +112,10 @@ set(PROJECT_SOURCES
         src/ui/setting/ThemeManager.cpp
         src/ui/setting/Icon.cpp
 
-        src/ui/mainwindow_rpc.cpp
-        src/ui/mainwindow.cpp
-        include/ui/mainwindow.h
-        include/ui/mainwindow.ui
+        src/ui/MainWindowRPC.cpp
+        src/ui/MainWindow.cpp
+        include/ui/MainWindow.h
+        include/ui/MainWindow.ui
         include/ui/utils/DataViewHtmlGenerator.h
         src/ui/utils/DataViewHtmlGenerator.cpp
         include/ui/utils/ProfilesTableModel.h

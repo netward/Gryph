@@ -1,5 +1,5 @@
-#include "include/ui/mainwindowapi.h"
-#include "include/ui/mainwindow.h"
+#include "include/ui/MainWindowAPI.h"
+#include "include/ui/MainWindow.h"
 
 #include <QPointer>
 #include <utility>

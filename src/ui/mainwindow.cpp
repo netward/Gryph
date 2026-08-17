@@ -1,5 +1,5 @@
-#include "include/ui/mainwindow.h"
-#include "ui_mainwindow.h"
+#include "include/ui/MainWindow.h"
+#include "ui_MainWindow.h"
 
 #include <memory>
 #include <atomic>
