@@ -15,6 +15,7 @@
 #endif
 
 #include <atomic>
+#include <memory>
 
 #include <QKeyEvent>
 #include <QSystemTrayIcon>
@@ -163,7 +164,42 @@ private slots:
 
 private:
     Ui::MainWindow *ui;
-    ProfilesTableModel *profilesTableModel = nullptr;
+    
+    // -----------------------------------------------------
+    // Running profile
+    // -----------------------------------------------------
+
+    // -----------------------------------------------------
+    // Currently running profile
+    //
+    // Access ONLY through:
+    //   runningProfileSnapshot()
+    //   publishRunningProfile()
+    //   clearRunningProfileIf()
+    //
+    // This object is read from UI and worker threads.
+    // -----------------------------------------------------
+
+    std::atomic<
+        std::shared_ptr<Configs::Profile>
+    > runningProfile_{ nullptr };
+
+    [[nodiscard]]
+    std::shared_ptr<Configs::Profile>
+        runningProfileSnapshot() const noexcept;
+
+
+    void publishRunningProfile(
+        const std::shared_ptr<Configs::Profile>& profile
+    ) noexcept;
+
+
+    bool clearRunningProfileIf(
+        const std::shared_ptr<Configs::Profile>& expected
+    ) noexcept;
+
+
+    ProfilesTableModel* profilesTableModel = nullptr;
     QSystemTrayIcon *tray;
     QMenu *trayServerMenu = nullptr;
     int trayServerPage = 0;
@@ -193,7 +229,7 @@ private:
     //
     QString title_error;
     int icon_status = -1;
-    std::shared_ptr<Configs::Profile> running;
+
     QString traffic_update_cache;
     qint64 last_test_time = 0;
     //

@@ -134,6 +134,50 @@ static bool themeUsesDarkLog(const QString& theme) {
     return isDarkMode(); // bi-mode themes, follow system preference
 }
 
+std::shared_ptr<Configs::Profile>
+MainWindow::runningProfileSnapshot() const noexcept
+{
+    return runningProfile_.load(
+        std::memory_order_acquire
+    );
+}
+
+
+void MainWindow::publishRunningProfile(
+    const std::shared_ptr<Configs::Profile>& profile
+) noexcept
+{
+    runningProfile_.store(
+        profile,
+        std::memory_order_release
+    );
+}
+
+
+bool MainWindow::clearRunningProfileIf(
+    const std::shared_ptr<Configs::Profile>& expected
+) noexcept
+{
+    if (!expected)
+    {
+        return false;
+    }
+
+
+    auto current =
+        expected;
+
+
+    return runningProfile_
+        .compare_exchange_strong(
+            current,
+            nullptr,
+
+            std::memory_order_acq_rel,
+            std::memory_order_acquire
+        );
+}
+
 // Конструктор полностью собирает рабочее состояние главного окна.
 // Последовательность инициализации:
 //   1. Регистрирует глобальные UI-callback и deeplink-обработчик.
@@ -1413,104 +1457,338 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     constexpr int PAGE_CAPACITY = 15;
     trayServerMenu = new QMenu(tr("Select Server"));
     trayMenu->addMenu(trayServerMenu);
-    connect(trayServerMenu, &QMenu::aboutToShow, this, [=, this]() {
-        trayServerMenu->clear();
-        // Остановка текущего профиля, если он запущен.
-        if (running) {
-            const auto runningConfig =
-                running->ConfigSnapshot();
+    connect(
+        trayServerMenu,
+        &QMenu::aboutToShow,
+        this,
+        [this]()
+        {
+            trayServerMenu->clear();
 
-            auto* stopAction =
-                trayServerMenu->addAction(
-                    tr("Stop: %1").arg(
-                        runningConfig.name
-                    )
+
+            // =====================================================
+            // Take one stable snapshot of the currently
+            // running Profile for this menu rebuild.
+            // =====================================================
+
+            const auto runningSnapshot =
+                runningProfileSnapshot();
+
+
+            const int runningProfileId =
+                runningSnapshot
+                ? runningSnapshot->Id()
+                : -1;
+
+
+            // =====================================================
+            // Stop currently running profile
+            // =====================================================
+
+            if (runningSnapshot)
+            {
+                const auto runningConfig =
+                    runningSnapshot->ConfigSnapshot();
+
+
+                auto* stopAction =
+                    trayServerMenu->addAction(
+                        tr("Stop: %1")
+                        .arg(
+                            runningConfig.name
+                        )
+                    );
+
+
+                connect(
+                    stopAction,
+                    &QAction::triggered,
+                    this,
+                    [this]()
+                    {
+                        profile_stop(
+                            false,
+                            false,
+                            true
+                        );
+                    }
                 );
 
-            connect(
-                stopAction,
-                &QAction::triggered,
-                this,
-                [=, this]()
-                {
-                    profile_stop(
-                        false,
-                        false,
-                        true
-                    );
-                }
-            );
 
-            trayServerMenu->addSeparator();
-        }
-        // Формирование плоского списка профилей. 
-        // Первой становится группа активного профиля либо текущая выбранная группа.
-        int startGroupId = Configs::dataManager->settingsRepo->current_group;
-        if (running) startGroupId = running->GroupId();
-        auto groupIds = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
-        // Циклическая перестановка групп, чтобы startGroupId находилась в начале списка.
-        int startIdx = groupIds.indexOf(startGroupId);
-        if (startIdx > 0) {
-            QList<int> reordered = groupIds.mid(startIdx) + groupIds.mid(0, startIdx);
-            groupIds = reordered;
-        }
-        QList<int> allProfileIDs;
-        for (const int gid :
-        groupIds)
-        {
-            auto group =
+                trayServerMenu->addSeparator();
+            }
+
+
+            // =====================================================
+            // Determine the first group in the tray list
+            //
+            // Prefer the group of the running profile.
+            // Otherwise use currently selected group.
+            // =====================================================
+
+            int startGroupId =
+                Configs::dataManager
+                ->settingsRepo
+                ->current_group;
+
+
+            if (runningSnapshot)
+            {
+                startGroupId =
+                    runningSnapshot->GroupId();
+            }
+
+
+            auto groupIds =
                 Configs::dataManager
                 ->groupsRepo
-                ->GetGroup(
-                    gid
-                );
-            if (!group)
-            {
-                MW_show_log(
-                    QString(
-                        "Tray menu: group %1 "
-                        "does not exist."
-                    )
-                    .arg(gid)
+                ->GetGroupsTabOrder();
+
+
+            // -----------------------------------------------------
+            // Rotate groups so startGroupId is first.
+            // -----------------------------------------------------
+
+            const int startIdx =
+                groupIds.indexOf(
+                    startGroupId
                 );
 
-                continue;
+
+            if (startIdx > 0)
+            {
+                QList<int> reordered =
+                    groupIds.mid(
+                        startIdx
+                    )
+                    +
+                    groupIds.mid(
+                        0,
+                        startIdx
+                    );
+
+
+                groupIds =
+                    std::move(
+                        reordered
+                    );
             }
-            allProfileIDs.append(
-                group->Profiles()
-            );
+
+
+            // =====================================================
+            // Build flat Profile ID list
+            // =====================================================
+
+            QList<int> allProfileIDs;
+
+
+            for (const int gid :
+            groupIds)
+            {
+                const auto group =
+                    Configs::dataManager
+                    ->groupsRepo
+                    ->GetGroup(
+                        gid
+                    );
+
+
+                if (!group)
+                {
+                    MW_show_log(
+                        QString(
+                            "Tray menu: group %1 "
+                            "does not exist."
+                        )
+                        .arg(
+                            gid
+                        )
+                    );
+
+
+                    continue;
+                }
+
+
+                allProfileIDs.append(
+                    group->Profiles()
+                );
+            }
+
+
+            // =====================================================
+            // Pagination
+            // =====================================================
+
+            const int totalProfiles =
+                allProfileIDs.size();
+
+
+            const int maxPage =
+                qMax(
+                    0,
+                    (totalProfiles - 1)
+                    / PAGE_CAPACITY
+                );
+
+
+            trayServerPage =
+                qBound(
+                    0,
+                    trayServerPage,
+                    maxPage
+                );
+
+
+            const int offset =
+                trayServerPage
+                *
+                PAGE_CAPACITY;
+
+
+            const int end =
+                qMin(
+                    offset
+                    +
+                    PAGE_CAPACITY,
+
+                    totalProfiles
+                );
+
+
+            // =====================================================
+            // Previous page
+            // =====================================================
+
+            if (trayServerPage > 0)
+            {
+                auto* upAction =
+                    trayServerMenu->addAction(
+                        QStringLiteral(
+                            "\u2191"
+                        )
+                    );
+
+
+                connect(
+                    upAction,
+                    &QAction::triggered,
+                    this,
+                    [this]()
+                    {
+                        --trayServerPage;
+
+
+                        trayServerMenu->popup(
+                            trayServerMenu->pos()
+                        );
+                    }
+                );
+            }
+
+
+            // =====================================================
+            // Load only ID + name for the current page
+            // =====================================================
+
+            const int pageSize =
+                end - offset;
+
+
+            QList<int> pageProfileIDs;
+
+
+            if (pageSize > 0)
+            {
+                pageProfileIDs =
+                    allProfileIDs.sliced(
+                        offset,
+                        pageSize
+                    );
+            }
+
+
+            const auto neededProfilesIDNames =
+                Configs::dataManager
+                ->profilesRepo
+                ->GetProfileIDNameMappedBatch(
+                    pageProfileIDs
+                );
+
+
+            // =====================================================
+            // Profile actions
+            // =====================================================
+
+            for (const auto& [id, name] :
+                neededProfilesIDNames)
+            {
+                auto* action =
+                    trayServerMenu
+                    ->addAction(
+                        name
+                    );
+
+
+                action->setCheckable(
+                    true
+                );
+
+
+                // Compare against the stable snapshot taken
+                // at the beginning of this menu rebuild.
+                action->setChecked(
+                    runningProfileId == id
+                );
+
+
+                connect(
+                    action,
+                    &QAction::triggered,
+                    this,
+                    [this, id]()
+                    {
+                        profile_start(
+                            id
+                        );
+                    }
+                );
+            }
+
+
+            // =====================================================
+            // Next page
+            // =====================================================
+
+            if (trayServerPage < maxPage)
+            {
+                auto* downAction =
+                    trayServerMenu->addAction(
+                        QStringLiteral(
+                            "\u2193"
+                        )
+                    );
+
+
+                connect(
+                    downAction,
+                    &QAction::triggered,
+                    this,
+                    [this]()
+                    {
+                        ++trayServerPage;
+
+
+                        trayServerMenu->popup(
+                            trayServerMenu->pos()
+                        );
+                    }
+                );
+            }
         }
-        int totalProfiles = allProfileIDs.size();
-        // Ограничение номера страницы допустимым диапазоном после добавления или удаления профилей.
-        int maxPage = qMax(0, (totalProfiles - 1) / PAGE_CAPACITY);
-        trayServerPage = qBound(0, trayServerPage, maxPage);
-        int offset = trayServerPage * PAGE_CAPACITY;
-        int end = qMin(offset + PAGE_CAPACITY, totalProfiles);
-        // На страницах после первой добавляем переход назад.
-        if (trayServerPage > 0) {
-            auto* upAction = trayServerMenu->addAction(QStringLiteral("\u2191"));
-            connect(upAction, &QAction::triggered, this, [=, this]() {
-                trayServerPage--;
-                trayServerMenu->popup(trayServerMenu->pos());
-                });
-        }
-        // Загрузка из репозитория только ID и имен текущей страницы без создания полных объектов всех профилей.
-        auto neededProfilesIDNames = Configs::dataManager->profilesRepo->GetProfileIDNameMappedBatch(allProfileIDs.sliced(offset, end - offset));
-        for (const auto& [id, name] : neededProfilesIDNames) {
-            auto* action = trayServerMenu->addAction(name);
-            action->setCheckable(true);
-            action->setChecked(running && running->Id() == id);
-            connect(action, &QAction::triggered, this, [=, this]() { profile_start(id); });
-        }
-        // Если остались профили, добавляем переход на следующую страницу.
-        if (trayServerPage < maxPage) {
-            auto* downAction = trayServerMenu->addAction(QStringLiteral("\u2193"));
-            connect(downAction, &QAction::triggered, this, [=, this]() {
-                trayServerPage++;
-                trayServerMenu->popup(trayServerMenu->pos());
-                });
-        }
-        });
+    );
+
+
     trayMenu->addSeparator();
 
     // macOS некорректно переиспользует один QMenu с разными родителями, поэтому для трея создаётся отдельное меню режимов.
@@ -1614,43 +1892,69 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         this,
         [this]()
         {
-            // -------------------------------------------------
+            // =====================================================
+            // Stable snapshot of currently running Profile
+            // =====================================================
+
+            const auto runningSnapshot =
+                runningProfileSnapshot();
+
+
+            const bool hasRunningProfile =
+                static_cast<bool>(
+                    runningSnapshot
+                    );
+
+
+            // =====================================================
             // Current profile speed test
-            // -------------------------------------------------
+            // =====================================================
 
             ui->actionSpeedtest_Current
                 ->setEnabled(
-                    static_cast<bool>(running)
+                    hasRunningProfile
                 );
 
 
-            // -------------------------------------------------
+            // =====================================================
             // Selected profiles actions
-            // -------------------------------------------------
+            // =====================================================
 
             const auto selected =
                 get_now_selected_list();
 
+
             const bool hasSelection =
-                !selected.empty();
+                !selected.isEmpty();
 
 
             ui->actionSpeedtest_Selected
-                ->setEnabled(hasSelection);
+                ->setEnabled(
+                    hasSelection
+                );
+
 
             ui->actionUrl_Test_Selected
-                ->setEnabled(hasSelection);
+                ->setEnabled(
+                    hasSelection
+                );
+
 
             ui->menu_resolve_selected
-                ->setEnabled(hasSelection);
+                ->setEnabled(
+                    hasSelection
+                );
+
 
             ui->actionResolve_Selected_Out_IP
-                ->setEnabled(hasSelection);
+                ->setEnabled(
+                    hasSelection
+                );
 
 
-            // -------------------------------------------------
+            // =====================================================
             // Stop testing action
-            // -------------------------------------------------
+            // =====================================================
 
             const bool isTesting =
                 speedtestRunning.load(
@@ -1658,24 +1962,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                 );
 
 
-            if (isTesting) {
+            if (isTesting)
+            {
+                // Add only if it is not already
+                // present in the menu.
+                const auto actions =
+                    ui->menu_server
+                    ->actions();
 
-                // Add only if it is not already in the menu.
-                if (!ui->menu_server
-                    ->actions()
-                    .contains(
-                        ui->menu_stop_testing
-                    ))
+
+                if (!actions.contains(
+                    ui->menu_stop_testing))
                 {
                     ui->menu_server
                         ->addAction(
                             ui->menu_stop_testing
                         );
                 }
-
             }
-            else {
-
+            else
+            {
                 ui->menu_server
                     ->removeAction(
                         ui->menu_stop_testing
@@ -1893,13 +2199,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             );
         }
     );
-    connect(ui->actionSpeedtest_Current, &QAction::triggered, this, [=, this]()
+
+    connect(
+        ui->actionSpeedtest_Current,
+        &QAction::triggered,
+        this,
+        [this]()
         {
-            if (running != nullptr)
+            const auto runningSnapshot = runningProfileSnapshot();
+            if (!runningSnapshot)
             {
-                speedtest_current_group({}, true);
+                return;
             }
-        });
+            speedtest_current_group(
+                {},
+                true
+            );
+        }
+    );
+
     connect(ui->actionSpeedtest_Selected, &QAction::triggered, this, [=, this]()
         {
             speedtest_current_group(get_now_selected_list());
@@ -2786,26 +3104,97 @@ void MainWindow::set_system_proxy(bool enable) {
     }
 }
 
-void MainWindow::set_spmode_system_proxy(bool enable, bool save) {
-    if (enable && Configs::dataManager->settingsRepo->disable_mixed_inbound) {
-        runOnUiThread([=] {
-            MessageBoxWarning("Invalid Operation", "Cannot set system proxy when mixed inbound is disabled.");
-            });
-        ui->checkBox_SystemProxy->setChecked(false);
+void MainWindow::set_spmode_system_proxy(
+    bool enable,
+    bool save)
+{
+    // =====================================================
+    // Validate operation
+    // =====================================================
+    if (enable &&
+        Configs::dataManager
+        ->settingsRepo
+        ->disable_mixed_inbound)
+    {
+        runOnUiThread(
+            [this]()
+            {
+                MessageBoxWarning(
+                    "Invalid Operation",
+                    "Cannot set system proxy when "
+                    "mixed inbound is disabled."
+                );
+                ui->checkBox_SystemProxy
+                    ->setChecked(
+                        false
+                    );
+            }
+        );
         return;
     }
-    Configs::dataManager->settingsRepo->spmode_system_proxy = enable;
-    if (running) {
-        set_system_proxy(enable);
-        if (!enable && Configs::dataManager->settingsRepo->reset_proxy_on_disable_sp) {
-            profile_start(running->Id());
+
+    // =====================================================
+    // Save requested state
+    // =====================================================
+    Configs::dataManager
+        ->settingsRepo
+        ->spmode_system_proxy =
+        enable;
+
+    // =====================================================
+    // Take one stable snapshot of the currently
+    // running profile.
+    //
+    // Do not access runningProfile_ directly after this.
+    // =====================================================
+    const auto runningSnapshot =
+        runningProfileSnapshot();
+
+    // =====================================================
+    // Apply system proxy state to currently running profile
+    // =====================================================
+    if (runningSnapshot)
+    {
+        set_system_proxy(
+            enable
+        );
+
+        // -------------------------------------------------
+        // When system proxy is disabled and Gryph is
+        // configured to reset/restart the active profile,
+        // restart exactly the profile captured above.
+        // -------------------------------------------------
+        if (!enable &&
+            Configs::dataManager
+            ->settingsRepo
+            ->reset_proxy_on_disable_sp)
+        {
+            const int runningProfileId =
+                runningSnapshot->Id();
+
+
+            if (runningProfileId >= 0)
+            {
+                profile_start(
+                    runningProfileId
+                );
+            }
         }
     }
 
-    if (save) {
-        Configs::dataManager->settingsRepo->Save();
+    // =====================================================
+    // Persist settings
+    // =====================================================
+    if (save)
+    {
+        Configs::dataManager
+            ->settingsRepo
+            ->Save();
     }
 
+    // =====================================================
+    // Refresh UI
+    // =====================================================
     refresh_status();
 }
 
@@ -3177,175 +3566,465 @@ MainWindow::filterProfilesList(
     return result;
 }
 
-void MainWindow::refresh_status(const QString& traffic_update) {
-    auto refresh_speed_label = [=, this] {
-        if (Configs::dataManager->settingsRepo->disable_traffic_stats) {
-            ui->label_speed->setText("");
-        }
-        else if (traffic_update_cache == "") {
-            ui->label_speed->setText(QObject::tr("Proxy: %1\nDirect: %2").arg("", ""));
-        }
-        else {
-            ui->label_speed->setText(traffic_update_cache);
-        }
+void MainWindow::refresh_status(
+    const QString& traffic_update)
+{
+    // =====================================================
+    // Speed label
+    // =====================================================
+    const auto refresh_speed_label =
+        [this]()
+        {
+            if (Configs::dataManager
+                ->settingsRepo
+                ->disable_traffic_stats)
+            {
+                ui->label_speed
+                    ->setText(
+                        ""
+                    );
+
+                return;
+            }
+            if (traffic_update_cache.isEmpty())
+            {
+                ui->label_speed
+                    ->setText(
+                        QObject::tr(
+                            "Proxy: %1\n"
+                            "Direct: %2"
+                        )
+                        .arg(
+                            "",
+                            ""
+                        )
+                    );
+
+                return;
+            }
+            ui->label_speed
+                ->setText(
+                    traffic_update_cache
+                );
         };
 
-    // From TrafficLooper
-    if (!traffic_update.isEmpty() && !Configs::dataManager->settingsRepo->disable_traffic_stats) {
-        traffic_update_cache = traffic_update;
-        if (traffic_update == "STOP") {
-            traffic_update_cache = "";
+    // =====================================================
+    // TrafficLooper update
+    // =====================================================
+    if (!traffic_update.isEmpty() &&
+        !Configs::dataManager
+        ->settingsRepo
+        ->disable_traffic_stats)
+    {
+        if (traffic_update ==
+            QStringLiteral("STOP"))
+        {
+            traffic_update_cache
+                .clear();
         }
-        else {
+        else
+        {
+            traffic_update_cache =
+                traffic_update;
             refresh_speed_label();
             return;
         }
     }
-
     refresh_speed_label();
 
-    // From UI.
+    // =====================================================
+    // Running Profile snapshot
     //
-    // Take immutable copies once so the status refresh never
-    // reads Profile's private configuration directly.
-    QString group_name;
-    Configs::ProfileConfigSnapshot runningConfig;
-    QString runningCountryInfo;
+    // IMPORTANT:
+    //
+    // Exactly one atomic load is performed for this entire
+    // refresh operation.
+    //
+    // Do not read runningProfile_ again below.
+    // =====================================================
+    const auto runningSnapshot =
+        runningProfileSnapshot();
     const bool hasRunningProfile =
-        static_cast<bool>(running);
-
-    if (hasRunningProfile)
+        static_cast<bool>(
+            runningSnapshot
+            );
+    QString groupName;
+    Configs::ProfileConfigSnapshot
+        runningConfig;
+    QString runningCountryInfo;
+    if (runningSnapshot)
     {
+        // -------------------------------------------------
+        // Take immutable Profile state
+        // -------------------------------------------------
         runningConfig =
-            running->ConfigSnapshot();
-
+            runningSnapshot
+            ->ConfigSnapshot();
         runningCountryInfo =
-            running->RunningCountryInfo();
+            runningSnapshot
+            ->RunningCountryInfo();
 
-        auto group =
+        // -------------------------------------------------
+        // Resolve owning group
+        // -------------------------------------------------
+        const auto group =
             Configs::dataManager
             ->groupsRepo
             ->GetGroup(
                 runningConfig.gid
             );
-
         if (group)
         {
-            group_name =
-                group->Snapshot().name;
+            groupName =
+                group
+                ->Snapshot()
+                .name;
         }
     }
 
-    if (QDateTime::currentSecsSinceEpoch() -
-        last_test_time > 2)
+    // =====================================================
+    // Running-profile label
+    // =====================================================
+    if (
+        QDateTime::currentSecsSinceEpoch()
+        -
+        last_test_time
+                    >
+        2
+        )
     {
         QString runningLabelText;
-
         if (hasRunningProfile)
         {
             runningLabelText =
-                QString("[%1] %2")
+                QString(
+                    "[%1] %2"
+                )
                 .arg(
-                    group_name,
+                    groupName,
                     runningConfig.displayName
                 );
-
             if (!runningCountryInfo.isEmpty())
             {
                 runningLabelText +=
-                    "\n" + runningCountryInfo;
+                    "\n"
+                    +
+                    runningCountryInfo;
             }
         }
         else
         {
             runningLabelText =
-                tr("Not Running");
-        }
-
-        ui->label_running
-            ->setText(runningLabelText);
-    }
-    //
-    auto display_socks = DisplayAddress(Configs::dataManager->settingsRepo->inbound_address, Configs::dataManager->settingsRepo->inbound_socks_port);
-    auto inbound_disabled = Configs::dataManager->settingsRepo->disable_mixed_inbound;
-    auto inbound_txt = QString("Mixed: %1").arg(inbound_disabled ? "Disabled" : display_socks);
-    ui->label_inbound->setText(inbound_txt);
-    //
-    ui->checkBox_VPN->setChecked(Configs::dataManager->settingsRepo->spmode_vpn);
-    ui->checkBox_SystemProxy->setChecked(Configs::dataManager->settingsRepo->spmode_system_proxy);
-    if (select_mode) {
-        ui->label_running->setText(tr("Select") + " *");
-        ui->label_running->setToolTip(tr("Select mode, double-click or press Enter to select a profile, press ESC to exit."));
-    }
-    else {
-        ui->label_running->setToolTip({});
-    }
-
-    auto make_title = [=, this](bool isTray) {
-        QStringList tt;
-        if (!isTray && Configs::IsAdmin()) tt << "[Admin]";
-        if (select_mode) tt << "[" + tr("Select") + "]";
-        if (!title_error.isEmpty()) tt << "[" + title_error + "]";
-        if (Configs::dataManager->settingsRepo->spmode_vpn && !Configs::dataManager->settingsRepo->spmode_system_proxy) tt << "[Tun]";
-        if (!Configs::dataManager->settingsRepo->spmode_vpn && Configs::dataManager->settingsRepo->spmode_system_proxy) tt << "[" + tr("System Proxy") + "]";
-        if (Configs::dataManager->settingsRepo->spmode_vpn && Configs::dataManager->settingsRepo->spmode_system_proxy) tt << "[Tun+" + tr("System Proxy") + "]";
-        tt << software_name;
-        if (!isTray) tt << QString(NKR_VERSION);
-        if (!Configs::dataManager->settingsRepo->active_routing.isEmpty() && Configs::dataManager->settingsRepo->active_routing != "Default") {
-            tt << "[" + Configs::dataManager->settingsRepo->active_routing + "]";
-        }
-        if (hasRunningProfile)
-        {
-            const QString displayTypeAndName =
-                QString("[%1] %2")
-                .arg(
-                    runningConfig.displayType,
-                    runningConfig.displayName
+                tr(
+                    "Not Running"
                 );
-
-            tt <<
-                displayTypeAndName
-                + "@"
-                + group_name;
-
-            if (!runningCountryInfo.isEmpty())
-            {
-                tt << runningCountryInfo;
-            }
         }
-        return tt.join(isTray ? "\n" : " ");
+        ui->label_running
+            ->setText(
+                runningLabelText
+            );
+    }
+
+    // =====================================================
+    // Inbound status
+    // =====================================================
+    const QString displaySocks =
+        DisplayAddress(
+            Configs::dataManager
+            ->settingsRepo
+            ->inbound_address,
+
+            Configs::dataManager
+            ->settingsRepo
+            ->inbound_socks_port
+        );
+    const bool inboundDisabled =
+        Configs::dataManager
+        ->settingsRepo
+        ->disable_mixed_inbound;
+    const QString inboundText =
+        QString(
+            "Mixed: %1"
+        )
+        .arg(
+            inboundDisabled
+            ? QStringLiteral("Disabled")
+            : displaySocks
+        );
+    ui->label_inbound
+        ->setText(
+            inboundText
+        );
+
+    // =====================================================
+    // Mode checkboxes
+    // =====================================================
+    ui->checkBox_VPN
+        ->setChecked(
+            Configs::dataManager
+            ->settingsRepo
+            ->spmode_vpn
+        );
+    ui->checkBox_SystemProxy
+        ->setChecked(
+            Configs::dataManager
+            ->settingsRepo
+            ->spmode_system_proxy
+        );
+
+    // =====================================================
+    // Select mode
+    // =====================================================
+    if (select_mode)
+    {
+        ui->label_running
+            ->setText(
+                tr("Select")
+                +
+                " *"
+            );
+        ui->label_running
+            ->setToolTip(
+                tr(
+                    "Select mode, double-click "
+                    "or press Enter to select "
+                    "a profile, press ESC to exit."
+                )
+            );
+    }
+    else
+    {
+        ui->label_running
+            ->setToolTip(
+                {}
+            );
+    }
+
+    // =====================================================
+    // Window / tray title
+    //
+    // Uses ONLY the runningSnapshot state captured above.
+    // =====================================================
+    const auto make_title =
+        [
+            this,
+            hasRunningProfile,
+            runningConfig,
+            runningCountryInfo,
+            groupName
+        ](
+            bool isTray
+            )
+        {
+            QStringList tt;
+            if (!isTray &&
+                Configs::IsAdmin())
+            {
+                tt <<
+                    "[Admin]";
+            }
+            if (select_mode)
+            {
+                tt <<
+                    "["
+                    +
+                    tr("Select")
+                    +
+                    "]";
+            }
+            if (!title_error.isEmpty())
+            {
+                tt <<
+                    "["
+                    +
+                    title_error
+                    +
+                    "]";
+            }
+            const bool vpnEnabled =
+                Configs::dataManager
+                ->settingsRepo
+                ->spmode_vpn;
+            const bool systemProxyEnabled =
+                Configs::dataManager
+                ->settingsRepo
+                ->spmode_system_proxy;
+            if (vpnEnabled &&
+                !systemProxyEnabled)
+            {
+                tt <<
+                    "[Tun]";
+            }
+            if (!vpnEnabled &&
+                systemProxyEnabled)
+            {
+                tt <<
+                    "["
+                    +
+                    tr("System Proxy")
+                    +
+                    "]";
+            }
+            if (vpnEnabled &&
+                systemProxyEnabled)
+            {
+                tt <<
+                    "[Tun+"
+                    +
+                    tr("System Proxy")
+                    +
+                    "]";
+            }
+            tt << software_name;
+            if (!isTray)
+            {
+                tt <<
+                    QString(
+                        NKR_VERSION
+                    );
+            }
+            const QString activeRouting =
+                Configs::dataManager
+                ->settingsRepo
+                ->active_routing;
+            if (!activeRouting.isEmpty() &&
+                activeRouting !=
+                QStringLiteral("Default"))
+            {
+                tt <<
+                    "["
+                    +
+                    activeRouting
+                    +
+                    "]";
+            }
+
+            // ---------------------------------------------
+            // Running Profile
+            // ---------------------------------------------
+            if (hasRunningProfile)
+            {
+                const QString
+                    displayTypeAndName =
+                    QString(
+                        "[%1] %2"
+                    )
+                    .arg(
+                        runningConfig
+                        .displayType,
+
+                        runningConfig
+                        .displayName
+                    );
+                tt <<
+                    displayTypeAndName
+                    +
+                    "@"
+                    +
+                    groupName;
+                if (!runningCountryInfo
+                    .isEmpty())
+                {
+                    tt <<
+                        runningCountryInfo;
+                }
+            }
+            return tt.join(
+                isTray
+                ? "\n"
+                : " "
+            );
         };
 
-    auto icon_status_new = Icon::NONE;
-
-    if (running != nullptr) {
-        if (Configs::dataManager->settingsRepo->spmode_vpn) {
-            icon_status_new = Icon::VPN;
+    // =====================================================
+    // Icon status
+    //
+    // IMPORTANT:
+    // Use hasRunningProfile, not the old `running` member.
+    // =====================================================
+    auto icon_status_new =
+        Icon::NONE;
+    if (hasRunningProfile)
+    {
+        if (Configs::dataManager
+            ->settingsRepo
+            ->spmode_vpn)
+        {
+            icon_status_new =
+                Icon::VPN;
         }
-        else if (Configs::dataManager->settingsRepo->system_dns_set && Configs::dataManager->settingsRepo->spmode_system_proxy) {
-            icon_status_new = Icon::SYSTEM_PROXY_DNS;
+        else if (
+            Configs::dataManager
+            ->settingsRepo
+            ->system_dns_set
+            &&
+            Configs::dataManager
+            ->settingsRepo
+            ->spmode_system_proxy)
+        {
+            icon_status_new =
+                Icon::SYSTEM_PROXY_DNS;
         }
-        else if (Configs::dataManager->settingsRepo->system_dns_set) {
-            icon_status_new = Icon::DNS;
+        else if (
+            Configs::dataManager
+            ->settingsRepo
+            ->system_dns_set)
+        {
+            icon_status_new =
+                Icon::DNS;
         }
-        else if (Configs::dataManager->settingsRepo->spmode_system_proxy) {
-            icon_status_new = Icon::SYSTEM_PROXY;
+        else if (
+            Configs::dataManager
+            ->settingsRepo
+            ->spmode_system_proxy)
+        {
+            icon_status_new =
+                Icon::SYSTEM_PROXY;
         }
-        else {
-            icon_status_new = Icon::RUNNING;
+        else
+        {
+            icon_status_new =
+                Icon::RUNNING;
         }
     }
 
-    // refresh title & window icon
-    setWindowTitle(software_name);
-    if (icon_status_new != icon_status) QApplication::setWindowIcon(GetTrayIcon(icon_status_new));
-
-    // refresh tray
-    if (tray != nullptr) {
-        tray->setToolTip(make_title(true));
-        if (icon_status_new != icon_status) tray->setIcon(Icon::GetTrayIcon(icon_status_new));
+    // =====================================================
+    // Window title & icon
+    // =====================================================
+    setWindowTitle(
+        software_name
+    );
+    if (icon_status_new !=
+        icon_status)
+    {
+        QApplication
+            ::setWindowIcon(
+                GetTrayIcon(
+                    icon_status_new
+                )
+            );
     }
 
+    // =====================================================
+    // Tray
+    // =====================================================
+    if (tray)
+    {
+        tray->setToolTip(
+            make_title(
+                true
+            )
+        );
+        if (icon_status_new !=
+            icon_status)
+        {
+            tray->setIcon(
+                Icon::GetTrayIcon(
+                    icon_status_new
+                )
+            );
+        }
+    }
     icon_status = icon_status_new;
 }
 
@@ -5497,8 +6176,9 @@ void MainWindow::on_masterLogBrowser_customContextMenuRequested(const QPoint& po
 void MainWindow::on_tabWidget_customContextMenuRequested(
     const QPoint& p)
 {
-    auto* tabBar =
+    auto* const tabBar =
         ui->tabWidget->tabBar();
+
 
     const int clickedIndex =
         tabBar->tabAt(p);
@@ -5513,7 +6193,7 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
         QMenu menu(this);
 
 
-        auto* addAction =
+        auto* const addAction =
             menu.addAction(
                 tr("Add new Group")
             );
@@ -5531,7 +6211,13 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
                     ->NewGroup();
 
 
-                auto* dialog =
+                if (!group)
+                {
+                    return;
+                }
+
+
+                auto* const dialog =
                     new DialogEditGroup(
                         group,
                         this
@@ -5554,7 +6240,9 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
 
                 Configs::dataManager
                     ->groupsRepo
-                    ->AddGroup(group);
+                    ->AddGroup(
+                        group
+                    );
 
 
                 MW_dialog_message(
@@ -5566,8 +6254,11 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
 
 
         menu.exec(
-            tabBar->mapToGlobal(p)
+            tabBar->mapToGlobal(
+                p
+            )
         );
+
 
         return;
     }
@@ -5596,7 +6287,7 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
         ];
 
 
-    auto group =
+    const auto group =
         Configs::dataManager
         ->groupsRepo
         ->GetGroup(
@@ -5604,7 +6295,8 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
         );
 
 
-    if (!group) {
+    if (!group)
+    {
         return;
     }
 
@@ -5622,7 +6314,7 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
     // Add group
     // =====================================================
 
-    auto* addAction =
+    auto* const addAction =
         menu.addAction(
             tr("Add new Group")
         );
@@ -5635,11 +6327,16 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
         [this]()
         {
             auto newGroup =
-                Configs::GroupsRepo::
-                NewGroup();
+                Configs::GroupsRepo::NewGroup();
 
 
-            auto* dialog =
+            if (!newGroup)
+            {
+                return;
+            }
+
+
+            auto* const dialog =
                 new DialogEditGroup(
                     newGroup,
                     this
@@ -5679,7 +6376,7 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
     // Delete group
     // =====================================================
 
-    auto* deleteAction =
+    auto* const deleteAction =
         new QAction(
             tr("Delete selected Group"),
             &menu
@@ -5695,7 +6392,13 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
             clickedGroupId
         ]()
         {
-            auto selectedGroup =
+            // -------------------------------------------------
+            // Re-resolve the Group at trigger time.
+            //
+            // The menu may have been open for some time.
+            // -------------------------------------------------
+
+            const auto selectedGroup =
                 Configs::dataManager
                 ->groupsRepo
                 ->GetGroup(
@@ -5703,7 +6406,8 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
                 );
 
 
-            if (!selectedGroup) {
+            if (!selectedGroup)
+            {
                 return;
             }
 
@@ -5732,8 +6436,21 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
             }
 
 
-            if (running &&
-                running->GroupId() ==
+            // =================================================
+            // Running Profile
+            //
+            // IMPORTANT:
+            //
+            // Take exactly one atomic snapshot.
+            // Never access runningProfile_ directly here.
+            // =================================================
+
+            const auto runningSnapshot =
+                runningProfileSnapshot();
+
+
+            if (runningSnapshot &&
+                runningSnapshot->GroupId() ==
                 clickedGroupId)
             {
                 profile_stop(
@@ -5743,6 +6460,10 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
                 );
             }
 
+
+            // -------------------------------------------------
+            // Delete Group
+            // -------------------------------------------------
 
             Configs::dataManager
                 ->groupsRepo
@@ -5763,7 +6484,7 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
     // Edit group
     // =====================================================
 
-    auto* editAction =
+    auto* const editAction =
         new QAction(
             tr("Edit selected Group"),
             &menu
@@ -5779,7 +6500,7 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
             clickedGroupId
         ]()
         {
-            auto selectedGroup =
+            const auto selectedGroup =
                 Configs::dataManager
                 ->groupsRepo
                 ->GetGroup(
@@ -5787,12 +6508,13 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
                 );
 
 
-            if (!selectedGroup) {
+            if (!selectedGroup)
+            {
                 return;
             }
 
 
-            auto* dialog =
+            auto* const dialog =
                 new DialogEditGroup(
                     selectedGroup,
                     this
@@ -5807,7 +6529,9 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
                     this,
                     dialog,
                     selectedGroup
-                ](int result)
+                ](
+                    int result
+                    )
                 {
                     if (result ==
                         QDialog::Accepted)
@@ -5846,8 +6570,6 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
         ui->actionRefresh_Column_Widths
     );
 
-    // addAction is already present because it was created
-    // through menu.addAction().
 
     menu.addAction(
         editAction
@@ -5881,29 +6603,36 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
             ui->actionUrl_Test_Group
         );
 
+
         menu.addAction(
             ui->actionSpeedtest_Group
         );
+
 
         menu.addAction(
             ui->actionResolve_Out_IP
         );
 
+
         menu.addAction(
             ui->menu_resolve_domain
         );
+
 
         menu.addAction(
             ui->menu_clear_test_result
         );
 
+
         menu.addAction(
             ui->menu_delete_repeat
         );
 
+
         menu.addAction(
             ui->menu_remove_unavailable
         );
+
 
         menu.addAction(
             ui->menu_remove_invalid
@@ -5944,55 +6673,125 @@ void MainWindow::on_tabWidget_customContextMenuRequested(
 
 
     // =====================================================
-    // Show
+    // Show context menu
     // =====================================================
 
     menu.exec(
-        tabBar->mapToGlobal(p)
+        tabBar->mapToGlobal(
+            p
+        )
     );
 }
 
 // eventFilter
+bool MainWindow::eventFilter(
+    QObject* obj,
+    QEvent* event)
+{
+    // =====================================================
+    // Mouse button press
+    // =====================================================
+    if (event->type() ==
+        QEvent::MouseButtonPress)
+    {
+        auto* mouseEvent =
+            dynamic_cast<QMouseEvent*>(
+                event
+                );
+        if (!mouseEvent)
+        {
+            return QMainWindow::eventFilter(
+                obj,
+                event
+            );
+        }
 
-bool MainWindow::eventFilter(QObject* obj, QEvent* event) {
-    if (event->type() == QEvent::MouseButtonPress) {
-        auto mouseEvent = dynamic_cast<QMouseEvent*>(event);
-        if (obj == ui->label_running && mouseEvent->button() == Qt::LeftButton && running != nullptr) {
+        // -------------------------------------------------
+        // Running profile label
+        // -------------------------------------------------
+        if (obj == ui->label_running &&
+            mouseEvent->button() ==
+            Qt::LeftButton)
+        {
+            const auto runningSnapshot =
+                runningProfileSnapshot();
+            if (!runningSnapshot)
+            {
+                return false;
+            }
             url_test_current();
             return true;
         }
-        else if (obj == ui->label_inbound && mouseEvent->button() == Qt::LeftButton) {
+
+        // -------------------------------------------------
+        // Inbound label
+        // -------------------------------------------------
+        if (obj == ui->label_inbound &&
+            mouseEvent->button() ==
+            Qt::LeftButton)
+        {
             on_menu_basic_settings_triggered();
+
             return true;
         }
-        else if (obj == ui->tabWidget && mouseEvent->button() == Qt::RightButton) {
-            on_tabWidget_customContextMenuRequested(mouseEvent->position().toPoint());
+
+        // -------------------------------------------------
+        // Tab widget context menu
+        // -------------------------------------------------
+        if (obj == ui->tabWidget &&
+            mouseEvent->button() ==
+            Qt::RightButton)
+        {
+            on_tabWidget_customContextMenuRequested(
+                mouseEvent
+                ->position()
+                .toPoint()
+            );
             return true;
         }
     }
-    else if (event->type() == QEvent::MouseButtonDblClick) {
-        if (obj == ui->splitter) {
-            auto size = ui->splitter->size();
-            ui->splitter->setSizes({ size.height() / 2, size.height() / 2 });
+
+    // =====================================================
+    // Mouse double click
+    // =====================================================
+    else if (event->type() ==
+        QEvent::MouseButtonDblClick)
+    {
+        if (obj == ui->splitter)
+        {
+            const auto size =
+                ui->splitter->size();
+            ui->splitter->setSizes(
+                {
+                    size.height() / 2,
+                    size.height() / 2
+                }
+            );
+            return true;
         }
     }
-    return QMainWindow::eventFilter(obj, event);
+
+    // =====================================================
+    // Default processing
+    // =====================================================
+    return QMainWindow::eventFilter(
+        obj,
+        event
+    );
 }
 
 // profile selector
-
 void MainWindow::start_select_mode(QObject* context, const std::function<void(int)>& callback) {
     select_mode = true;
     connectOnce(this, &MainWindow::profile_selected, context, callback);
     refresh_status();
 }
 
-// 连接列表
+// Connection List
 
 inline QJsonArray last_arr; // format is nekoray_connections_json
 
 // Hotkey
-
 inline QList<std::shared_ptr<QHotkey>> RegisteredHotkey;
 
 void MainWindow::RegisterHotkey(bool unregister) {

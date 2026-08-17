@@ -6,6 +6,10 @@
 #include "include/ui/utils//MessageBoxTimer.h"
 #include "3rdparty/qv2ray/v2/proxy/QvProxyConfigurator.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <memory>
+
 #include <QInputDialog>
 #include <QPushButton>
 #include <QDesktopServices>
@@ -18,9 +22,6 @@
 
 #include "include/sys/Process.hpp"
 
-#include <algorithm>
-
-#include <memory>
 
 // rpc
 
@@ -1186,215 +1187,850 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
     });
 }
 
-void MainWindow::querySpeedtest(const QMap<QString, int>& tag2entID, bool testCurrent)
+void MainWindow::querySpeedtest(
+    const QMap<QString, int>& tag2entID,
+    bool testCurrent)
 {
-    bool ok;
-    auto res = defaultClient->QueryCurrentSpeedTests(&ok);
-    if (!ok || !res.is_running.value())
+    // =====================================================
+    // Query current speed-test state from Core
+    // =====================================================
+    bool ok = false;
+    const auto res =
+        defaultClient
+        ->QueryCurrentSpeedTests(
+            &ok
+        );
+    if (!ok ||
+        !res.is_running.value())
     {
         return;
     }
-    auto profile = testCurrent ? running : Configs::dataManager->profilesRepo->GetProfile(tag2entID[QString::fromStdString(res.result.value().outbound_tag.value())]);
-    if (profile == nullptr)
+
+    // =====================================================
+    // Validate result
+    // =====================================================
+    if (!res.result.has_value())
     {
         return;
     }
-    runOnUiThread([=, this]
+    const auto& testResult =
+        res.result.value();
+
+    // =====================================================
+    // Resolve Profile
+    //
+    // IMPORTANT:
+    // Never access the old `running` member directly.
+    // =====================================================
+    std::shared_ptr<Configs::Profile>
+        profile;
+    if (testCurrent)
     {
-        dataViewHtmlGenerator_.setSpeedtestProgress(profile->OutboundSnapshot()->name, res.result.value());
-        UpdateDataView();
-
-        if (res.result.value().error.value().empty() && !res.result.value().cancelled.value())
-        {
-            profile->MergeSpeedTestResult(
-                QString::fromStdString(
-                    res.result.value()
-                    .dl_speed.value()
-                ),
-
-                QString::fromStdString(
-                    res.result.value()
-                    .ul_speed.value()
-                ),
-
-                res.result.value()
-                .latency.value(),
-
-                res.result.value()
-                .server_country.value()
-                .empty()
-                ? QString()
-                : CountryNameToCode(
-                    QString::fromStdString(
-                        res.result.value()
-                        .server_country.value()
-                    )
-                )
-            );
-            refresh_proxy_list({profile->Id()});
-        }
-    });
-}
-
-void MainWindow::queryCountryTest(const QMap<QString, int>& tag2entID, bool testCurrent)
-{
-    bool ok;
-    auto res = defaultClient->QueryCountryTestResults(&ok);
-    if (!ok || res.results.empty())
-    {
-        return;
+        // -------------------------------------------------
+        // Exactly one atomic snapshot for this operation.
+        // -------------------------------------------------
+        profile =
+            runningProfileSnapshot();
     }
-    for (const auto& result : res.results)
+    else
     {
-        dataViewHtmlGenerator_.addTestProgress();
-        UpdateDataView();
-        auto profile = testCurrent ? running : Configs::dataManager->profilesRepo->GetProfile(tag2entID[QString::fromStdString(result.outbound_tag.value())]);
-        if (profile == nullptr)
+        // -------------------------------------------------
+        // Resolve Profile from outbound tag
+        // -------------------------------------------------
+        if (!testResult
+            .outbound_tag
+            .has_value())
         {
             return;
         }
-        runOnUiThread([=, this]
+        const QString outboundTag =
+            QString::fromStdString(
+                testResult
+                .outbound_tag
+                .value()
+            );
+
+        // Do not use operator[] here.
+        //
+        // value(..., -1) makes the "tag not found" case
+        // explicit and does not depend on a default ID.
+        const int profileId =
+            tag2entID.value(
+                outboundTag,
+                -1
+            );
+        if (profileId < 0)
         {
-            if (result.error.value().empty() && !result.cancelled.value())
-            {
-                profile->MergeCountryTestResult(
-                    result.latency.value(),
-
-                    result.server_country.value()
-                    .empty()
-                    ? QString()
-                    : CountryNameToCode(
-                        QString::fromStdString(
-                            result.server_country.value()
-                        )
-                    )
-                );
-                refresh_proxy_list({profile->Id()});
-            }
-        });
+            return;
+        }
+        profile =
+            Configs::dataManager
+            ->profilesRepo
+            ->GetProfile(
+                profileId
+            );
     }
-    UpdateDataView(true);
-}
-
-
-void MainWindow::runSpeedTest(const QString& config, const QString& xrayConfig, bool useDefault, bool testCurrent, const QStringList& outboundTags, const QMap<QString, int>& tag2entID, int entID)
-{
-    if (stopSpeedtest.load()) {
-        MW_show_log(tr("Profile speed test aborted"));
+    if (!profile)
+    {
         return;
     }
 
-    libcore::SpeedTestRequest req;
-    auto speedtestConf = Configs::dataManager->settingsRepo->speed_test_mode;
-    for (const auto &item: outboundTags) {
-        req.outbound_tags.push_back(item.toStdString());
-    }
-    req.config = config.toStdString();
-    req.use_default_outbound = useDefault;
-    req.test_download = speedtestConf == Configs::TestConfig::FULL || speedtestConf == Configs::TestConfig::DL;
-    req.test_upload = speedtestConf == Configs::TestConfig::FULL || speedtestConf == Configs::TestConfig::UL;
-    req.simple_download = speedtestConf == Configs::TestConfig::SIMPLEDL;
-    req.simple_download_addr = Configs::dataManager->settingsRepo->simple_dl_url.toStdString();
-    req.test_current = testCurrent;
-    req.timeout_ms = Configs::dataManager->settingsRepo->speed_test_timeout_ms;
-    req.only_country = speedtestConf == Configs::TestConfig::COUNTRY;
-    req.country_concurrency = Configs::dataManager->settingsRepo->test_concurrent;
-    req.xray_config = xrayConfig.toStdString();
-    req.need_xray = !xrayConfig.isEmpty();
-
-    if (speedtestConf != Configs::TestConfig::COUNTRY) {
-        dataViewHtmlGenerator_.addTestProgress();
-        UpdateDataView();
-    }
-
-    // loop query result
-    auto doneMu = new QMutex;
-    doneMu->lock();
-    runOnNewThread([=,this]
-    {
-        while (true) {
-            QThread::msleep(100);
-            if (doneMu->tryLock())
-            {
-                break;
-            }
-            if (speedtestConf == Configs::TestConfig::COUNTRY)
-            {
-                queryCountryTest(tag2entID, testCurrent);
-            } else
-            {
-                querySpeedtest(tag2entID, testCurrent);
-            }
-        }
-        doneMu->unlock();
-        delete doneMu;
-    });
-    bool rpcOK;
-    auto result = defaultClient->SpeedTest(&rpcOK, req);
-    doneMu->unlock();
+    // =====================================================
+    // Take immutable configuration snapshot
     //
-    if (!rpcOK || result.results.empty()) return;
+    // We only need the profile name for the progress UI.
+    // Do not read live outbound directly.
+    // =====================================================
+    const auto profileConfig =
+        profile->ConfigSnapshot();
+    const QString profileName =
+        profileConfig.name;
+    const int profileId =
+        profile->Id();
 
-    for (const auto &res: result.results) {
-        if (testCurrent) entID = running ? running->Id() : -1;
-        else {
-            entID = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
-        }
-        if (entID == -1) {
-            MW_show_log(tr("Something is very wrong, the subject ent cannot be found!"));
-            continue;
-        }
+    // =====================================================
+    // Update UI and Profile test state
+    // =====================================================
+    runOnUiThread(
+        [
+            this,
+            profile,
+            profileName,
+            profileId,
+            res
+        ]()
+        {
+            if (!res.result.has_value())
+            {
+                return;
+            }
+            const auto& result =
+                res.result.value();
 
-        auto ent = Configs::dataManager->profilesRepo->GetProfile(entID);
-        if (ent == nullptr) {
-            MW_show_log(tr("Profile manager data is corrupted, try again."));
-            continue;
-        }
+            // -------------------------------------------------
+            // Speed-test progress
+            // -------------------------------------------------
+            dataViewHtmlGenerator_
+                .setSpeedtestProgress(
+                    profileName,
+                    result
+                );
+            UpdateDataView();
 
-        if (res.cancelled.value()) continue;
-
-        if (res.error.value().empty()) {
-
-            ent->SetSpeedTestResult(
-                QString::fromStdString(
-                    res.dl_speed.value()
-                ),
-
-                QString::fromStdString(
-                    res.ul_speed.value()
-                ),
-
-                res.latency.value(),
-
-                res.server_country.value()
+            // -------------------------------------------------
+            // Successful result
+            // -------------------------------------------------
+            if (!result
+                .error
+                .value()
                 .empty()
-                ? QString()
-                : CountryNameToCode(
-                    QString::fromStdString(
-                        res.server_country.value()
-                    )
-                )
+                ||
+                result
+                .cancelled
+                .value())
+            {
+                return;
+            }
+            const QString downloadSpeed =
+                QString::fromStdString(
+                    result
+                    .dl_speed
+                    .value()
+                );
+            const QString uploadSpeed =
+                QString::fromStdString(
+                    result
+                    .ul_speed
+                    .value()
+                );
+            const int latency =
+                result
+                .latency
+                .value();
+            QString countryCode;
+            const std::string serverCountry =
+                result
+                .server_country
+                .value();
+            if (!serverCountry.empty())
+            {
+                countryCode =
+                    CountryNameToCode(
+                        QString::fromStdString(
+                            serverCountry
+                        )
+                    );
+            }
+
+            // -------------------------------------------------
+            // Profile owns synchronization of its test state.
+            // -------------------------------------------------
+            profile->MergeSpeedTestResult(
+                downloadSpeed,
+                uploadSpeed,
+                latency,
+                countryCode
+            );
+
+            // -------------------------------------------------
+            // Refresh exactly this Profile row
+            // -------------------------------------------------
+            refresh_proxy_list(
+                {
+                    profileId
+                }
             );
         }
+    );
+}
 
-        else {
+void MainWindow::queryCountryTest(
+    const QMap<QString, int>& tag2entID,
+    bool testCurrent)
+{
+    // =====================================================
+    // Query test results from Core
+    // =====================================================
+    bool ok = false;
+    const auto res =
+        defaultClient
+        ->QueryCountryTestResults(
+            &ok
+        );
+    if (!ok ||
+        res.results.empty())
+    {
+        return;
+    }
 
-            ent->SetSpeedTestError();
+    // =====================================================
+    // Running Profile snapshot
+    //
+    // For current-profile testing we take exactly ONE
+    // snapshot for the entire batch of results.
+    // =====================================================
+    std::shared_ptr<Configs::Profile>
+        currentProfile;
+    if (testCurrent)
+    {
+        currentProfile =
+            runningProfileSnapshot();
+        if (!currentProfile)
+        {
+            return;
+        }
+    }
 
+    // =====================================================
+    // Process results
+    // =====================================================
+    for (const auto& result :
+        res.results)
+    {
+        std::shared_ptr<Configs::Profile>
+            profile;
 
+        // -------------------------------------------------
+        // Resolve target Profile
+        // -------------------------------------------------
+        if (testCurrent)
+        {
+            // Use the stable Profile captured above.
+            profile =
+                currentProfile;
+        }
+        else
+        {
+            // ---------------------------------------------
+            // Result must contain outbound tag.
+            // ---------------------------------------------
+            if (!result
+                .outbound_tag
+                .has_value())
+            {
+                continue;
+            }
+            const QString outboundTag =
+                QString::fromStdString(
+                    result
+                    .outbound_tag
+                    .value()
+                );
+
+            // ---------------------------------------------
+            // Do NOT use:
+            //
+            // tag2entID[outboundTag]
+            //
+            // because a missing key may silently produce
+            // a default value.
+            // ---------------------------------------------
+            const int profileId =
+                tag2entID.value(
+                    outboundTag,
+                    -1
+                );
+            if (profileId < 0)
+            {
+                continue;
+            }
+            profile =
+                Configs::dataManager
+                ->profilesRepo
+                ->GetProfile(
+                    profileId
+                );
+        }
+
+        // -------------------------------------------------
+        // One missing Profile must not cancel processing
+        // of all remaining test results.
+        // -------------------------------------------------
+        if (!profile)
+        {
+            continue;
+        }
+        // Store ID before asynchronous UI callback.
+        const int profileId =
+            profile->Id();
+
+        // =================================================
+        // UI + test-state update
+        // =================================================
+        runOnUiThread(
+            [
+                this,
+                profile,
+                profileId,
+                result
+            ]()
+            {
+                // -----------------------------------------
+                // Test progress belongs to UI state.
+                // -----------------------------------------
+                dataViewHtmlGenerator_
+                    .addTestProgress();
+                UpdateDataView();
+
+                // -----------------------------------------
+                // Ignore failed/cancelled result
+                // -----------------------------------------
+                if (!result
+                    .error
+                    .value()
+                    .empty())
+                {
+                    return;
+                }
+                if (result
+                    .cancelled
+                    .value())
+                {
+                    return;
+                }
+
+                // -----------------------------------------
+                // Country
+                // -----------------------------------------
+                QString countryCode;
+                const std::string serverCountry =
+                    result
+                    .server_country
+                    .value();
+                if (!serverCountry.empty())
+                {
+                    countryCode =
+                        CountryNameToCode(
+                            QString::fromStdString(
+                                serverCountry
+                            )
+                        );
+                }
+
+                // -----------------------------------------
+                // Update Profile test state
+                //
+                // Profile owns synchronization internally.
+                // -----------------------------------------
+                profile
+                    ->MergeCountryTestResult(
+                        result
+                        .latency
+                        .value(),
+
+                        countryCode
+                    );
+
+                // -----------------------------------------
+                // Refresh only affected Profile
+                // -----------------------------------------
+                refresh_proxy_list(
+                    {
+                        profileId
+                    }
+                );
+            }
+        );
+    }
+
+    // =====================================================
+    // Final DataView refresh
+    // =====================================================
+    runOnUiThread(
+        [this]()
+        {
+            UpdateDataView(
+                true
+            );
+        }
+    );
+}
+
+void MainWindow::runSpeedTest(
+    const QString& config,
+    const QString& xrayConfig,
+    bool useDefault,
+    bool testCurrent,
+    const QStringList& outboundTags,
+    const QMap<QString, int>& tag2entID,
+    int entID)
+{
+    // =====================================================
+    // Cancellation
+    // =====================================================
+    if (stopSpeedtest.load(
+        std::memory_order_acquire))
+    {
+        MW_show_log(
+            tr("Profile speed test aborted")
+        );
+        return;
+    }
+
+    // =====================================================
+    // Freeze current Profile for the entire test
+    //
+    // IMPORTANT:
+    // If we are testing the currently running profile,
+    // take exactly one atomic snapshot now.
+    //
+    // Do not read global running-profile state again later.
+    // =====================================================
+    std::shared_ptr<Configs::Profile>
+        currentProfile;
+    if (testCurrent)
+    {
+        currentProfile =
+            runningProfileSnapshot();
+        if (!currentProfile)
+        {
             MW_show_log(
-                tr("[%1] speed test error: %2")
+                tr(
+                    "Cannot start speed test: "
+                    "no profile is currently running."
+                )
+            );
+            return;
+        }
+    }
+
+    // =====================================================
+    // Preserve explicitly supplied Profile ID
+    //
+    // entID is used when runSpeedTest() is called for
+    // a single full-config Profile.
+    //
+    // Never overwrite the original parameter in the result
+    // loop.
+    // =====================================================
+    const int fixedProfileId =
+        entID;
+
+    // =====================================================
+    // Build request
+    // =====================================================
+    libcore::SpeedTestRequest req;
+    const auto speedtestConf =
+        Configs::dataManager
+        ->settingsRepo
+        ->speed_test_mode;
+    for (const auto& item :
+        outboundTags)
+    {
+        req.outbound_tags
+            .push_back(
+                item.toStdString()
+            );
+    }
+
+    req.config =
+        config.toStdString();
+    req.use_default_outbound =
+        useDefault;
+    req.test_download =
+        speedtestConf ==
+        Configs::TestConfig::FULL
+        ||
+        speedtestConf ==
+        Configs::TestConfig::DL;
+    req.test_upload =
+        speedtestConf ==
+        Configs::TestConfig::FULL
+        ||
+        speedtestConf ==
+        Configs::TestConfig::UL;
+    req.simple_download =
+        speedtestConf ==
+        Configs::TestConfig::SIMPLEDL;
+    req.simple_download_addr =
+        Configs::dataManager
+        ->settingsRepo
+        ->simple_dl_url
+        .toStdString();
+    req.test_current =
+        testCurrent;
+    req.timeout_ms =
+        Configs::dataManager
+        ->settingsRepo
+        ->speed_test_timeout_ms;
+    req.only_country =
+        speedtestConf ==
+        Configs::TestConfig::COUNTRY;
+    req.country_concurrency =
+        Configs::dataManager
+        ->settingsRepo
+        ->test_concurrent;
+    req.xray_config =
+        xrayConfig.toStdString();
+    req.need_xray =
+        !xrayConfig.isEmpty();
+
+    // =====================================================
+    // Initial UI progress
+    //
+    // runSpeedTest() is normally called from the speed-test
+    // worker, so UI state must be changed on the UI thread.
+    // =====================================================
+    if (speedtestConf !=
+        Configs::TestConfig::COUNTRY)
+    {
+        runOnUiThread(
+            [this]()
+            {
+                dataViewHtmlGenerator_
+                    .addTestProgress();
+
+
+                UpdateDataView();
+            }
+        );
+    }
+
+    // =====================================================
+    // Background progress polling
+    //
+    // Old implementation allocated QMutex manually:
+    //
+    //     new QMutex
+    //     delete doneMu
+    //
+    // A shared atomic flag gives us much simpler lifetime
+    // management.
+    // =====================================================
+    auto rpcFinished =
+        std::make_shared<
+        std::atomic_bool
+        >(
+            false
+        );
+
+    runOnNewThread(
+        [
+            this,
+            rpcFinished,
+            speedtestConf,
+            tag2entID,
+            testCurrent
+        ]()
+        {
+            while (!rpcFinished->load(
+                std::memory_order_acquire))
+            {
+                QThread::msleep(
+                    100
+                );
+
+                // SpeedTest() may have completed while
+                // this thread was sleeping.
+                if (rpcFinished->load(
+                    std::memory_order_acquire))
+                {
+                    break;
+                }
+                if (speedtestConf ==
+                    Configs::TestConfig::COUNTRY)
+                {
+                    queryCountryTest(
+                        tag2entID,
+                        testCurrent
+                    );
+                }
+                else
+                {
+                    querySpeedtest(
+                        tag2entID,
+                        testCurrent
+                    );
+                }
+            }
+        }
+    );
+
+    // =====================================================
+    // Blocking RPC
+    // =====================================================
+    bool rpcOK =
+        false;
+    const auto result =
+        defaultClient
+        ->SpeedTest(
+            &rpcOK,
+            req
+        );
+
+    // Signal polling worker to exit.
+    rpcFinished->store(
+        true,
+        std::memory_order_release
+    );
+
+    // =====================================================
+    // Validate RPC result
+    // =====================================================
+    if (!rpcOK)
+    {
+        MW_show_log(
+            tr(
+                "Speed test RPC failed."
+            )
+        );
+        return;
+    }
+    if (result.results.empty())
+    {
+        return;
+    }
+
+    // =====================================================
+    // Process final results
+    // =====================================================
+    for (const auto& res :
+        result.results)
+    {
+        std::shared_ptr<Configs::Profile>
+            profile;
+        int targetProfileId =
+            -1;
+
+        // -------------------------------------------------
+        // Case 1:
+        // Current running Profile
+        //
+        // Use the Profile captured BEFORE SpeedTest().
+        // -------------------------------------------------
+        if (testCurrent)
+        {
+            profile =
+                currentProfile;
+            if (profile)
+            {
+                targetProfileId =
+                    profile->Id();
+            }
+        }
+
+        // -------------------------------------------------
+        // Case 2:
+        // Explicitly supplied Profile ID
+        //
+        // This is important for calls such as:
+        //
+        // runSpeedTest(..., entID)
+        //
+        // for individual full-config profiles.
+        // -------------------------------------------------
+        else if (fixedProfileId >= 0)
+        {
+            targetProfileId =
+                fixedProfileId;
+            profile =
+                Configs::dataManager
+                ->profilesRepo
+                ->GetProfile(
+                    targetProfileId
+                );
+        }
+
+        // -------------------------------------------------
+        // Case 3:
+        // Batch test — resolve Profile by outbound tag
+        // -------------------------------------------------
+        else
+        {
+            if (!res
+                .outbound_tag
+                .has_value())
+            {
+                MW_show_log(
+                    tr(
+                        "Speed test result "
+                        "does not contain an outbound tag."
+                    )
+                );
+                continue;
+            }
+            const QString outboundTag =
+                QString::fromStdString(
+                    res
+                    .outbound_tag
+                    .value()
+                );
+            targetProfileId =
+                tag2entID.value(
+                    outboundTag,
+                    -1
+                );
+            if (targetProfileId >= 0)
+            {
+                profile =
+                    Configs::dataManager
+                    ->profilesRepo
+                    ->GetProfile(
+                        targetProfileId
+                    );
+            }
+        }
+
+        // =================================================
+        // Validate target Profile
+        // =================================================
+        if (targetProfileId < 0)
+        {
+            MW_show_log(
+                tr(
+                    "Something is very wrong, "
+                    "the subject ent cannot be found!"
+                )
+            );
+
+            continue;
+        }
+        if (!profile)
+        {
+            MW_show_log(
+                tr(
+                    "Profile manager data is corrupted, "
+                    "try again."
+                )
+            );
+            continue;
+        }
+
+        // =================================================
+        // Cancelled test
+        // =================================================
+        if (res
+            .cancelled
+            .value())
+        {
+            continue;
+        }
+
+        // =================================================
+        // Successful result
+        // =================================================
+        if (res
+            .error
+            .value()
+            .empty())
+        {
+            QString countryCode;
+            const std::string serverCountry =
+                res
+                .server_country
+                .value();
+            if (!serverCountry.empty())
+            {
+                countryCode =
+                    CountryNameToCode(
+                        QString::fromStdString(
+                            serverCountry
+                        )
+                    );
+            }
+            profile->SetSpeedTestResult(
+                QString::fromStdString(
+                    res
+                    .dl_speed
+                    .value()
+                ),
+                QString::fromStdString(
+                    res
+                    .ul_speed
+                    .value()
+                ),
+                res
+                .latency
+                .value(),
+                countryCode
+            );
+        }
+
+        // =================================================
+        // Error
+        // =================================================
+        else
+        {
+            profile
+                ->SetSpeedTestError();
+
+            // Use immutable config snapshot instead of
+            // reading mutable outbound state directly.
+            const auto profileConfig =
+                profile
+                ->ConfigSnapshot();
+            const QString displayTypeAndName =
+                QString(
+                    "[%1] %2"
+                )
                 .arg(
-                    ent->OutboundSnapshot()
-                    ->DisplayTypeAndName(),
+                    profileConfig.displayType,
+                    profileConfig.displayName
+                );
+            MW_show_log(
+                tr(
+                    "[%1] speed test error: %2"
+                )
+                .arg(
+                    displayTypeAndName,
 
                     QString::fromStdString(
-                        res.error.value()
+                        res
+                        .error
+                        .value()
                     )
                 )
             );
         }
-        Configs::dataManager->profilesRepo->Save(ent);
+
+        // =================================================
+        // Persist Profile test state
+        // =================================================
+        Configs::dataManager
+            ->profilesRepo
+            ->Save(
+                profile
+            );
     }
 }
 
@@ -1487,6 +2123,81 @@ void MainWindow::profile_start(int _id) {
         //
         bool rpcOK;
         QString error = defaultClient->Start(&rpcOK, req);
+        Stats::trafficLooper
+            ->SetChainGroups(
+                result->chainGroups
+            );
+
+
+        Stats::trafficLooper
+            ->loop_enabled.store(
+                true,
+                std::memory_order_release
+            );
+
+
+        Stats::connection_lister
+            ->suspend =
+            false;
+
+
+        // -----------------------------------------------------
+        // Persist ID
+        // -----------------------------------------------------
+
+        Configs::dataManager
+            ->settingsRepo
+            ->UpdateStartedId(
+                ent->Id()
+            );
+
+
+        // -----------------------------------------------------
+        // New runtime session
+        // -----------------------------------------------------
+
+        ent->ClearRunningCountryInfo();
+
+
+        // -----------------------------------------------------
+        // Atomically publish Profile
+        // -----------------------------------------------------
+
+        publishRunningProfile(
+            ent
+        );
+
+
+        // -----------------------------------------------------
+        // System proxy
+        // -----------------------------------------------------
+
+        if (Configs::dataManager
+            ->settingsRepo
+            ->spmode_system_proxy)
+        {
+            set_system_proxy(
+                true
+            );
+        }
+
+
+        // -----------------------------------------------------
+        // Initial UI
+        // -----------------------------------------------------
+
+        runOnUiThread(
+            [this, ent]
+            {
+                refresh_status();
+
+                refresh_proxy_list(
+                    {
+                        ent->Id()
+                    }
+                );
+            }
+        );
         if (!rpcOK) {
             return false;
         }
@@ -1521,22 +2232,27 @@ void MainWindow::profile_start(int _id) {
         Stats::trafficLooper->SetChainGroups(
             result->chainGroups
         );
-
         Stats::trafficLooper->loop_enabled.store(
             true,
             std::memory_order_release
         );
         Stats::connection_lister->suspend = false;
-
-        Configs::dataManager->settingsRepo->UpdateStartedId(ent->Id());
+        Configs::dataManager
+            ->settingsRepo
+            ->UpdateStartedId(
+                ent->Id()
+            );
+        // Runtime information belongs to one connection session.
         ent->ClearRunningCountryInfo();
-        running = ent;
+        // Atomically publish the active profile.
+        publishRunningProfile(
+            ent
+        );
         if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(true);
 
         // -----------------------------------------------------
         // Initial UI update
         // -----------------------------------------------------
-
         runOnUiThread(
             [this, ent]
             {
@@ -1550,11 +2266,9 @@ void MainWindow::profile_start(int _id) {
             }
         );
 
-
         // -----------------------------------------------------
         // Resolve public IP/country outside UI thread
         // -----------------------------------------------------
-
         runOnNewThread(
             [this, ent]
             {
@@ -1562,16 +2276,12 @@ void MainWindow::profile_start(int _id) {
                 {
                     return;
                 }
-
-
                 const auto resp =
                     NetworkRequestHelper::HttpGet(
                         "http://ip-api.com/json/",
                         false,
                         true
                     );
-
-
                 if (!resp.error.isEmpty())
                 {
                     MW_show_log(
@@ -1581,16 +2291,12 @@ void MainWindow::profile_start(int _id) {
 
                     return;
                 }
-
-
                 QJsonParseError parseError;
-
                 const auto doc =
                     QJsonDocument::fromJson(
                         resp.data,
                         &parseError
                     );
-
                 if (parseError.error !=
                     QJsonParseError::NoError)
                 {
@@ -1602,52 +2308,35 @@ void MainWindow::profile_start(int _id) {
 
                     return;
                 }
-
-
                 if (!doc.isObject())
                 {
                     return;
                 }
-
-
                 const QJsonObject obj =
                     doc.object();
-
-
                 const QString city =
                     obj.value(
                         "city"
                     )
                     .toString();
-
-
                 const QString countryName =
                     obj.value(
                         "country"
                     )
                     .toString();
-
-
                 const QString countryCode =
                     obj.value(
                         "countryCode"
                     )
                     .toString();
-
-
                 // -------------------------------------------------
                 // Build display string
                 // -------------------------------------------------
-
                 QStringList locationParts;
-
-
                 if (!countryName.isEmpty())
                 {
                     QString countryText =
                         countryName;
-
-
                     if (!countryCode.isEmpty())
                     {
                         countryText.prepend(
@@ -1657,50 +2346,55 @@ void MainWindow::profile_start(int _id) {
                             + " "
                         );
                     }
-
-
                     locationParts.append(
                         countryText
                     );
                 }
-
-
                 if (!city.isEmpty())
                 {
                     locationParts.append(
                         city
                     );
                 }
-
-
                 const QString countryInfo =
                     locationParts.join(
                         ", "
                     );
-
-
                 if (countryInfo.isEmpty())
                 {
                     return;
                 }
 
-
                 // -------------------------------------------------
                 // Thread-safe Profile runtime state update
                 // -------------------------------------------------
-
                 ent->SetRunningCountryInfo(
                     countryInfo
                 );
 
+                const auto current =
+                    runningProfileSnapshot();
 
-                // -------------------------------------------------
-                // UI must only be touched from UI thread
-                // -------------------------------------------------
 
+                if (current != ent)
+                {
+                    // Profile was stopped/replaced while HTTP
+                    // request was running.
+                    return;
+                }
                 runOnUiThread(
-                    [this]
+                    [this, ent]
                     {
+                        const auto current =
+                            runningProfileSnapshot();
+
+
+                        if (current != ent)
+                        {
+                            return;
+                        }
+
+
                         refresh_status();
                     }
                 );
@@ -1742,8 +2436,15 @@ void MainWindow::profile_start(int _id) {
 
     runOnNewThread([=, this] {
         // stop current running
-        if (running != nullptr) {
-            profile_stop(false, false, true);
+        const auto runningSnapshot =
+            runningProfileSnapshot();
+        if (runningSnapshot)
+        {
+            profile_stop(
+                false,
+                false,
+                true
+            );
             mu_stopping.lock();
             mu_stopping.unlock();
         }
@@ -1762,162 +2463,354 @@ void MainWindow::profile_start(int _id) {
     });
 }
 
-void MainWindow::profile_stop(bool crash, bool block, bool manual) {
-    if (running == nullptr) {
+void MainWindow::profile_stop(
+    bool crash,
+    bool block,
+    bool manual)
+{
+    // =====================================================
+    // Freeze the exact Profile being stopped
+    //
+    // Keep one strong shared_ptr for the whole operation.
+    // Never read global running-profile state from the
+    // worker again.
+    // =====================================================
+    const auto stoppingProfile =
+        runningProfileSnapshot();
+    if (!stoppingProfile)
+    {
         return;
     }
-    auto id = running->Id();
+    const int stoppingProfileId =
+        stoppingProfile->Id();
+    const auto stoppingConfig =
+        stoppingProfile
+        ->ConfigSnapshot();
+    const QString stoppingProfileName =
+        QString("[%1] %2")
+        .arg(
+            stoppingConfig.displayType,
+            stoppingConfig.displayName
+        );
 
-    auto profile_stop_stage2 = [=,this] {
-        if (currentUnderTest.load()) {
-            bool ok;
-            defaultClient->StopTests(&ok);
-            if (!ok) MW_show_log("Failed to stop profile tests!");
-        }
-        if (!crash) {
-            bool rpcOK;
-            QString error = defaultClient->Stop(&rpcOK);
-            if (rpcOK && !error.isEmpty()) {
-                runOnUiThread([=,this] { MessageBoxWarning(tr("Stop return error"), error); });
-                return false;
-            } else if (!rpcOK) {
-                return false;
-            }
-        }
-        if (Configs::dataManager->settingsRepo->spmode_system_proxy) set_system_proxy(false);
-        return true;
-    };
-
-    if (!mu_stopping.tryLock()) {
-        return;
-    }
-
-    UpdateConnectionListWithRecreate({});
-
-    runOnNewThread([=, this] {
-        
-        // -------------------------------------------------
-        // Final traffic flush
-        // -------------------------------------------------
-
-        Stats::trafficLooper
-            ->StopAndFlushTraffic();
-
-        Stats::connection_lister->suspend = true;
-
-        // -------------------------------------------------
-        // Restart warning
-        // -------------------------------------------------
-
-        QMessageBox* restartMsgbox = nullptr;
-        MessageBoxTimer* restartMsgboxTimer = nullptr;
-
-        runOnUiThread(
-            [this, &restartMsgbox, &restartMsgboxTimer] {
-
-                restartMsgbox = new QMessageBox(
-                    QMessageBox::Question,
-                    software_name,
-                    tr(
-                        "If there is no response for a long time, "
-                        "it is recommended to restart the software."
-                    ),
-                    QMessageBox::Yes | QMessageBox::No,
-                    this
-                );
-
-                connect(
-                    restartMsgbox,
-                    &QMessageBox::accepted,
-                    this,
-                    [this] {
-                        MW_dialog_message(
-                            MwMessage::RestartProgram,
-                            {}
-                        );
-                    }
-                );
-
-                restartMsgboxTimer =
-                    new MessageBoxTimer(
-                        this,
-                        restartMsgbox,
-                        5000
+    // =====================================================
+    // Core stop procedure
+    // =====================================================
+    const auto profile_stop_stage2 =
+        [
+            this,
+            crash
+        ]() -> bool
+        {
+            // -------------------------------------------------
+            // Stop active tests first
+            // -------------------------------------------------
+            if (currentUnderTest.load(
+                std::memory_order_acquire))
+            {
+                bool ok =
+                    false;
+                defaultClient
+                    ->StopTests(
+                        &ok
                     );
-            },
-            true
-        );
+                if (!ok)
+                {
+                    MW_show_log(
+                        "Failed to stop profile tests!"
+                    );
+                }
+            }
 
+            // -------------------------------------------------
+            // Stop Core profile
+            // -------------------------------------------------
+            if (!crash)
+            {
+                bool rpcOK =
+                    false;
+                const QString error =
+                    defaultClient
+                    ->Stop(
+                        &rpcOK
+                    );
+                if (!rpcOK)
+                {
+                    MW_show_log(
+                        "Failed to stop profile: "
+                        "RPC request failed."
+                    );
 
-        // -------------------------------------------------
-        // Stop profile
-        // -------------------------------------------------
+                    return false;
+                }
+                if (!error.isEmpty())
+                {
+                    runOnUiThread(
+                        [
+                            this,
+                            error
+                        ]()
+                        {
+                            MessageBoxWarning(
+                                tr("Stop return error"),
+                                error
+                            );
+                        }
+                    );
+                    return false;
+                }
+            }
 
-        MW_show_log(
-            ">>>>>>>> "
-            + tr("Stopping profile %1")
-            .arg(
-                running->OutboundSnapshot()
-                ->DisplayTypeAndName()
-            )
-        );
+            // -------------------------------------------------
+            // Disable system proxy
+            // -------------------------------------------------
+            if (Configs::dataManager
+                ->settingsRepo
+                ->spmode_system_proxy)
+            {
+                set_system_proxy(
+                    false
+                );
+            }
+            return true;
+        };
 
-        if (!profile_stop_stage2()) {
+    // =====================================================
+    // Only one stop operation at a time
+    // =====================================================
+    if (!mu_stopping.tryLock())
+    {
+        return;
+    }
+    UpdateConnectionListWithRecreate(
+        {}
+    );
 
+    // =====================================================
+    // Stop worker
+    // =====================================================
+    runOnNewThread(
+        [
+            this,
+            stoppingProfile,
+            stoppingProfileId,
+            stoppingProfileName,
+            profile_stop_stage2,
+            manual
+        ]()
+        {
+            // =================================================
+            // Final traffic flush
+            // =================================================
+            Stats::trafficLooper
+                ->StopAndFlushTraffic();
+            Stats::connection_lister
+                ->suspend =
+                true;
+
+            // =================================================
+            // Restart warning
+            // =================================================
+            QMessageBox*
+                restartMsgbox =
+                nullptr;
+            MessageBoxTimer*
+                restartMsgboxTimer =
+                nullptr;
+
+            // Create these objects synchronously on UI thread.
+            runOnUiThread(
+                [
+                    this,
+                    &restartMsgbox,
+                    &restartMsgboxTimer
+                ]()
+                {
+                    restartMsgbox =
+                        new QMessageBox(
+                            QMessageBox::Question,
+                            software_name,
+                            tr(
+                                "If there is no response for a long time, "
+                                "it is recommended to restart the software."
+                            ),
+                            QMessageBox::Yes
+                            |
+                            QMessageBox::No,
+                            this
+                        );
+                    connect(
+                        restartMsgbox,
+                        &QMessageBox::accepted,
+                        this,
+                        [this]()
+                        {
+                            MW_dialog_message(
+                                MwMessage::RestartProgram,
+                                {}
+                            );
+                        }
+                    );
+                    restartMsgboxTimer =
+                        new MessageBoxTimer(
+                            this,
+                            restartMsgbox,
+                            5000
+                        );
+                },
+                true
+            );
+
+            // =================================================
+            // Stop exact captured Profile
+            // =================================================
             MW_show_log(
-                "<<<<<<<< "
-                + tr(
-                    "Failed to stop, "
-                    "please restart the program."
+                ">>>>>>>> "
+                +
+                tr(
+                    "Stopping profile %1"
+                )
+                .arg(
+                    stoppingProfileName
                 )
             );
-        }
-
-
-        // -------------------------------------------------
-        // Persist running state
-        // -------------------------------------------------
-
-        if (manual) {
-            Configs::dataManager
-                ->settingsRepo
-                ->UpdateStartedId(-1919);
-        }
-
-        running = nullptr;
-
-
-        // -------------------------------------------------
-        // UI cleanup
-        // -------------------------------------------------
-
-        runOnUiThread(
-            [
-                this,
-                id,
-                &restartMsgboxTimer,
-                &restartMsgbox
-            ] {
-
-                if (restartMsgboxTimer) {
-                    restartMsgboxTimer->cancel();
-                    restartMsgboxTimer->deleteLater();
-                }
-
-                if (restartMsgbox) {
-                    restartMsgbox->deleteLater();
-                }
-
-                refresh_status();
-
-                refresh_proxy_list(
-                    { id }
+            const bool stopped =
+                profile_stop_stage2();
+            if (!stopped)
+            {
+                MW_show_log(
+                    "<<<<<<<< "
+                    +
+                    tr(
+                        "Failed to stop, "
+                        "please restart the program."
+                    )
                 );
+            }
+            else
+            {
+                MW_show_log(
+                    "<<<<<<<< "
+                    +
+                    tr(
+                        "Profile %1 stopped"
+                    )
+                    .arg(
+                        stoppingProfileName
+                    )
+                );
+            }
 
-                mu_stopping.unlock();
-            },
-            true
-        );
+            // =================================================
+            // Persist/clear running state
+            //
+            // Do this only after successful stop.
+            // Otherwise Core may still actually be running.
+            // =================================================
+            if (stopped)
+            {
+                if (manual)
+                {
+                    Configs::dataManager
+                        ->settingsRepo
+                        ->UpdateStartedId(
+                            -1919
+                        );
+                }
 
-        }, block);
+                // ---------------------------------------------
+                // Clear only if the active Profile is STILL
+                // the exact Profile we started stopping.
+                //
+                // If another Profile was published meanwhile,
+                // it must not be cleared by this old worker.
+                // ---------------------------------------------
+                const bool cleared =
+                    clearRunningProfileIf(
+                        stoppingProfile
+                    );
+                if (!cleared)
+                {
+                    MW_show_log(
+                        "Running profile changed while "
+                        "the previous profile was stopping; "
+                        "the new active profile was preserved."
+                    );
+                }
+            }
+
+            // =================================================
+            // Copy UI object pointers before callback
+            //
+            // Do not capture the worker's local variables
+            // by reference in the cleanup lambda.
+            // =================================================
+            QMessageBox*
+                const restartMsgboxToDelete =
+                restartMsgbox;
+            MessageBoxTimer*
+                const restartTimerToDelete =
+                restartMsgboxTimer;
+
+            // =================================================
+            // UI cleanup
+            // =================================================
+            runOnUiThread(
+                [
+                    this,
+                    stoppingProfileId,
+                    restartMsgboxToDelete,
+                    restartTimerToDelete
+                ]()
+                {
+                    // -----------------------------------------
+                    // Restart timer
+                    // -----------------------------------------
+                    if (restartTimerToDelete)
+                    {
+                        restartTimerToDelete
+                            ->cancel();
+
+
+                        restartTimerToDelete
+                            ->deleteLater();
+                    }
+
+                    // -----------------------------------------
+                    // Restart dialog
+                    // -----------------------------------------
+                    if (restartMsgboxToDelete)
+                    {
+                        restartMsgboxToDelete
+                            ->deleteLater();
+                    }
+
+                    // -----------------------------------------
+                    // Status
+                    // -----------------------------------------
+                    refresh_status();
+
+                    // -----------------------------------------
+                    // Refresh exact stopped Profile row
+                    //
+                    // THIS is where the old undefined `id`
+                    // has been replaced with stoppingProfileId.
+                    // -----------------------------------------
+                    refresh_proxy_list(
+                        {
+                            stoppingProfileId
+                        }
+                    );
+
+                    // -----------------------------------------
+                    // Allow next stop operation
+                    // -----------------------------------------
+                    mu_stopping.unlock();
+                },
+                true
+            );
+        },
+
+        block
+    );
 }
