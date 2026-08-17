@@ -92,35 +92,345 @@ namespace Configs {
         }
     }
 
-    void Database::execBatchInsertProfilesChunk(const std::vector<ProfileInsertRow>& rows) {
-        if (rows.empty()) return;
-        const size_t n = rows.size();
-        std::string sql = "INSERT INTO profiles (id, type, name, gid, latency, dl_speed, ul_speed, test_country, ip_out, outbound_json, traffic_dl, traffic_up) VALUES ";
-        for (size_t i = 0; i < n; ++i) {
-            if (i > 0) sql += ",";
-            sql += "(?,?,?,?,?,?,?,?,?,?,?,?)";
+    void Database::execBatchInsertProfilesChunk(
+        const std::vector<ProfileInsertRow>& rows)
+    {
+        if (rows.empty())
+        {
+            return;
         }
-        try {
-            SQLite::Statement stmt(db, sql);
-            int idx = 1;
-            for (const auto& r : rows) {
-                stmt.bind(idx++, r.id);
-                stmt.bind(idx++, r.type);
-                stmt.bind(idx++, r.name);
-                stmt.bind(idx++, r.gid);
-                stmt.bind(idx++, r.latency);
-                stmt.bind(idx++, r.dl_speed);
-                stmt.bind(idx++, r.ul_speed);
-                stmt.bind(idx++, r.test_country);
-                stmt.bind(idx++, r.ip_out);
-                stmt.bind(idx++, r.outbound_json);
-                stmt.bind(idx++, static_cast<int64_t>(r.traffic_dl));
-                stmt.bind(idx++, static_cast<int64_t>(r.traffic_up));
+
+
+        const size_t count =
+            rows.size();
+
+
+        std::string sql =
+            "INSERT INTO profiles "
+            "("
+            "id, "
+            "type, "
+            "name, "
+            "gid, "
+            "latency, "
+            "dl_speed, "
+            "ul_speed, "
+            "test_country, "
+            "ip_out, "
+            "outbound_json, "
+            "traffic_dl, "
+            "traffic_up"
+            ") "
+            "VALUES ";
+
+
+        for (size_t i = 0;
+            i < count;
+            ++i)
+        {
+            if (i > 0)
+            {
+                sql += ",";
             }
-            stmt.exec();
-            maybeCheckpoint(static_cast<int>(rows.size()));
-        } catch (std::exception& e) {
-            std::cerr << "DB Error: " << e.what() << std::endl;
+
+
+            sql +=
+                "(?,?,?,?,?,?,?,?,?,?,?,?)";
+        }
+
+
+        SQLite::Statement stmt(
+            db,
+            sql
+        );
+
+
+        int index = 1;
+
+
+        for (const auto& row :
+            rows)
+        {
+            stmt.bind(
+                index++,
+                row.id
+            );
+
+            stmt.bind(
+                index++,
+                row.type
+            );
+
+            stmt.bind(
+                index++,
+                row.name
+            );
+
+            stmt.bind(
+                index++,
+                row.gid
+            );
+
+            stmt.bind(
+                index++,
+                row.latency
+            );
+
+            stmt.bind(
+                index++,
+                row.dl_speed
+            );
+
+            stmt.bind(
+                index++,
+                row.ul_speed
+            );
+
+            stmt.bind(
+                index++,
+                row.test_country
+            );
+
+            stmt.bind(
+                index++,
+                row.ip_out
+            );
+
+            stmt.bind(
+                index++,
+                row.outbound_json
+            );
+
+            stmt.bind(
+                index++,
+                static_cast<int64_t>(
+                    row.traffic_dl
+                    )
+            );
+
+            stmt.bind(
+                index++,
+                static_cast<int64_t>(
+                    row.traffic_up
+                    )
+            );
+        }
+
+
+        // IMPORTANT:
+        //
+        // Do not catch SQLite exception here.
+        // The owner transaction must see it.
+        stmt.exec();
+    }
+
+    bool Database::execBatchInsertProfiles(
+        const std::vector<ProfileInsertRow>& rows)
+    {
+        if (rows.empty())
+        {
+            return true;
+        }
+
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        bool transactionStarted =
+            false;
+
+
+        try
+        {
+            // =====================================================
+            // One SQLite transaction for the WHOLE batch.
+            // =====================================================
+
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+
+            transactionStarted =
+                true;
+
+
+            // execBatchInsertProfiles0() may split the batch
+            // into multiple SQL statements, but all of them
+            // are now inside one SQLite transaction.
+            execBatchInsertProfiles0(
+                rows
+            );
+
+
+            db.exec(
+                "COMMIT"
+            );
+
+
+            transactionStarted =
+                false;
+
+
+            // Count committed writes only after COMMIT.
+            maybeCheckpoint(
+                static_cast<int>(
+                    rows.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            if (transactionStarted)
+            {
+                try
+                {
+                    db.exec(
+                        "ROLLBACK"
+                    );
+                }
+                catch (...)
+                {
+                    // Preserve the original exception.
+                }
+            }
+
+
+            NotifyError(
+                "execBatchInsertProfiles",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
+    bool Database::deleteProfilesAtomic(
+        const std::vector<int>& ids)
+    {
+        if (ids.empty())
+        {
+            return true;
+        }
+
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        bool transactionStarted =
+            false;
+
+
+        try
+        {
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+
+            transactionStarted =
+                true;
+
+
+            constexpr size_t chunkSize =
+                500;
+
+
+            for (size_t offset = 0;
+                offset < ids.size();
+                offset += chunkSize)
+            {
+                const size_t end =
+                    std::min(
+                        offset + chunkSize,
+                        ids.size()
+                    );
+
+
+                std::string sql =
+                    "DELETE FROM profiles "
+                    "WHERE id IN (";
+
+
+                for (size_t i = offset;
+                    i < end;
+                    ++i)
+                {
+                    if (i > offset)
+                    {
+                        sql += ",";
+                    }
+
+
+                    sql +=
+                        std::to_string(
+                            ids[i]
+                        );
+                }
+
+
+                sql += ")";
+
+
+                db.exec(
+                    sql
+                );
+            }
+
+
+            db.exec(
+                "COMMIT"
+            );
+
+
+            transactionStarted =
+                false;
+
+
+            maybeCheckpoint(
+                static_cast<int>(
+                    ids.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            if (transactionStarted)
+            {
+                try
+                {
+                    db.exec(
+                        "ROLLBACK"
+                    );
+                }
+                catch (...)
+                {
+                }
+            }
+
+
+            NotifyError(
+                "deleteProfilesAtomic",
+                e
+            );
+
+
+            return false;
         }
     }
 

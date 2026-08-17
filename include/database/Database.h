@@ -514,26 +514,15 @@ namespace Configs
         }
 
 
-        void execBatchInsertProfiles(
-            const std::vector<
-            ProfileInsertRow
-            >& rows)
-        {
-            try
-            {
-                execBatchInsertProfiles0(
-                    rows
-                );
-            }
-            catch (std::exception& e)
-            {
-                NotifyError(
-                    "execBatchInsertProfiles",
-                    e
-                );
-            }
-        }
+        [[nodiscard]]
+        bool execBatchInsertProfiles(
+            const std::vector<ProfileInsertRow>& rows
+        );
 
+        [[nodiscard]]
+        bool deleteProfilesAtomic(
+            const std::vector<int>& ids
+        );
 
         void execBatchReplaceProfiles(
             const std::vector<

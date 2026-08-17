@@ -99,6 +99,38 @@ namespace Configs
         return true;
     }
 
+    bool Profile::RollbackAssignedIdentity(
+        int expectedId,
+        int expectedGid)
+    {
+        QWriteLocker locker(
+            &configLock_
+        );
+
+
+        // Never reset a Profile whose identity has meanwhile
+        // been changed by somebody else.
+        if (id_ != expectedId ||
+            gid_ != expectedGid)
+        {
+            return false;
+        }
+
+
+        // Restore state of a newly-created unpublished Profile.
+        id_ = -1;
+        gid_ = 0;
+
+
+        // Increment revision deliberately.
+        //
+        // Any operation that captured the old revision while
+        // this temporary identity was visible must become stale.
+        ++configRevision_;
+
+
+        return true;
+    }
 
     void Profile::LoadIdentity(
         int id,

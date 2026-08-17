@@ -787,6 +787,29 @@ namespace Configs {
         QList<std::shared_ptr<Profile>>& profiles,
         int gid)
     {
+        // =========================================================
+        // Basic validation
+        // =========================================================
+
+        if (!Configs::dataManager ||
+            !Configs::dataManager->settingsRepo ||
+            !Configs::dataManager->groupsRepo)
+        {
+            return false;
+        }
+
+
+        // Empty batch is already successfully complete.
+        if (profiles.isEmpty())
+        {
+            return true;
+        }
+
+
+        // =========================================================
+        // Resolve target Group
+        // =========================================================
+
         const int targetGid =
             gid < 0
             ? Configs::dataManager
@@ -794,119 +817,513 @@ namespace Configs {
             ->current_group
             : gid;
 
-        // -------------------------------------------------
-        // Resolve Group without ProfilesRepo::mutex
-        // -------------------------------------------------
-        auto group =
-            dataManager
-            ->groupsRepo
-            ->GetGroup(targetGid);
 
-        if (!group) {
+        auto group =
+            Configs::dataManager
+            ->groupsRepo
+            ->GetGroup(
+                targetGid
+            );
+
+
+        if (!group)
+        {
+            MW_show_log(
+                "ProfilesRepo::AddProfileBatch: "
+                "group not found: "
+                +
+                Int2String(
+                    targetGid
+                )
+            );
+
+
             return false;
         }
 
-        QList<std::shared_ptr<Profile>>
-            toAdd;
 
-        for (const auto& profile : profiles) {
+        // =========================================================
+        // Strict pre-validation
+        //
+        // ALL entries must be valid unpublished Profiles.
+        //
+        // Do NOT silently filter the input list.
+        // =========================================================
 
-            if (profile &&
-                profile->Id() < 0)
+        QSet<const Profile*>
+            uniqueProfiles;
+
+
+        uniqueProfiles.reserve(
+            profiles.size()
+        );
+
+
+        for (const auto& profile :
+            profiles)
+        {
+            if (!profile)
             {
-                toAdd.append(profile);
+                MW_show_log(
+                    "ProfilesRepo::AddProfileBatch: "
+                    "null Profile in batch"
+                );
+
+
+                return false;
             }
+
+
+            // AddProfileBatch is only for NEW unpublished Profiles.
+            if (profile->Id() >= 0)
+            {
+                MW_show_log(
+                    "ProfilesRepo::AddProfileBatch: "
+                    "batch contains an already published Profile"
+                );
+
+
+                return false;
+            }
+
+
+            // The same shared_ptr twice would make the first
+            // TryAssignIdentity succeed and the second fail.
+            if (uniqueProfiles.contains(
+                profile.get()))
+            {
+                MW_show_log(
+                    "ProfilesRepo::AddProfileBatch: "
+                    "duplicate Profile object in batch"
+                );
+
+
+                return false;
+            }
+
+
+            uniqueProfiles.insert(
+                profile.get()
+            );
         }
 
-        if (toAdd.isEmpty()) {
-            return true;
-        }
 
-        // -------------------------------------------------
-        // Reserve IDs
-        // -------------------------------------------------
+        // =========================================================
+        // Reserve one contiguous ID range
+        // =========================================================
+
         const int count =
-            toAdd.size();
+            profiles.size();
 
 
         const int firstId =
-            NewProfileIDRange(count);
+            NewProfileIDRange(
+                count
+            );
 
-        if (firstId <= 0) {
+
+        if (firstId <= 0)
+        {
+            MW_show_log(
+                "ProfilesRepo::AddProfileBatch: "
+                "failed to reserve profile IDs"
+            );
+
+
             return false;
         }
+
+
+        // =========================================================
+        // Prepare rollback bookkeeping
+        // =========================================================
+
+        struct AssignedProfile
+        {
+            std::shared_ptr<Profile> profile;
+            int id = -1;
+        };
+
+
+        QList<AssignedProfile>
+            assignedProfiles;
+
+
+        assignedProfiles.reserve(
+            count
+        );
+
+
+        QList<int>
+            profileIDs;
+
+
+        profileIDs.reserve(
+            count
+        );
+
 
         std::vector<ProfileInsertRow>
             rows;
 
+
         rows.reserve(
-            static_cast<size_t>(count)
+            static_cast<size_t>(
+                count
+                )
         );
 
-        QList<int> profileIDs;
 
-        profileIDs.reserve(count);
-        // -------------------------------------------------
-        // ProfilesRepo state + DB
-        // -------------------------------------------------
-        {
-            QMutexLocker locker(&mutex);
+        // =========================================================
+        // Rollback helper
+        // =========================================================
 
-
-            for (int i = 0;
-                i < count;
-                ++i)
+        const auto rollbackIdentities =
+            [&assignedProfiles,
+            targetGid]()
             {
-                const int id =
-                    firstId + i;
-
-                auto& profile =
-                    toAdd[i];
-
-                if (!profile->TryAssignIdentity(
-                    id,
-                    targetGid))
+                // Reverse order is preferable for rollback.
+                for (auto it =
+                    assignedProfiles.rbegin();
+                    it !=
+                    assignedProfiles.rend();
+                    ++it)
                 {
-                    MW_show_log(
-                        "Failed to assign identity "
-                        "to profile in AddProfileBatch"
-                    );
+                    if (!it->profile)
+                    {
+                        continue;
+                    }
 
-                    continue;
+
+                    const bool rolledBack =
+                        it->profile
+                        ->RollbackAssignedIdentity(
+                            it->id,
+                            targetGid
+                        );
+
+
+                    if (!rolledBack)
+                    {
+                        MW_show_log(
+                            "ProfilesRepo::AddProfileBatch: "
+                            "failed to rollback Profile identity"
+                        );
+                    }
                 }
+            };
 
-                identityMap[id] =
-                    std::weak_ptr<Profile>(
-                        profile
-                    );
 
-                rows.push_back(
-                    profileToInsertRow(
-                        profile.get(),
-                        id,
-                        targetGid
-                    )
+        // =========================================================
+        // Assign ALL identities
+        //
+        // If ONE assignment fails -> roll back EVERYTHING.
+        // =========================================================
+
+        for (int i = 0;
+            i < count;
+            ++i)
+        {
+            const int newId =
+                firstId + i;
+
+
+            auto& profile =
+                profiles[i];
+
+
+            if (!profile->TryAssignIdentity(
+                newId,
+                targetGid))
+            {
+                MW_show_log(
+                    "ProfilesRepo::AddProfileBatch: "
+                    "failed to assign identity; "
+                    "rolling back entire batch"
                 );
 
-                profileIDs.append(id);
+
+                rollbackIdentities();
+
+
+                return false;
             }
 
-            db.execBatchInsertProfiles(
-                rows
+
+            assignedProfiles.append(
+                {
+                    profile,
+                    newId
+                }
+            );
+
+
+            profileIDs.append(
+                newId
+            );
+
+
+            rows.push_back(
+                profileToInsertRow(
+                    profile.get(),
+                    newId,
+                    targetGid
+                )
             );
         }
 
-        // -------------------------------------------------
-        // ProfilesRepo::mutex is released here.
-        // -------------------------------------------------
-        group->AddProfileBatch(
-            profileIDs
-        );
 
-        // Group mutex is also released before Save().
-        dataManager
+        // =========================================================
+        // Defensive invariant checks
+        // =========================================================
+
+        if (assignedProfiles.size() != count ||
+            profileIDs.size() != count ||
+            rows.size() !=
+            static_cast<size_t>(count))
+        {
+            MW_show_log(
+                "ProfilesRepo::AddProfileBatch: "
+                "internal batch size mismatch"
+            );
+
+
+            rollbackIdentities();
+
+
+            return false;
+        }
+
+
+        // =========================================================
+// Atomic DB INSERT
+//
+// Nothing is published into Group before the complete
+// Profile batch has been committed to SQLite.
+// =========================================================
+
+        {
+            QMutexLocker locker(
+                &mutex
+            );
+
+
+            const bool inserted =
+                db.execBatchInsertProfiles(
+                    rows
+                );
+
+
+            if (!inserted)
+            {
+                // Do not hold ProfilesRepo::mutex while taking
+                // Profile configuration locks during rollback.
+                locker.unlock();
+
+
+                MW_show_log(
+                    "ProfilesRepo::AddProfileBatch: "
+                    "database transaction failed; "
+                    "rolling back identities"
+                );
+
+
+                rollbackIdentities();
+
+
+                return false;
+            }
+
+
+            // =====================================================
+            // Publish profiles into identity map only AFTER
+            // SQLite transaction has committed successfully.
+            // =====================================================
+
+            for (const auto& assigned :
+                assignedProfiles)
+            {
+                identityMap[
+                    assigned.id
+                ] =
+                    std::weak_ptr<Profile>(
+                        assigned.profile
+                    );
+            }
+        }
+
+
+        // =========================================================
+        // FULL ROLLBACK
+        //
+        // At this point Profile rows already exist in SQLite and
+        // have been published into identityMap.
+        //
+        // If publication into Group or Group persistence fails,
+        // undo all of that.
+        // =========================================================
+
+        const auto rollbackCommittedBatch =
+            [
+                this,
+                &assignedProfiles,
+                &profileIDs,
+                &rollbackIdentities,
+                group
+            ]() -> bool
+            {
+                bool rollbackOk =
+                    true;
+
+
+                // =================================================
+                // 1. Remove newly-added IDs from Group memory
+                // =================================================
+
+                if (group)
+                {
+                    group->RemoveProfileBatch(
+                        profileIDs
+                    );
+                }
+
+
+                // =================================================
+                // 2. Convert QList<int> to std::vector<int>
+                // =================================================
+
+                std::vector<int>
+                    ids;
+
+
+                ids.reserve(
+                    static_cast<size_t>(
+                        profileIDs.size()
+                        )
+                );
+
+
+                for (const int id :
+                profileIDs)
+                {
+                    ids.push_back(
+                        id
+                    );
+                }
+
+
+                // =================================================
+                // 3. Remove committed Profile rows from SQLite
+                // =================================================
+
+                const bool deleted =
+                    db.deleteProfilesAtomic(
+                        ids
+                    );
+
+
+                if (!deleted)
+                {
+                    MW_show_log(
+                        "ProfilesRepo::AddProfileBatch: "
+                        "CRITICAL: failed to remove "
+                        "Profile rows during rollback"
+                    );
+
+
+                    rollbackOk =
+                        false;
+                }
+
+
+                // =================================================
+                // 4. Remove Profiles from identity map
+                // =================================================
+
+                {
+                    QMutexLocker locker(
+                        &mutex
+                    );
+
+
+                    for (const auto& assigned :
+                        assignedProfiles)
+                    {
+                        identityMap.erase(
+                            assigned.id
+                        );
+                    }
+                }
+
+
+                // =================================================
+                // 5. Return Profile objects to unpublished state
+                // =================================================
+
+                rollbackIdentities();
+
+
+                return rollbackOk;
+            };
+
+
+        // =========================================================
+        // Publish IDs into Group
+        // =========================================================
+
+        const bool groupChanged =
+            group->AddProfileBatch(
+                profileIDs
+            );
+
+
+        if (!groupChanged)
+        {
+            MW_show_log(
+                "ProfilesRepo::AddProfileBatch: "
+                "failed to publish Profile IDs into Group; "
+                "rolling back complete batch"
+            );
+
+
+            rollbackCommittedBatch();
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Persist Group
+        // =========================================================
+
+        const bool groupSaved =
+            Configs::dataManager
             ->groupsRepo
-            ->Save(group);
+            ->Save(
+                group
+            );
+
+
+        if (!groupSaved)
+        {
+            MW_show_log(
+                "ProfilesRepo::AddProfileBatch: "
+                "failed to persist Group; "
+                "rolling back complete batch"
+            );
+
+
+            rollbackCommittedBatch();
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Complete success
+        // =========================================================
 
         return true;
     }

@@ -36,6 +36,8 @@
 #include <QMutexLocker>
 
 namespace Configs {
+    class ProfilesRepo;
+
     struct ProfileTrafficSnapshot
     {
         qint64 downlink = 0;
@@ -859,6 +861,18 @@ namespace Configs {
 
 
     private:
+        friend class ProfilesRepo;
+
+
+        // Used only by ProfilesRepo while rolling back
+        // an unpublished batch insertion.
+        //
+        // Identity is reset only if it still has exactly
+        // the values assigned by the repository.
+        bool RollbackAssignedIdentity(
+            int expectedId,
+            int expectedGid
+        );
 
         // =====================================================
         // Internal configuration copy-on-write machinery
