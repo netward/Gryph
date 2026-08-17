@@ -694,93 +694,76 @@ namespace Configs {
         std::shared_ptr<Profile>& profile,
         int gid)
     {
-        if (!profile ||
-            profile->Id() >= 0)
+        // =========================================================
+        // Basic validation
+        // =========================================================
+
+        if (!profile)
         {
-            return false;
-        }
-
-        // -------------------------------------------------
-        // Resolve target group BEFORE ProfilesRepo::mutex
-        // -------------------------------------------------
-        const int targetGid =
-            gid < 0
-            ? Configs::dataManager
-            ->settingsRepo
-            ->current_group
-            : gid;
-
-        auto group =
-            dataManager
-            ->groupsRepo
-            ->GetGroup(targetGid);
-
-        if (!group) {
-
             MW_show_log(
-                "Could not find group with id "
-                + Int2String(targetGid)
+                "ProfilesRepo::AddProfile: "
+                "null Profile"
             );
 
             return false;
         }
 
-        // -------------------------------------------------
-        // Reserve DB ID
-        // -------------------------------------------------
-        const int newId =
-            NewProfileID();
 
-        if (newId <= 0) {
-            return false;
-        }
-
-        if (!profile->TryAssignIdentity(
-            newId,
-            targetGid))
-        {
-            return false;
-        }
-
-        // -------------------------------------------------
-        // ProfilesRepo state + profile DB persistence
-        // -------------------------------------------------
-        {
-            QMutexLocker locker(&mutex);
-
-
-            identityMap[newId] =
-                std::weak_ptr<Profile>(
-                    profile
-                );
-
-            saveToDatabase(
-                profile.get(),
-                profile->Id()
-            );
-        }
-
-        // -------------------------------------------------
-        // IMPORTANT:
+        // AddProfile() is only intended for a new,
+        // unpublished Profile.
         //
-        // ProfilesRepo::mutex has already been released.
-        // -------------------------------------------------
-        if (!group->AddProfile(newId)) {
+        // A Profile with id >= 0 is already published
+        // into persistent repository state.
+        if (profile->Id() >= 0)
+        {
+            MW_show_log(
+                "ProfilesRepo::AddProfile: "
+                "Profile is already published"
+            );
 
-            // The group already contains this ID.
-            //
-            // Extremely unlikely for a newly allocated ID,
-            // but do not nest locks attempting recovery here.
             return false;
         }
 
-        // Group::AddProfile released Group::mutex
-        // before GroupsRepo::Save is called.
-        dataManager
-            ->groupsRepo
-            ->Save(group);
 
-        return true;
+        // =========================================================
+        // Use the transactional batch implementation
+        // =========================================================
+        //
+        // A single Profile is just a batch containing one element.
+        //
+        // This is intentional:
+        //
+        // AddProfileBatch() already implements:
+        //
+        //   1. target Group validation;
+        //   2. ID reservation;
+        //   3. Profile identity assignment;
+        //   4. atomic SQLite INSERT;
+        //   5. identityMap publication;
+        //   6. Group publication;
+        //   7. Group persistence;
+        //   8. complete rollback on failure.
+        //
+        // Keeping all of this in ONE implementation avoids
+        // AddProfile() and AddProfileBatch() drifting apart again.
+        // =========================================================
+
+        QList<std::shared_ptr<Profile>>
+            batch;
+
+
+        batch.reserve(1);
+
+
+        batch.append(
+            profile
+        );
+
+
+        return AddProfileBatch(
+            batch,
+            gid
+        );
     }
 
     bool ProfilesRepo::AddProfileBatch(
@@ -2046,15 +2029,16 @@ namespace Configs {
         }
         return ids;
     }
-
-    int ProfilesRepo::NewProfileID() const {
-        // Atomically increment and get the new ID using RETURNING clause (DB atomic, no lock required)
-        auto query = db.query("UPDATE entity_ids SET profile_last_id = profile_last_id + 1 RETURNING profile_last_id");
-        if (query && query->executeStep()) {
-            return query->getColumn(0).getInt();
-        }
-        return 0;
-    }
+    
+    // Don't used anymore
+    //int ProfilesRepo::NewProfileID() const {
+    //    // Atomically increment and get the new ID using RETURNING clause (DB atomic, no lock required)
+    //    auto query = db.query("UPDATE entity_ids SET profile_last_id = profile_last_id + 1 RETURNING profile_last_id");
+    //    if (query && query->executeStep()) {
+    //        return query->getColumn(0).getInt();
+    //    }
+    //    return 0;
+    //}
 
     int ProfilesRepo::NewProfileIDRange(int n) const {
         if (n <= 0) return 0;

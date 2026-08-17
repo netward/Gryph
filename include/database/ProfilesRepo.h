@@ -91,11 +91,25 @@ namespace Configs {
                 const QString& type
             );
         
-        // Add profile to database (assigns ID and saves)
-        bool AddProfile(std::shared_ptr<Profile>& profile, int gid = -1);
-        
-        // Add multiple profiles in batch
-        bool AddProfileBatch(QList<std::shared_ptr<Profile>>& profiles, int gid = -1);
+        // Add one new unpublished Profile.
+        //
+        // Uses the same all-or-nothing transactional path
+        // as AddProfileBatch().
+        bool AddProfile(
+            std::shared_ptr<Profile>& profile,
+            int gid = -1
+        );
+
+
+        // Add multiple new unpublished Profiles atomically.
+        //
+        // Either the complete batch is published into
+        // SQLite/repository/Group state, or the operation
+        // rolls back.
+        bool AddProfileBatch(
+            QList<std::shared_ptr<Profile>>& profiles,
+            int gid = -1
+        );
         
         // Get profile by ID (uses identity map)
         std::shared_ptr<Profile> GetProfile(int id) const;
