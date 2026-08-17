@@ -1,5 +1,6 @@
 #include "include/ui/MainWindow.h"
 #include "ui_MainWindow.h"
+#include "include/ui/MainWindowAPI.h"
 
 #include <memory>
 #include <atomic>
@@ -191,19 +192,6 @@ bool MainWindow::clearRunningProfileIf(
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     // Регистрация главного окна и глобальных UI-маршрутизаторов.
     setAcceptDrops(true);
-    MW_dialog_message = [=, this](MwMessage cmd, QStringList args) {
-        runOnUiThread([=, this]
-            {
-                dialog_message_impl(cmd, args);
-            });
-        };
-    // Общий обработчик deeplink-ссылок Gryph://.
-    MW_handle_deeplink = [=, this](const QString& url) {
-        runOnUiThread([=, this]
-            {
-                handle_deeplink_impl(url);
-            });
-        };
 
     // Проверка соответствия прав записи автозапуска текущим правам процесса и при необходимости перенос старого формата настройки автозапуска.
     AutoRun_FixPrivilegeIfNeeded();
@@ -257,10 +245,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         new SyntaxHighlighter(themeUsesDarkLog(theme), qvLogDocument);
         scheduleProxyListRefresh();
         });
-    MW_show_log = [=, this](const QString& log) {
-        append_log(log);
-        };
-
+    
     // Выбор входящего порта.
     if (Configs::dataManager->settingsRepo->random_inbound_port)
     {
@@ -2551,10 +2536,25 @@ void MainWindow::dropEvent(QDropEvent* event)
 MainWindow::~MainWindow()
 {
     // =========================================================
-    // Final lifetime barrier.
+    // FIRST:
+    // detach this window from every global dispatcher.
     //
-    // Normally prepare_exit() already called shutdown(), but
-    // the destructor must be safe independently.
+    // From this point:
+    //
+    // MW_show_log()
+    // MW_dialog_message()
+    // MW_handle_deeplink()
+    //
+    // can no longer schedule NEW work against this MainWindow.
+    // =========================================================
+
+    MainWindowApi::Detach(
+        this
+    );
+
+
+    // =========================================================
+    // Invalidate detached runtime workers.
     // =========================================================
 
     if (runtimeSessionState_)
@@ -2565,14 +2565,11 @@ MainWindow::~MainWindow()
 
 
     // =========================================================
-    // From this point no detached country lookup may publish
-    // new runtime data.
-    //
-    // It may still be blocked inside HttpGet(), but it owns no
-    // MainWindow pointer, so that is safe.
+    // Destroy UI only after external dispatch has been detached.
     // =========================================================
 
     delete ui;
+
 
     ui =
         nullptr;
@@ -2648,8 +2645,39 @@ void MainWindow::show_group(int gid) {
     Configs::dataManager->settingsRepo->refreshing_group = false;
 }
 
-// callback
+// =============================================================
+// MainWindowApi dispatch targets
+// =============================================================
 
+void MainWindow::dispatchGlobalMessage(
+    MwMessage cmd,
+    const QStringList& args)
+{
+    dialog_message_impl(
+        cmd,
+        args
+    );
+}
+
+
+void MainWindow::dispatchGlobalDeeplink(
+    const QString& url)
+{
+    handle_deeplink_impl(
+        url
+    );
+}
+
+
+void MainWindow::enqueueGlobalLog(
+    const QString& log)
+{
+    append_log(
+        log
+    );
+}
+
+// callback
 void MainWindow::handle_deeplink_impl(const QString& url) {
     const QUrl u(url);
     // QUrl lowercases the host, so "Gryph://AddSub/" arrives with host "addsub".

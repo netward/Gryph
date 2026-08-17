@@ -1,9 +1,13 @@
 #include "include/global/Utils.hpp"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 #include "3rdparty/QThreadCreateThread.hpp"
 
 #include <random>
+#include <utility>
 
+#include <QDebug>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QApplication>
 #include <QUrlQuery>
 #include <QTcpServer>
@@ -23,6 +27,337 @@
 #ifdef Q_OS_MAC
 #include <ApplicationServices/ApplicationServices.h>
 #endif
+
+namespace
+{
+    // =========================================================
+    // Messages which arrive before MainWindowApi::Initialize()
+    // finishes publishing MainWindow.
+    // =========================================================
+
+    struct PendingMainWindowMessage
+    {
+        MwMessage command;
+
+        QStringList arguments;
+    };
+
+
+    QMutex
+        g_pendingMainWindowEventsMutex;
+
+
+    QList<PendingMainWindowMessage>
+        g_pendingMainWindowMessages;
+
+
+    QStringList
+        g_pendingMainWindowLogs;
+
+
+    // Avoid unlimited memory use if something goes badly wrong
+    // during application initialization.
+    constexpr int
+        MAX_PENDING_MAINWINDOW_LOGS = 1000;
+
+
+    constexpr int
+        MAX_PENDING_MAINWINDOW_MESSAGES = 100;
+}
+
+// =============================================================
+// Stable MainWindow bridges
+//
+// No MainWindow* is stored here.
+// No callback captures `this`.
+// =============================================================
+
+void MW_show_log(
+    const QString& log)
+{
+    if (log.isEmpty())
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // Normal path
+    //
+    // MainWindow already exists.
+    // =========================================================
+
+    if (MainWindowApi::DispatchLog(
+        log))
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // MainWindow is not published yet.
+    //
+    // This happens during MainWindow construction because the
+    // Core and several background services already start before
+    // MainWindowApi::Initialize() can publish g_mainWindow.
+    //
+    // Do NOT lose this log line.
+    // =========================================================
+
+    {
+        QMutexLocker locker(
+            &g_pendingMainWindowEventsMutex
+        );
+
+
+        // Keep the startup buffer bounded.
+        if (g_pendingMainWindowLogs.size()
+            >=
+            MAX_PENDING_MAINWINDOW_LOGS)
+        {
+            g_pendingMainWindowLogs
+                .removeFirst();
+        }
+
+
+        g_pendingMainWindowLogs
+            .append(
+                log
+            );
+    }
+
+
+    // Also keep the message visible in debugger/console.
+    qInfo()
+        .noquote()
+        << log;
+}
+
+void MW_dialog_message(
+    MwMessage cmd,
+    QStringList args)
+{
+    // =========================================================
+    // Normal delivery
+    // =========================================================
+
+    if (MainWindowApi::DispatchMessage(
+        cmd,
+        args))
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // MainWindow is still being constructed.
+    //
+    // Preserve the message and replay it immediately after
+    // MainWindowApi publishes the window.
+    // =========================================================
+
+    {
+        QMutexLocker locker(
+            &g_pendingMainWindowEventsMutex
+        );
+
+
+        if (g_pendingMainWindowMessages.size()
+            >=
+            MAX_PENDING_MAINWINDOW_MESSAGES)
+        {
+            // Dropping the oldest event is preferable to
+            // unbounded startup memory growth.
+            g_pendingMainWindowMessages
+                .removeFirst();
+        }
+
+
+        PendingMainWindowMessage
+            pending;
+
+
+        pending.command =
+            cmd;
+
+
+        pending.arguments =
+            std::move(args);
+
+
+        g_pendingMainWindowMessages
+            .append(
+                std::move(pending)
+            );
+    }
+}
+
+void MW_FlushPendingMainWindowEvents()
+{
+    // =========================================================
+    // Move pending data into local containers.
+    //
+    // Do NOT hold the pending mutex while invoking MainWindow.
+    // MainWindow callbacks may themselves log messages.
+    // =========================================================
+
+    QList<PendingMainWindowMessage>
+        messages;
+
+
+    QStringList
+        logs;
+
+
+    {
+        QMutexLocker locker(
+            &g_pendingMainWindowEventsMutex
+        );
+
+
+        messages.swap(
+            g_pendingMainWindowMessages
+        );
+
+
+        logs.swap(
+            g_pendingMainWindowLogs
+        );
+    }
+
+
+    // =========================================================
+    // Deliver control messages first.
+    //
+    // CoreStarted, for example, updates application state.
+    // =========================================================
+
+    QList<PendingMainWindowMessage>
+        undeliveredMessages;
+
+
+    for (auto& pending :
+        messages)
+    {
+        const bool delivered =
+            MainWindowApi::DispatchMessage(
+                pending.command,
+                pending.arguments
+            );
+
+
+        if (!delivered)
+        {
+            undeliveredMessages
+                .append(
+                    std::move(pending)
+                );
+        }
+    }
+
+
+    // =========================================================
+    // Then replay startup log.
+    // =========================================================
+
+    QStringList
+        undeliveredLogs;
+
+
+    for (const auto& log :
+        logs)
+    {
+        if (!MainWindowApi::DispatchLog(
+            log))
+        {
+            undeliveredLogs
+                .append(
+                    log
+                );
+        }
+    }
+
+
+    // =========================================================
+    // Extremely defensive:
+    //
+    // If the MainWindow disappeared again during the flush,
+    // return the undelivered events to the queue.
+    // =========================================================
+
+    if (undeliveredMessages.isEmpty()
+        &&
+        undeliveredLogs.isEmpty())
+    {
+        return;
+    }
+
+
+    {
+        QMutexLocker locker(
+            &g_pendingMainWindowEventsMutex
+        );
+
+
+        // Older messages must remain before newer messages
+        // which may have appeared while we were flushing.
+
+        if (!undeliveredMessages.isEmpty())
+        {
+            QList<PendingMainWindowMessage>
+                merged;
+
+
+            merged.reserve(
+                undeliveredMessages.size()
+                +
+                g_pendingMainWindowMessages.size()
+            );
+
+
+            merged.append(
+                undeliveredMessages
+            );
+
+
+            merged.append(
+                g_pendingMainWindowMessages
+            );
+
+
+            g_pendingMainWindowMessages =
+                std::move(merged);
+        }
+
+
+        if (!undeliveredLogs.isEmpty())
+        {
+            QStringList
+                merged;
+
+
+            merged.reserve(
+                undeliveredLogs.size()
+                +
+                g_pendingMainWindowLogs.size()
+            );
+
+
+            merged.append(
+                undeliveredLogs
+            );
+
+
+            merged.append(
+                g_pendingMainWindowLogs
+            );
+
+
+            g_pendingMainWindowLogs =
+                std::move(merged);
+        }
+    }
+}
 
 QStringList SplitLines(const QString &_string) {
     return _string.split(QRegularExpression("[\r\n]"), Qt::SplitBehaviorFlags::SkipEmptyParts);
@@ -365,29 +700,152 @@ void runOnUiThread(
     }
 }
 
-static QString g_pendingDeeplink;
+namespace
+{
+    QMutex
+        g_pendingDeeplinkMutex;
 
-QString Deeplink_ExtractFromArgs(const QStringList &args) {
-    for (const auto &arg : args) {
-        if (arg.startsWith("Gryph://")) return arg;
+
+    QString
+        g_pendingDeeplink;
+}
+
+
+void MW_handle_deeplink(
+    const QString& url)
+{
+    Deeplink_Submit(
+        url
+    );
+}
+
+
+QString Deeplink_ExtractFromArgs(
+    const QStringList& args)
+{
+    for (const auto& arg :
+        args)
+    {
+        if (arg.startsWith(
+            QStringLiteral(
+                "Gryph://"
+            )))
+        {
+            return arg;
+        }
     }
+
+
     return {};
 }
 
-void Deeplink_Submit(const QString &url) {
-    if (url.isEmpty() || !url.startsWith("Gryph://")) return;
-    if (MW_handle_deeplink) {
-        MW_handle_deeplink(url);
-    } else {
-        g_pendingDeeplink = url; // main window not up yet; replayed by Deeplink_FlushPending
+
+void Deeplink_Submit(
+    const QString& url)
+{
+    if (url.isEmpty() ||
+        !url.startsWith(
+            QStringLiteral(
+                "Gryph://"
+            )))
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // Try immediate/context-bound delivery.
+    // =========================================================
+
+    if (MainWindowApi::
+        DispatchDeeplink(
+            url
+        ))
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // MainWindow does not exist yet.
+    //
+    // Preserve URL for Deeplink_FlushPending().
+    // =========================================================
+
+    {
+        QMutexLocker locker(
+            &g_pendingDeeplinkMutex
+        );
+
+
+        g_pendingDeeplink =
+            url;
     }
 }
 
-void Deeplink_FlushPending() {
-    if (g_pendingDeeplink.isEmpty() || !MW_handle_deeplink) return;
-    const QString url = g_pendingDeeplink;
-    g_pendingDeeplink.clear();
-    MW_handle_deeplink(url);
+
+void Deeplink_FlushPending()
+{
+    QString url;
+
+
+    // ---------------------------------------------------------
+    // Take stable copy.
+    // ---------------------------------------------------------
+
+    {
+        QMutexLocker locker(
+            &g_pendingDeeplinkMutex
+        );
+
+
+        if (g_pendingDeeplink
+            .isEmpty())
+        {
+            return;
+        }
+
+
+        url =
+            g_pendingDeeplink;
+    }
+
+
+    // ---------------------------------------------------------
+    // Window still unavailable.
+    //
+    // Keep the pending value.
+    // ---------------------------------------------------------
+
+    if (!MainWindowApi::
+        DispatchDeeplink(
+            url
+        ))
+    {
+        return;
+    }
+
+
+    // ---------------------------------------------------------
+    // Successfully dispatched.
+    //
+    // Clear only if nobody replaced pending URL meanwhile.
+    // ---------------------------------------------------------
+
+    {
+        QMutexLocker locker(
+            &g_pendingDeeplinkMutex
+        );
+
+
+        if (g_pendingDeeplink
+            ==
+            url)
+        {
+            g_pendingDeeplink
+                .clear();
+        }
+    }
 }
 
 void runOnNewThread(const std::function<void()> &callback, bool wait) {

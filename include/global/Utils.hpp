@@ -59,7 +59,9 @@ inline QString software_core_name;
 
 // MainWindow functions
 
-inline std::function<void(QString)> MW_show_log;
+void MW_show_log(
+    const QString& log
+);
 
 // Commands delivered to the main window from anywhere in the app via
 // MW_dialog_message. The accompanying QStringList carries command-specific
@@ -96,9 +98,25 @@ namespace MwArg {
     inline const QString Quiet        = QStringLiteral("quiet");
 }
 
-inline std::function<void(MwMessage, QStringList)> MW_dialog_message;
-// Handles a "Gryph://" deeplink. Set by MainWindow; marshals to the UI thread.
-inline std::function<void(QString)> MW_handle_deeplink;
+// =============================================================
+// Stable global bridges.
+//
+// These are functions, not mutable std::function instances.
+// =============================================================
+
+void MW_dialog_message(
+    MwMessage cmd,
+    QStringList args
+);
+
+
+void MW_handle_deeplink(
+    const QString& url
+);
+
+// Flush messages/logs which arrived while MainWindow
+// was still being constructed.
+void MW_FlushPendingMainWindowEvents();
 
 // Deeplink plumbing (see Utils.cpp). Delivery channels feed URLs in here; the
 // pending buffer covers URLs that arrive before the main window exists.

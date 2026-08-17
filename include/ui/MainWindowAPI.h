@@ -5,66 +5,134 @@
 #include <QList>
 #include <QMap>
 #include <QString>
+#include <QStringList>
 
 #include "include/global/HTTPRequestHelper.hpp"
 #include "include/stats/connections/connectionLister.hpp"
 
+
 class QObject;
 class QWidget;
 
+enum class MwMessage;
+
+
 namespace MainWindowApi
 {
-    // Создание главного окна.
+    // =========================================================
+    // MainWindow lifetime
+    // =========================================================
+
     void Initialize();
 
-    // Возвращает главное окно как QWidget.
-    // Используется только как parent для диалогов.
+
+    void Detach(
+        QWidget* expectedWindow
+    );
+
+
     QWidget* Widget();
 
-    // Завершение приложения.
+
+    // =========================================================
+    // Global message bridges
+    // =========================================================
+
+    [[nodiscard]]
+    bool DispatchMessage(
+        MwMessage cmd,
+        QStringList args
+    );
+
+
+    [[nodiscard]]
+    bool DispatchDeeplink(
+        QString url
+    );
+
+
+    [[nodiscard]]
+    bool DispatchLog(
+        QString log
+    );
+
+
+    // =========================================================
+    // Existing MainWindow API
+    // =========================================================
+
     void PrepareExit();
 
-    // Выбор профиля в главном окне.
+
     void StartSelectMode(
         QObject* context,
-        std::function<void(int)> callback);
+        std::function<void(int)> callback
+    );
 
-    // Регистрация или отключение глобальных горячих клавиш.
-    void RegisterHotkey(bool unregister);
 
-    // Управление VPN и профилями.
+    void RegisterHotkey(
+        bool unregister
+    );
+
+
     bool StopVpnProcess();
+
 
     void StopProfile(
         bool crash = false,
         bool block = false,
-        bool manual = false);
+        bool manual = false
+    );
 
-    // Обновление интерфейса.
-    void RefreshStatus(const QString& trafficUpdate = {});
+
+    void RefreshStatus(
+        const QString& trafficUpdate = {}
+    );
+
 
     void UpdateTrafficGraph(
         int proxyDownload,
         int proxyUpload,
         int directDownload,
-        int directUpload);
+        int directUpload
+    );
+
 
     void RefreshProxyList(
         const QList<int>& ids = {},
-        bool mayNeedReset = false);
+        bool mayNeedReset = false
+    );
 
-    // Обновление списка соединений.
+
     void UpdateConnectionList(
-        const QMap<QString, Stats::ConnectionMetadata>& toUpdate,
-        const QMap<QString, Stats::ConnectionMetadata>& toAdd);
+        const QMap<
+        QString,
+        Stats::ConnectionMetadata
+        >& toUpdate,
+
+        const QMap<
+        QString,
+        Stats::ConnectionMetadata
+        >& toAdd
+    );
+
 
     void UpdateConnectionListWithRecreate(
-        const QList<Stats::ConnectionMetadata>& connections);
+        const QList<
+        Stats::ConnectionMetadata
+        >& connections
+    );
 
-    // Обновление панели загрузки.
+
     void SetDownloadReport(
-        const Configs_network::DownloadProgressReport& report,
-        bool show);
+        const Configs_network::
+        DownloadProgressReport& report,
 
-    void UpdateDataView(bool force = false);
+        bool show
+    );
+
+
+    void UpdateDataView(
+        bool force = false
+    );
 }

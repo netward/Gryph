@@ -96,6 +96,31 @@ public:
 
     void setDownloadReport(const DownloadProgressReport& report, bool show);
 
+    // =============================================================
+    // MainWindowApi dispatch targets
+    //
+    // These methods are intentionally small.
+    //
+    // External/background code must not call private MainWindow
+    // implementation directly. MainWindowApi owns dispatch and
+    // lifetime handling.
+    // =============================================================
+
+    void dispatchGlobalMessage(
+        MwMessage cmd,
+        const QStringList& args
+    );
+
+
+    void dispatchGlobalDeeplink(
+        const QString& url
+    );
+
+
+    void enqueueGlobalLog(
+        const QString& log
+    );
+
 signals:
 
     void profile_selected(int id);
@@ -187,16 +212,16 @@ private:
     > runningProfile_{ nullptr };
 
     // =============================================================
-// Runtime session state
-//
-// This object has its own lifetime independent of MainWindow.
-//
-// Background workers capture shared_ptr<RuntimeSessionState>
-// instead of capturing MainWindow*.
-//
-// Therefore MainWindow may be destroyed while a blocking HTTP
-// request is still running without causing use-after-free.
-// =============================================================
+    // Runtime session state
+    //
+    // This object has its own lifetime independent of MainWindow.
+    //
+    // Background workers capture shared_ptr<RuntimeSessionState>
+    // instead of capturing MainWindow*.
+    //
+    // Therefore MainWindow may be destroyed while a blocking HTTP
+    // request is still running without causing use-after-free.
+    // =============================================================
 
     struct RuntimeSessionState final
     {

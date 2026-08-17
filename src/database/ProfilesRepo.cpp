@@ -125,7 +125,6 @@ namespace Configs {
         // =====================================================
         // Identity
         // =====================================================
-
         profile->LoadIdentity(
             json["id"].toInt(),
             json["gid"].toInt()
@@ -135,7 +134,6 @@ namespace Configs {
         // =====================================================
         // Outbound
         // =====================================================
-
         if (json.contains("outbound") &&
             json["outbound"].isObject())
         {
@@ -194,18 +192,15 @@ namespace Configs {
                     }
                             );
 
-
             if (!updated)
             {
                 return nullptr;
             }
         }
 
-
         // =====================================================
         // Test state
         // =====================================================
-
         ProfileTestSnapshot test;
 
         test.latency =
