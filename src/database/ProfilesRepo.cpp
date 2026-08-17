@@ -253,21 +253,47 @@ namespace Configs {
         return profile;
     }
 
-    void ProfilesRepo::saveToDatabase(
+    bool ProfilesRepo::saveToDatabase(
         const Profile* profile,
         int id) const
     {
+        // =========================================================
+        // Validation
+        // =========================================================
+
         if (!profile)
         {
-            return;
+            MW_show_log(
+                "ProfilesRepo::saveToDatabase: "
+                "null Profile"
+            );
+
+            return false;
         }
 
+
+        if (id < 0)
+        {
+            MW_show_log(
+                "ProfilesRepo::saveToDatabase: "
+                "invalid Profile id"
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Freeze Profile state BEFORE database I/O
+        // =========================================================
 
         const auto config =
             profile->ConfigSnapshot();
 
+
         const auto test =
             profile->TestSnapshot();
+
 
         const auto traffic =
             profile->TrafficSnapshot();
@@ -289,65 +315,136 @@ namespace Configs {
                 traffic.downlink
                 );
 
+
         const long long trafficUp =
             static_cast<long long>(
                 traffic.uplink
                 );
 
 
+        // =========================================================
+        // Check whether the row already exists
+        // =========================================================
+
         auto checkQuery =
             db.query(
-                "SELECT id FROM profiles "
+                "SELECT id "
+                "FROM profiles "
                 "WHERE id = ?",
                 id
             );
 
 
-        const bool exists =
-            checkQuery &&
-            checkQuery->executeStep();
+        if (!checkQuery)
+        {
+            MW_show_log(
+                "ProfilesRepo::saveToDatabase: "
+                "failed to query Profile existence"
+            );
 
+            return false;
+        }
+
+
+        bool exists =
+            false;
+
+
+        try
+        {
+            exists =
+                checkQuery->executeStep();
+        }
+        catch (const std::exception& e)
+        {
+            MW_show_log(
+                "ProfilesRepo::saveToDatabase: "
+                "failed while checking Profile existence: "
+                +
+                QString::fromUtf8(
+                    e.what()
+                )
+            );
+
+            return false;
+        }
+
+
+        // Release SELECT statement before UPDATE/INSERT.
+        //
+        // This is particularly useful with a single SQLite
+        // connection because the read statement should not stay
+        // alive longer than necessary.
+        checkQuery =
+        {};
+
+
+        // =========================================================
+        // UPDATE existing row
+        // =========================================================
 
         if (exists)
         {
-            db.exec(
-                R"(
-                UPDATE profiles
-                SET type = ?,
-                    name = ?,
-                    gid = ?,
-                    latency = ?,
-                    dl_speed = ?,
-                    ul_speed = ?,
-                    test_country = ?,
-                    ip_out = ?,
-                    outbound_json = ?,
-                    traffic_dl = ?,
-                    traffic_up = ?,
-                    updated_at = strftime('%s', 'now')
-                WHERE id = ?
-            )",
+            const bool updated =
+                db.exec(
+                    R"(
+                    UPDATE profiles
+                    SET type = ?,
+                        name = ?,
+                        gid = ?,
+                        latency = ?,
+                        dl_speed = ?,
+                        ul_speed = ?,
+                        test_country = ?,
+                        ip_out = ?,
+                        outbound_json = ?,
+                        traffic_dl = ?,
+                        traffic_up = ?,
+                        updated_at = strftime('%s', 'now')
+                    WHERE id = ?
+                    )",
 
-                config.type.toStdString(),
-                config.name.toStdString(),
-                config.gid,
+                    config.type.toStdString(),
+                    config.name.toStdString(),
+                    config.gid,
 
-                test.latency,
-                test.dlSpeed.toStdString(),
-                test.ulSpeed.toStdString(),
-                test.testCountry.toStdString(),
-                test.ipOut.toStdString(),
+                    test.latency,
+                    test.dlSpeed.toStdString(),
+                    test.ulSpeed.toStdString(),
+                    test.testCountry.toStdString(),
+                    test.ipOut.toStdString(),
 
-                outboundJson.toStdString(),
+                    outboundJson.toStdString(),
 
-                trafficDl,
-                trafficUp,
+                    trafficDl,
+                    trafficUp,
 
-                id
-            );
+                    id
+                );
+
+
+            if (!updated)
+            {
+                MW_show_log(
+                    "ProfilesRepo::saveToDatabase: "
+                    "UPDATE failed for Profile "
+                    +
+                    Int2String(id)
+                );
+
+                return false;
+            }
+
+
+            return true;
         }
-        else
-        {
+
+
+        // =========================================================
+        // INSERT missing row
+        // =========================================================
+
+        const bool inserted =
             db.exec(
                 R"(
                 INSERT INTO profiles
@@ -366,8 +463,11 @@ namespace Configs {
                     traffic_up
                 )
                 VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            )",
+                (
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?
+                )
+                )",
 
                 id,
 
@@ -386,7 +486,22 @@ namespace Configs {
                 trafficDl,
                 trafficUp
             );
+
+
+        if (!inserted)
+        {
+            MW_show_log(
+                "ProfilesRepo::saveToDatabase: "
+                "INSERT failed for Profile "
+                +
+                Int2String(id)
+            );
+
+            return false;
         }
+
+
+        return true;
     }
 
     ProfileInsertRow
@@ -1957,10 +2072,10 @@ namespace Configs {
             group->RemoveProfileBatch(ids);
             dataManager->groupsRepo->Save(group);
         }
-        // =========================================================
-// Delete persistent Profiles
-// =========================================================
 
+        // =========================================================
+        // Delete persistent Profiles
+        // =========================================================
         {
             std::lock_guard<std::mutex>
                 locker(
@@ -1976,14 +2091,12 @@ namespace Configs {
                 //
                 // Increment while repository mutex is held.
                 // -------------------------------------------------
-
                 ++deletionEpoch_;
 
 
                 // -------------------------------------------------
                 // Remove cached objects first.
                 // -------------------------------------------------
-
                 for (const int id :
                 ids)
                 {
@@ -2002,12 +2115,10 @@ namespace Configs {
                 // cannot enter their publication phase between
                 // epoch invalidation and persistent deletion.
                 // -------------------------------------------------
-
                 const std::vector<int> idVec(
                     ids.begin(),
                     ids.end()
                 );
-
 
                 db.execDeleteByIdIn(
                     "profiles",
@@ -2054,8 +2165,17 @@ namespace Configs {
     bool ProfilesRepo::Save(
         const std::shared_ptr<Profile>& profile)
     {
+        // =========================================================
+        // Validation
+        // =========================================================
+
         if (!profile)
         {
+            MW_show_log(
+                "ProfilesRepo::Save: "
+                "null Profile"
+            );
+
             return false;
         }
 
@@ -2066,25 +2186,57 @@ namespace Configs {
 
         if (id < 0)
         {
+            MW_show_log(
+                "ProfilesRepo::Save: "
+                "cannot save unpublished Profile"
+            );
+
             return false;
         }
 
 
-        QMutexLocker locker(
-            &mutex
-        );
+        // =========================================================
+        // Persist FIRST
+        //
+        // Do not update identityMap before SQLite confirms the save.
+        // =========================================================
 
-
-        saveToDatabase(
-            profile.get(),
-            id
-        );
-
-
-        identityMap[id] =
-            std::weak_ptr<Profile>(
-                profile
+        const bool persisted =
+            saveToDatabase(
+                profile.get(),
+                id
             );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "ProfilesRepo::Save: "
+                "failed to persist Profile "
+                +
+                Int2String(id)
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Publish in-memory state only AFTER DB success
+        // =========================================================
+
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            identityMap[id] =
+                std::weak_ptr<Profile>(
+                    profile
+                );
+        }
 
 
         return true;
@@ -2109,6 +2261,7 @@ namespace Configs {
         }
 
 
+        // Freeze traffic snapshot before SQLite I/O.
         const auto traffic =
             profile->TrafficSnapshot();
 
@@ -2118,27 +2271,45 @@ namespace Configs {
                 traffic.downlink
                 );
 
+
         const long long up =
             static_cast<long long>(
                 traffic.uplink
                 );
 
 
-        QMutexLocker locker(
-            &mutex
-        );
+        // =========================================================
+        // No ProfilesRepo::mutex needed here.
+        //
+        // Database serializes its own SQLite connection.
+        // This operation does not touch identityMap.
+        // =========================================================
+
+        const bool persisted =
+            db.exec(
+                "UPDATE profiles "
+                "SET traffic_dl = ?, "
+                "traffic_up = ?, "
+                "updated_at = strftime('%s', 'now') "
+                "WHERE id = ?",
+
+                dl,
+                up,
+                id
+            );
 
 
-        db.exec(
-            "UPDATE profiles "
-            "SET traffic_dl = ?, "
-            "traffic_up = ? "
-            "WHERE id = ?",
+        if (!persisted)
+        {
+            MW_show_log(
+                "ProfilesRepo::SaveTraffic: "
+                "failed to persist traffic for Profile "
+                +
+                Int2String(id)
+            );
 
-            dl,
-            up,
-            id
-        );
+            return false;
+        }
 
 
         return true;

@@ -42,8 +42,15 @@ namespace Configs {
         // Helper to deserialize Profile from JSON
         std::shared_ptr<Profile> profileFromJson(const QJsonObject& json) const;
         
-        // Save profile to database (internal helper)
-        void saveToDatabase(const Profile* profile, int id) const;
+        // Save Profile snapshot to SQLite.
+        //
+        // Returns true only when the database operation
+        // completed successfully.
+        [[nodiscard]]
+        bool saveToDatabase(
+            const Profile* profile,
+            int id
+        ) const;
 
         // Build one row for batch insert (same columns as saveToDatabase)
         ProfileInsertRow profileToInsertRow(const Profile* profile, int id, int gid) const;
