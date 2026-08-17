@@ -10,6 +10,7 @@
 #include <atomic>
 #include <memory>
 
+#include <QDebug>
 #include <QInputDialog>
 #include <QPushButton>
 #include <QDesktopServices>
@@ -2094,90 +2095,103 @@ void MainWindow::resolveRunningProfileCountryAsync(
     }
 
 
-    // ---------------------------------------------------------
+    // =========================================================
     // IMPORTANT
     //
-    // HttpGet() is blocking.
+    // Copy the lifetime/session state while MainWindow is
+    // definitely alive.
     //
-    // Therefore absolutely no network operation is performed
-    // on the UI thread.
-    // ---------------------------------------------------------
+    // The worker below DOES NOT capture `this`.
+    // =========================================================
+
+    const auto runtimeState =
+        runtimeSessionState_;
+
+
+    if (!runtimeState)
+    {
+        return;
+    }
+
+
+    // The request may already be stale even before we start it.
+    if (!runtimeState->isCurrent(
+        sessionGeneration))
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // Background HTTP worker
+    //
+    // Captures ONLY:
+    //
+    //   profile
+    //   sessionGeneration
+    //   runtimeState
+    //
+    // NO MainWindow pointer.
+    // =========================================================
 
     runOnNewThread(
         [
-            this,
             profile,
-            sessionGeneration
+            sessionGeneration,
+            runtimeState
         ]()
         {
-            // -------------------------------------------------
-            // Blocking HTTP request.
+            // =================================================
+            // Blocking HTTP request
             //
-            // We are on a worker thread here.
-            // -------------------------------------------------
+            // MainWindow may be destroyed while this call is
+            // waiting. That is safe because this lambda has no
+            // MainWindow pointer.
+            // =================================================
 
             const auto response =
                 NetworkRequestHelper::HttpGet(
-                    "http://ip-api.com/json/",
+                    QStringLiteral(
+                        "http://ip-api.com/json/"
+                    ),
                     false,
                     true
                 );
 
 
-            // -------------------------------------------------
-            // Check session BEFORE doing anything with result.
-            //
-            // The profile could have been:
-            //
-            //   stopped;
-            //   replaced;
-            //   restarted;
-            //
-            // while HttpGet() was waiting.
-            // -------------------------------------------------
+            // =================================================
+            // Check lifetime/session AFTER network wait
+            // =================================================
 
-            const quint64 currentGeneration =
-                runningSessionGeneration_.load(
-                    std::memory_order_acquire
-                );
-
-
-            if (currentGeneration !=
-                sessionGeneration)
+            if (!runtimeState->isCurrent(
+                sessionGeneration))
             {
                 return;
             }
 
 
-            const auto currentProfile =
-                runningProfileSnapshot();
-
-
-            if (currentProfile != profile)
-            {
-                return;
-            }
-
-
-            // -------------------------------------------------
+            // =================================================
             // HTTP error
-            // -------------------------------------------------
+            //
+            // Do NOT call MW_show_log from this detached worker.
+            //
+            // MW_show_log currently ultimately belongs to the
+            // MainWindow lifetime.
+            // =================================================
 
             if (!response.error.isEmpty())
             {
-                MW_show_log(
-                    "Failed to get profile country info: "
-                    +
-                    response.error
-                );
+                qWarning()
+                    << "Failed to get profile country info:"
+                    << response.error;
 
                 return;
             }
 
 
-            // -------------------------------------------------
+            // =================================================
             // Parse JSON
-            // -------------------------------------------------
+            // =================================================
 
             QJsonParseError parseError;
 
@@ -2192,11 +2206,9 @@ void MainWindow::resolveRunningProfileCountryAsync(
             if (parseError.error !=
                 QJsonParseError::NoError)
             {
-                MW_show_log(
-                    "Failed to parse profile country info: "
-                    +
-                    parseError.errorString()
-                );
+                qWarning()
+                    << "Failed to parse profile country info:"
+                    << parseError.errorString();
 
                 return;
             }
@@ -2204,10 +2216,9 @@ void MainWindow::resolveRunningProfileCountryAsync(
 
             if (!document.isObject())
             {
-                MW_show_log(
-                    "Failed to parse profile country info: "
-                    "root JSON value is not an object."
-                );
+                qWarning()
+                    << "Failed to parse profile country info:"
+                    << "root JSON value is not an object.";
 
                 return;
             }
@@ -2217,38 +2228,41 @@ void MainWindow::resolveRunningProfileCountryAsync(
                 document.object();
 
 
-            // -------------------------------------------------
-            // Extract location
-            // -------------------------------------------------
+            // =================================================
+            // Extract result
+            // =================================================
 
             const QString city =
-                object.value(
-                    "city"
+                object
+                .value(
+                    QStringLiteral("city")
                 )
                 .toString();
 
 
             const QString countryName =
-                object.value(
-                    "country"
+                object
+                .value(
+                    QStringLiteral("country")
                 )
                 .toString();
 
 
             const QString countryCode =
-                object.value(
-                    "countryCode"
+                object
+                .value(
+                    QStringLiteral("countryCode")
                 )
                 .toString();
 
 
-            // -------------------------------------------------
+            // =================================================
             // Build display string
             //
             // Example:
             //
             // 🇳🇱 Netherlands, Amsterdam
-            // -------------------------------------------------
+            // =================================================
 
             QStringList locationParts;
 
@@ -2272,7 +2286,7 @@ void MainWindow::resolveRunningProfileCountryAsync(
                         countryText.prepend(
                             flag
                             +
-                            " "
+                            QStringLiteral(" ")
                         );
                     }
                 }
@@ -2294,7 +2308,7 @@ void MainWindow::resolveRunningProfileCountryAsync(
 
             const QString countryInfo =
                 locationParts.join(
-                    ", "
+                    QStringLiteral(", ")
                 );
 
 
@@ -2304,76 +2318,51 @@ void MainWindow::resolveRunningProfileCountryAsync(
             }
 
 
-            // -------------------------------------------------
-            // Check session AGAIN.
+            // =================================================
+            // ATOMIC SESSION COMMIT
             //
-            // Although JSON parsing is fast, keeping this check
-            // here makes ownership of the async result explicit.
-            // -------------------------------------------------
+            // This is more important than doing:
+            //
+            //     if (generation == expected)
+            //         profile->Set...
+            //
+            // because the generation could change BETWEEN the
+            // check and SetRunningCountryInfo().
+            //
+            // commitIfCurrent() protects both operations with
+            // one mutex.
+            // =================================================
 
-            if (runningSessionGeneration_.load(
-                std::memory_order_acquire)
-                !=
-                sessionGeneration)
+            const bool committed =
+                runtimeState
+                ->commitIfCurrent(
+                    sessionGeneration,
+
+                    [
+                        &profile,
+                        &countryInfo
+                    ]()
+                    {
+                        profile
+                            ->SetRunningCountryInfo(
+                                countryInfo
+                            );
+                    }
+                );
+
+            if (!committed)
             {
                 return;
             }
-
-
-            if (runningProfileSnapshot() !=
-                profile)
-            {
-                return;
-            }
-
-
-            // -------------------------------------------------
-            // Thread-safe runtime Profile state
-            // -------------------------------------------------
-
-            profile->SetRunningCountryInfo(
-                countryInfo
-            );
-
-
-            // -------------------------------------------------
-            // UI update
+            // =================================================
+            // NO MainWindow callback here.
             //
-            // Only UI work is posted to the UI thread.
-            // -------------------------------------------------
-
-            runOnUiThread(
-                [
-                    this,
-                    profile,
-                    sessionGeneration
-                ]()
-                {
-                    // -----------------------------------------
-                    // The queued UI callback may execute later.
-                    //
-                    // Check session one final time.
-                    // -----------------------------------------
-
-                    if (runningSessionGeneration_.load(
-                        std::memory_order_acquire)
-                        !=
-                        sessionGeneration)
-                    {
-                        return;
-                    }
-
-
-                    if (runningProfileSnapshot() !=
-                        profile)
-                    {
-                        return;
-                    }
-
-
-                    refresh_status();
-                }
-            );
+            // MainWindow already refreshes status periodically.
+            //
+            // Avoiding runOnUiThread([this] {...}) completely
+            // removes the MainWindow lifetime dependency from
+            // this asynchronous worker.
+            // =================================================
         }
     );
 }
@@ -2710,20 +2699,34 @@ void MainWindow::profile_start(int _id) {
                 );
 
 
-            // =====================================================
-            // Create new runtime session
+            // =========================================================
+            // Create a new runtime session
             //
-            // Increment BEFORE asynchronous operations are launched.
-            // =====================================================
+            // RuntimeSessionState is also captured by asynchronous
+            // operations, so the generation remains accessible even if
+            // MainWindow later gets destroyed.
+            // =========================================================
+
+            const auto runtimeState =
+                runtimeSessionState_;
+
+
+            if (!runtimeState)
+            {
+                return false;
+            }
+
 
             const quint64 sessionGeneration =
-                runningSessionGeneration_
-                .fetch_add(
-                    1,
-                    std::memory_order_acq_rel
-                )
-                +
-                1;
+                runtimeState
+                ->beginSession();
+
+
+            if (sessionGeneration == 0)
+            {
+                // MainWindow/application is already shutting down.
+                return false;
+            }
 
 
             // -----------------------------------------------------
@@ -2765,21 +2768,16 @@ void MainWindow::profile_start(int _id) {
                 [
                     this,
                     ent,
-                    sessionGeneration
+                    sessionGeneration,
+                    runtimeState
                 ]()
                 {
-                    // Do not refresh status for a session which
-                    // was already replaced before this queued
-                    // callback reached the UI thread.
-
-                    if (runningSessionGeneration_.load(
-                        std::memory_order_acquire)
-                        !=
-                        sessionGeneration)
+                    if (!runtimeState ||
+                        !runtimeState->isCurrent(
+                            sessionGeneration))
                     {
                         return;
                     }
-
 
                     if (runningProfileSnapshot() !=
                         ent)
@@ -2787,10 +2785,7 @@ void MainWindow::profile_start(int _id) {
                         return;
                     }
 
-
                     refresh_status();
-
-
                     refresh_proxy_list(
                         {
                             ent->Id()
@@ -2798,7 +2793,6 @@ void MainWindow::profile_start(int _id) {
                     );
                 }
             );
-
 
             // =====================================================
             // Public IP/country lookup
@@ -2894,6 +2888,16 @@ void MainWindow::profile_stop(
     {
         return;
     }
+
+    const auto runtimeState =
+        runtimeSessionState_;
+
+
+    const quint64 stoppingSessionGeneration =
+        runtimeState
+        ? runtimeState->currentGeneration()
+        : 0;
+
     const int stoppingProfileId =
         stoppingProfile->Id();
     const auto stoppingConfig =
@@ -3008,6 +3012,8 @@ void MainWindow::profile_stop(
             stoppingProfile,
             stoppingProfileId,
             stoppingProfileName,
+            stoppingSessionGeneration,
+            runtimeState,
             profile_stop_stage2,
             manual
         ]()
@@ -3143,21 +3149,24 @@ void MainWindow::profile_stop(
                         stoppingProfile
                     );
 
-
                 if (cleared)
                 {
-                    // ---------------------------------------------------------
-                    // Invalidate all asynchronous operations which belonged
-                    // to the stopped runtime session.
+                    // =====================================================
+                    // Invalidate ONLY the exact session which we stopped.
                     //
-                    // For example an outstanding ip-api HTTP request.
-                    // ---------------------------------------------------------
+                    // If another session somehow started meanwhile,
+                    // generation will already differ and we will not touch
+                    // the new session.
+                    // =====================================================
 
-                    runningSessionGeneration_
-                        .fetch_add(
-                            1,
-                            std::memory_order_acq_rel
-                        );
+                    if (runtimeState &&
+                        stoppingSessionGeneration != 0)
+                    {
+                        runtimeState
+                            ->invalidateIfCurrent(
+                                stoppingSessionGeneration
+                            );
+                    }
                 }
                 else
                 {

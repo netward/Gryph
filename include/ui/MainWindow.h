@@ -16,6 +16,8 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <utility>
 
 #include <QKeyEvent>
 #include <QSystemTrayIcon>
@@ -184,23 +186,196 @@ private:
         std::shared_ptr<Configs::Profile>
     > runningProfile_{ nullptr };
 
-    // -----------------------------------------------------
-    // Running profile session generation
-    //
-    // Every successful start receives a new generation.
-    //
-    // This allows asynchronous operations belonging to an
-    // old connection session to detect that their result
-    // is stale.
-    //
-    // This is especially important when the SAME Profile
-    // object is stopped and started again while an older
-    // HTTP request is still running.
-    // -----------------------------------------------------
+    // =============================================================
+// Runtime session state
+//
+// This object has its own lifetime independent of MainWindow.
+//
+// Background workers capture shared_ptr<RuntimeSessionState>
+// instead of capturing MainWindow*.
+//
+// Therefore MainWindow may be destroyed while a blocking HTTP
+// request is still running without causing use-after-free.
+// =============================================================
 
-    std::atomic<quint64>
-        runningSessionGeneration_{ 0 };
+    struct RuntimeSessionState final
+    {
+        mutable std::mutex mutex;
 
+        bool alive = true;
+
+        quint64 generation = 0;
+
+
+        // ---------------------------------------------------------
+        // Begin a new runtime Profile session.
+        //
+        // Returns 0 when MainWindow is already shutting down.
+        // ---------------------------------------------------------
+
+        [[nodiscard]]
+        quint64 beginSession()
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            if (!alive)
+            {
+                return 0;
+            }
+
+
+            ++generation;
+
+
+            return generation;
+        }
+
+
+        // ---------------------------------------------------------
+        // Get the current generation.
+        // ---------------------------------------------------------
+
+        [[nodiscard]]
+        quint64 currentGeneration() const
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            return generation;
+        }
+
+
+        // ---------------------------------------------------------
+        // Check whether an async result still belongs to the
+        // currently active runtime session.
+        // ---------------------------------------------------------
+
+        [[nodiscard]]
+        bool isCurrent(
+            quint64 expectedGeneration
+        ) const
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            return
+                alive
+                &&
+                generation == expectedGeneration;
+        }
+
+
+        // ---------------------------------------------------------
+        // Invalidate a session ONLY if it is still the session
+        // which the caller expects.
+        //
+        // This prevents an old stop worker from invalidating a
+        // newly-started Profile session.
+        // ---------------------------------------------------------
+
+        bool invalidateIfCurrent(
+            quint64 expectedGeneration
+        )
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            if (!alive ||
+                generation != expectedGeneration)
+            {
+                return false;
+            }
+
+
+            ++generation;
+
+
+            return true;
+        }
+
+
+        // ---------------------------------------------------------
+        // Execute a tiny commit operation only if the async result
+        // still belongs to the current session.
+        //
+        // Generation cannot change between validation and commit,
+        // because both are protected by the same mutex.
+        // ---------------------------------------------------------
+
+        template<typename CommitFunction>
+        bool commitIfCurrent(
+            quint64 expectedGeneration,
+            CommitFunction&& commitFunction
+        )
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            if (!alive ||
+                generation != expectedGeneration)
+            {
+                return false;
+            }
+
+
+            std::forward<CommitFunction>(
+                commitFunction
+            )();
+
+
+            return true;
+        }
+
+
+        // ---------------------------------------------------------
+        // Permanently disable async runtime operations.
+        //
+        // Called during application shutdown.
+        // ---------------------------------------------------------
+
+        void shutdown()
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            if (!alive)
+            {
+                return;
+            }
+
+
+            alive = false;
+
+            ++generation;
+        }
+    };
+
+
+    std::shared_ptr<RuntimeSessionState>
+        runtimeSessionState_ =
+        std::make_shared<
+        RuntimeSessionState
+        >();
+        
     [[nodiscard]]
     std::shared_ptr<Configs::Profile>
         runningProfileSnapshot() const noexcept;

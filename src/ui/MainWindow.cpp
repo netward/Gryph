@@ -2548,8 +2548,34 @@ void MainWindow::dropEvent(QDropEvent* event)
     event->ignore();
 }
 
-MainWindow::~MainWindow() {
+MainWindow::~MainWindow()
+{
+    // =========================================================
+    // Final lifetime barrier.
+    //
+    // Normally prepare_exit() already called shutdown(), but
+    // the destructor must be safe independently.
+    // =========================================================
+
+    if (runtimeSessionState_)
+    {
+        runtimeSessionState_
+            ->shutdown();
+    }
+
+
+    // =========================================================
+    // From this point no detached country lookup may publish
+    // new runtime data.
+    //
+    // It may still be blocked inside HttpGet(), but it owns no
+    // MainWindow pointer, so that is safe.
+    // =========================================================
+
     delete ui;
+
+    ui =
+        nullptr;
 }
 
 // Group tab manage
@@ -2949,34 +2975,111 @@ void MainWindow::on_commitDataRequest() {
 
 void MainWindow::prepare_exit()
 {
-    qDebug() << "prepare for exit...";
+    qDebug()
+        << "prepare for exit...";
+
+
     mu_exit.lock();
-    if (Configs::dataManager->settingsRepo->prepare_exit)
+
+
+    if (Configs::dataManager
+        ->settingsRepo
+        ->prepare_exit)
     {
-        qDebug() << "prepare exit had already succeeded, ignoring...";
+        qDebug()
+            << "prepare exit had already succeeded, ignoring...";
+
         mu_exit.unlock();
+
         return;
     }
-    Configs::dataManager->settingsRepo->prepare_exit = true;
-    //
-    set_system_proxy(false);
-    if (Configs::dataManager->settingsRepo->system_dns_set) set_system_dns(false, false);
-    RegisterHiddenMenuShortcuts(true);
-    RegisterHotkey(true);
-    //
-    on_commitDataRequest();
-    //
-    Configs::dataManager->settingsRepo->noSave = true; // don't change Configs::dataManager->settingsRepo after this line
-    profile_stop(false, true);
 
-    runOnThread([=, this]()
+
+    Configs::dataManager
+        ->settingsRepo
+        ->prepare_exit =
+        true;
+
+
+    // =====================================================
+    // Invalidate asynchronous runtime operations FIRST.
+    // =====================================================
+
+    if (runtimeSessionState_)
+    {
+        runtimeSessionState_
+            ->shutdown();
+    }
+
+
+    // =====================================================
+    // Normal shutdown continues below.
+    // =====================================================
+
+    set_system_proxy(
+        false
+    );
+
+
+    if (Configs::dataManager
+        ->settingsRepo
+        ->system_dns_set)
+    {
+        set_system_dns(
+            false,
+            false
+        );
+    }
+
+
+    RegisterHiddenMenuShortcuts(
+        true
+    );
+
+
+    RegisterHotkey(
+        true
+    );
+
+
+    on_commitDataRequest();
+
+
+    Configs::dataManager
+        ->settingsRepo
+        ->noSave =
+        true;
+
+
+    profile_stop(
+        false,
+        true
+    );
+
+
+    runOnThread(
+        [this]()
         {
-            core_process->Kill();
-        }, DS_cores, true);
-    HideWindow(this);
+            core_process
+                ->Kill();
+        },
+
+        DS_cores,
+
+        true
+    );
+
+
+    HideWindow(
+        this
+    );
+
 
     mu_exit.unlock();
-    qDebug() << "prepare exit done!";
+
+
+    qDebug()
+        << "prepare exit done!";
 }
 
 void MainWindow::on_menu_exit_triggered() {
