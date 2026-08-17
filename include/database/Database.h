@@ -13,8 +13,10 @@
 
 #include "include/global/Utils.hpp"
 
-namespace Configs {
-    struct ProfileInsertRow {
+namespace Configs 
+{
+    struct ProfileInsertRow 
+    {
         int id;
         std::string type;
         std::string name;
@@ -29,7 +31,8 @@ namespace Configs {
         long long traffic_up = 0;
     };
     
-    struct ProfileTrafficRow {
+    struct ProfileTrafficRow 
+    {
         int id = -1;
         long long traffic_dl = 0;
         long long traffic_up = 0;
@@ -39,7 +42,8 @@ namespace Configs {
     // routes   -> route_profiles, route_rules tables
     // settings -> settings table
     // icons    -> icons/ folder (handled by the UI layer, not the database)
-    struct BackupParts {
+    struct BackupParts 
+    {
         bool profiles = false;
         bool routes = false;
         bool settings = false;
@@ -55,7 +59,8 @@ namespace Configs {
     // Run WAL checkpoint after this many write operations (exec or batch chunk).
     constexpr int WAL_CHECKPOINT_AFTER_WRITES = 10000;
 
-    inline void NotifyError(const std::string& query, std::exception& e) {
+    inline void NotifyError(const std::string& query, std::exception& e) 
+    {
         runOnUiThread([=] {
             std::string shortQ;
             if (query.length() > 200) shortQ = query.substr(0, 200);
@@ -384,28 +389,48 @@ namespace Configs {
         }
 
     public:
+
         template<typename... Args>
-        void exec(const std::string& sql, Args&&... args) {
-            try {
-                exec0(sql, std::forward<Args>(args)...);
-            } catch (std::exception& e) {
-                NotifyError(sql, e);
+        [[nodiscard]]
+        bool exec(
+            const std::string& sql,
+            Args&&... args)
+        {
+            try
+            {
+                exec0(
+                    sql,
+                    std::forward<Args>(args)...
+                );
+
+                return true;
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    sql,
+                    e
+                );
+
+                return false;
             }
         }
+
 
         template<typename... Args>
         DatabaseQuery query(
             const std::string& sql,
             Args&&... args)
         {
-            try {
+            try
+            {
                 return query0(
                     sql,
                     std::forward<Args>(args)...
                 );
             }
-            catch (std::exception& e) {
-
+            catch (std::exception& e)
+            {
                 NotifyError(
                     sql,
                     e
@@ -415,60 +440,141 @@ namespace Configs {
             }
         }
 
-        void execDeleteByIdIn(const std::string& table, const std::string& idColumn, const std::vector<int>& ids) {
-            try {
-                execDeleteByIdIn0(table, idColumn, ids);
-            } catch (std::exception& e) {
-                NotifyError("execDeleteByIdIn for " + table, e);
+
+        void execDeleteByIdIn(
+            const std::string& table,
+            const std::string& idColumn,
+            const std::vector<int>& ids)
+        {
+            try
+            {
+                execDeleteByIdIn0(
+                    table,
+                    idColumn,
+                    ids
+                );
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    "execDeleteByIdIn for " + table,
+                    e
+                );
             }
         }
 
-        void execBatchSettingsReplace(const std::vector<std::pair<std::string, std::string>>& keyValues) {
-            try {
-                execBatchSettingsReplace0(keyValues);
-            } catch (std::exception& e) {
-                NotifyError("execBatchSettingsReplace", e);
+
+        void execBatchSettingsReplace(
+            const std::vector<
+            std::pair<
+            std::string,
+            std::string
+            >
+            >& keyValues)
+        {
+            try
+            {
+                execBatchSettingsReplace0(
+                    keyValues
+                );
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    "execBatchSettingsReplace",
+                    e
+                );
             }
         }
 
-        void execBatchInsertIntPairs(const std::string& table, const std::string& colA, const std::string& colB,
-                                     const std::vector<int>& pairs) {
-            try {
-                execBatchInsertIntPairs0(table, colA, colB, pairs);
-            } catch (std::exception& e) {
-                NotifyError("execBatchInsertIntPairs for " + table, e);
+
+        void execBatchInsertIntPairs(
+            const std::string& table,
+            const std::string& colA,
+            const std::string& colB,
+            const std::vector<int>& pairs)
+        {
+            try
+            {
+                execBatchInsertIntPairs0(
+                    table,
+                    colA,
+                    colB,
+                    pairs
+                );
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    "execBatchInsertIntPairs for "
+                    + table,
+                    e
+                );
             }
         }
 
-        void execBatchInsertProfiles(const std::vector<ProfileInsertRow>& rows) {
-            try {
-                execBatchInsertProfiles0(rows);
-            } catch (std::exception& e) {
-                NotifyError("execBatchInsertProfiles", e);
+
+        void execBatchInsertProfiles(
+            const std::vector<
+            ProfileInsertRow
+            >& rows)
+        {
+            try
+            {
+                execBatchInsertProfiles0(
+                    rows
+                );
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    "execBatchInsertProfiles",
+                    e
+                );
             }
         }
 
-        void execBatchReplaceProfiles(const std::vector<ProfileInsertRow>& rows) {
-            try {
-                execBatchReplaceProfiles0(rows);
-            } catch (std::exception& e) {
-                NotifyError("execBatchReplaceProfiles", e);
+
+        void execBatchReplaceProfiles(
+            const std::vector<
+            ProfileInsertRow
+            >& rows)
+        {
+            try
+            {
+                execBatchReplaceProfiles0(
+                    rows
+                );
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    "execBatchReplaceProfiles",
+                    e
+                );
             }
         }
 
-        // Throws std::exception on failure. Caller must delete destPath if it already exists.
-        void backupTo(const std::string& destPath);
-        // Throws std::exception on failure.
-        void restoreFrom(const std::string& srcPath);
 
-        // Create a snapshot at destPath containing only the selected categories.
-        // entity_ids is always retained so restored IDs stay consistent.
-        // Caller must delete destPath if it already exists. Throws on failure.
-        void backupSelective(const std::string& destPath, const BackupParts& parts);
+        void backupTo(
+            const std::string& destPath
+        );
 
-        // Replace the selected categories in the live database with the contents
-        // of the snapshot at srcPath. Only columns present in both schemas are
-        // copied, so backups from other versions still restore. Throws on failure.
-        void restoreSelective(const std::string& srcPath, const BackupParts& parts);
-    };
-}
+
+        void restoreFrom(
+            const std::string& srcPath
+        );
+
+
+        void backupSelective(
+            const std::string& destPath,
+            const BackupParts& parts
+        );
+
+
+        void restoreSelective(
+            const std::string& srcPath,
+            const BackupParts& parts
+        );
+    }; // class Database
+} // namespace Configs

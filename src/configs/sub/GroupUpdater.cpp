@@ -2702,20 +2702,68 @@ namespace Subscription {
 
 
         // =====================================================
-        // Mark subscription update successful ONLY NOW
+        // Persist SUCCESS state LAST
+        //
+        // At this point:
+        //
+        // 1. Subscription was downloaded successfully.
+        // 2. Subscription was parsed successfully.
+        // 3. New Profiles were inserted.
+        // 4. Final profile order was constructed.
+        // 5. Final profile order was persisted.
+        // 6. Obsolete profiles were handled.
+        //
+        // Only now are we allowed to mark the subscription
+        // as successfully updated.
         // =====================================================
 
-        group->UpdateSubscriptionState(
-            QDateTime::currentMSecsSinceEpoch()
-            / 1000,
-
-            subUserInfo
-        );
+        const qint64 completedAt =
+            QDateTime::currentSecsSinceEpoch();
 
 
-        groupsRepo->Save(
-            group
-        );
+        if (!groupsRepo->CommitSubscriptionState(
+            group,
+            completedAt,
+            subUserInfo))
+        {
+            MW_show_log(
+                "GroupUpdater: subscription profiles "
+                "were updated, but failed to persist "
+                "subscription success state"
+            );
+
+
+            runOnUiThread(
+                []
+                {
+                    MessageBoxWarning(
+                        QObject::tr(
+                            "Subscription update warning"
+                        ),
+
+                        QObject::tr(
+                            "The subscription profiles were updated, "
+                            "but Gryph could not save the subscription "
+                            "update state.\n\n"
+                            "The last update timestamp was not advanced."
+                        )
+                    );
+                }
+            );
+
+
+            // IMPORTANT:
+            //
+            // Do NOT emit SubscriptionFinished here.
+            //
+            // The profile update itself is already valid,
+            // but its completion metadata was not persisted.
+            //
+            // Keeping the old timestamp is preferable because
+            // automatic update logic can retry later.
+
+            return;
+        }
 
 
         // =====================================================

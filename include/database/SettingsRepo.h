@@ -2,11 +2,15 @@
 
 #include "Database.h"
 #include "include/global/Const.hpp"
-#include <QMutexLocker>
-#include <QJsonObject>
-#include <QMap>
-#include <QKeySequence>
+
 #include <atomic>
+
+#include <QJsonObject>
+#include <QKeySequence>
+#include <QMap>
+#include <QMutexLocker>
+#include <QString>
+#include <QStringList>
 
 #ifdef Q_OS_WIN
 #include "include/sys/windows/WinVersion.h"

@@ -281,7 +281,7 @@ namespace Configs {
         return false;
     }
 
-    void GroupsRepo::saveToDatabase(
+    bool GroupsRepo::saveToDatabase(
         const GroupSnapshot& group) const
     {
         // -------------------------------------------------
@@ -330,8 +330,6 @@ namespace Configs {
         // -------------------------------------------------
 
         bool exists = false;
-
-
         {
             auto checkQuery =
                 db.query(
@@ -340,21 +338,32 @@ namespace Configs {
                     "WHERE id = ?",
                     group.id
                 );
+            if (!checkQuery)
+            {
+                return false;
+            }
+            try
+            {
+                exists =
+                    checkQuery->executeStep();
+            }
+            catch (std::exception& e)
+            {
+                NotifyError(
+                    "SELECT id FROM groups WHERE id = ?",
+                    e
+                );
 
-
-            exists =
-                checkQuery &&
-                checkQuery->executeStep();
+                return false;
+            }
         }
-
 
         // -------------------------------------------------
         // UPDATE
         // -------------------------------------------------
-
-        if (exists) {
-
-            db.exec(
+        if (exists)
+        {
+            return db.exec(
                 R"(
                 UPDATE groups
                 SET archive = ?,
@@ -374,7 +383,7 @@ namespace Configs {
                     test_items_to_show = ?,
                     updated_at = strftime('%s', 'now')
                 WHERE id = ?
-            )",
+                )",
 
                 group.archive
                 ? 1
@@ -422,17 +431,12 @@ namespace Configs {
 
                 group.id
             );
-
-
-            return;
         }
-
 
         // -------------------------------------------------
         // INSERT
         // -------------------------------------------------
-
-        db.exec(
+        return db.exec(
             R"(
             INSERT INTO groups
             (
@@ -458,7 +462,7 @@ namespace Configs {
                 ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?
             )
-        )",
+            )",
 
             group.id,
 
@@ -507,8 +511,9 @@ namespace Configs {
                 )
         );
     }
-
-    std::shared_ptr<Group> GroupsRepo::loadFromDatabase(int id) const {
+    
+    std::shared_ptr<Group> GroupsRepo::loadFromDatabase(int id) const 
+    {
         auto query = db.query(R"(
             SELECT id, archive, skip_auto_update, auto_clear_unavailable, name, url, info, sub_last_update,
                    front_proxy_id, landing_proxy_id,
@@ -749,41 +754,46 @@ namespace Configs {
     bool GroupsRepo::Save(
         const std::shared_ptr<Group>& group)
     {
-        if (!group) {
+        if (!group)
+        {
             return false;
         }
 
 
-        // -------------------------------------------------
-        // Snapshot Group first.
+        // =====================================================
+        // Snapshot BEFORE taking repository mutex.
         //
-        // Only Group::mutex is held inside Snapshot().
-        // -------------------------------------------------
+        // Group::Snapshot() locks Group::mutex internally.
+        // We do not want nested Group -> Repo locking.
+        // =====================================================
 
         const GroupSnapshot snapshot =
             group->Snapshot();
 
 
-        if (snapshot.id < 0) {
+        if (snapshot.id < 0)
+        {
             return false;
         }
 
 
-        // -------------------------------------------------
-        // Group::mutex is ALREADY released.
-        //
-        // Now it is safe to acquire GroupsRepo::mutex.
-        // -------------------------------------------------
+        // =====================================================
+        // Persist snapshot
+        // =====================================================
 
         {
             std::lock_guard<std::mutex>
                 locker(mutex);
 
 
-            saveToDatabase(
-                snapshot
-            );
+            if (!saveToDatabase(
+                snapshot))
+            {
+                return false;
+            }
 
+
+            // Update identity map only after DB write succeeds.
 
             memMap[snapshot.id] =
                 group;
@@ -792,4 +802,97 @@ namespace Configs {
 
         return true;
     }
+
+    bool GroupsRepo::CommitSubscriptionState(
+        const std::shared_ptr<Group>& group,
+        qint64 lastUpdate,
+        const QString& newInfo)
+    {
+        if (!group)
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Read identity without changing live subscription state.
+        // =====================================================
+
+        const GroupSnapshot snapshot =
+            group->Snapshot();
+
+
+        if (snapshot.id < 0)
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // IMPORTANT:
+        //
+        // Persist FIRST.
+        //
+        // We intentionally do NOT call:
+        //
+        //     group->UpdateSubscriptionState(...)
+        //
+        // yet.
+        //
+        // Therefore another reader cannot observe a successful
+        // update before SQLite has accepted the state.
+        // =====================================================
+
+        {
+            std::lock_guard<std::mutex>
+                locker(mutex);
+
+
+            const bool persisted =
+                db.exec(
+                    R"(
+                UPDATE groups
+                SET sub_last_update = ?,
+                    info = ?,
+                    updated_at = strftime('%s', 'now')
+                WHERE id = ?
+                )",
+
+                    static_cast<long long>(
+                        lastUpdate
+                        ),
+
+                    newInfo.toStdString(),
+
+                    snapshot.id
+                );
+
+
+            if (!persisted)
+            {
+                return false;
+            }
+
+
+            memMap[snapshot.id] =
+                group;
+        }
+
+
+        // =====================================================
+        // SQLite commit succeeded.
+        //
+        // Only NOW publish the successful state into the
+        // in-memory Group.
+        // =====================================================
+
+        group->UpdateSubscriptionState(
+            lastUpdate,
+            newInfo
+        );
+
+
+        return true;
+    }
+
 }

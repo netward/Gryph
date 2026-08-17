@@ -23,8 +23,10 @@ namespace Configs {
         
         // Save group to database (internal helper)
         // void saveToDatabase(const Group* group, int id) const;
-        void saveToDatabase(
-            const GroupSnapshot& group) const;
+        [[nodiscard]]
+        bool saveToDatabase(
+            const GroupSnapshot& group
+        ) const;
 
         // Load group from database
         std::shared_ptr<Group> loadFromDatabase(int id) const;
@@ -43,6 +45,13 @@ namespace Configs {
         
         // Create a new group (doesn't save to DB yet, id will be -1)
         [[nodiscard]] static std::shared_ptr<Group> NewGroup();
+
+        [[nodiscard]]
+        bool CommitSubscriptionState(
+            const std::shared_ptr<Group>& group,
+            qint64 lastUpdate,
+            const QString& newInfo
+        );
         
         // Add group to database (assigns ID and saves)
         bool AddGroup(std::shared_ptr<Group>& group);
