@@ -14,12 +14,12 @@ namespace Qv2ray::ui {
         if (darkMode) {
             tcpudpFormat.setForeground(QColor(0, 200, 230));
             ipHostFormat.setForeground(Qt::yellow);
-            warningFormat.setForeground(QColor(255, 160, 15));
+            warningFormat.setForeground(QColor(5, 48, 173));
             warningFormat2.setForeground(Qt::cyan);
         } else {
             ipHostFormat.setForeground(QColor(0, 52, 130));
             tcpudpFormat.setForeground(QColor(0, 52, 130));
-            warningFormat.setForeground(QColor(255, 160, 15));
+            warningFormat.setForeground(QColor(5, 48, 173));
             //warningFormat.setForeground(Qt::white);
             warningFormat2.setForeground(Qt::darkCyan);
         }
