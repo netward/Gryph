@@ -1,4 +1,4 @@
-#include "include/configs/generate.h"
+#include "include/configs/Generate.h"
 #include "include/api/RPC.h"
 #include "include/global/Configs.hpp"
 

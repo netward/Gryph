@@ -1,4 +1,4 @@
-#include "include/configs/sub/clash.hpp"
+#include "include/configs/sub/Clash.hpp"
 
 namespace clash {
 

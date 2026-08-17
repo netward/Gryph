@@ -3,20 +3,38 @@
 #include "Database.h"
 #include "include/database/entities/Profile.h"
 #include <3rdparty/SQLiteCpp/include/SQLiteCpp.h>
+
 #include <memory>
 #include <mutex>
 #include <map>
+#include <vector>
+#include <cstdint>
+
 #include <QString>
 #include <QJsonObject>
-#include <vector>
+
 
 namespace Configs {
     class ProfilesRepo {
     private:
         Database& db;
         mutable std::mutex mutex;
-        // Identity map: id -> weak_ptr<Profile>
-        mutable std::map<int, std::weak_ptr<Profile>> identityMap;
+        
+        // Identity map:
+        //
+        // profile ID -> currently published Profile object.
+        mutable std::map<
+            int,
+            std::weak_ptr<Profile>
+        > identityMap;
+
+        // Incremented whenever Profiles are deleted from
+        // persistent storage.
+        //
+        // GetProfile()/GetProfileBatch() use this value to
+        // detect a delete that happened while SQLite was being
+        // read without holding ProfilesRepo::mutex.
+        std::uint64_t deletionEpoch_ = 0;
 
         // Helper to serialize Profile to JSON
         QJsonObject profileToJson(const Profile* profile) const;
@@ -82,7 +100,11 @@ namespace Configs {
         // Get profile by ID (uses identity map)
         std::shared_ptr<Profile> GetProfile(int id) const;
 
-        QList<std::shared_ptr<Profile>> GetProfileBatch(QList<int> ids);
+        [[nodiscard]]
+        QList<std::shared_ptr<Profile>>
+            GetProfileBatch(
+                const QList<int>& ids
+            );
 
         QList<std::pair<int, QString> > GetProfileIDNameMappedBatch(QList<int> ids);
 

@@ -16,7 +16,7 @@
 #include <QDialogButtonBox>
 #include <include/api/RPC.h>
 
-#include "include/configs/sub/warp.h"
+#include "include/configs/sub/WARP.h"
 #include "include/database/RoutesRepo.h"
 
 void DialogManageRoutes::reloadProfileItems() {

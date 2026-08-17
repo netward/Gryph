@@ -2079,7 +2079,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
             // Глобальный переключатель маршрутизации через WARP.
             auto* actionWarp = new QAction(ui->menuRouting_Menu);
-            actionWarp->setText("Enable Warp");
+            actionWarp->setText("Enable WARP");
             actionWarp->setCheckable(true);
             actionWarp->setChecked(Configs::dataManager->settingsRepo->enable_warp);
             connect(actionWarp, &QAction::triggered, this, [=, this](bool checked) {

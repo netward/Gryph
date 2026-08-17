@@ -2,7 +2,7 @@
 #include "include/global/HTTPRequestHelper.hpp"
 
 #include "include/configs/sub/GroupUpdater.hpp"
-#include "include/configs/sub/clash.hpp"
+#include "include/configs/sub/Clash.hpp"
 
 #include <atomic>
 #include <utility>

@@ -2,7 +2,7 @@
 
 #include <QJsonObject>
 #include "include/global/Configs.hpp"
-#include "include/configs/sub/clash.hpp"
+#include "include/configs/sub/Clash.hpp"
 
 namespace Configs
 {

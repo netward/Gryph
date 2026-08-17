@@ -3,7 +3,7 @@
 #include <QNetworkProxy>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <include/configs/sub/warp.h>
+#include <include/configs/sub/WARP.h>
 #include <include/global/Configs.hpp>
 #include <QObject>
 #include <utility>

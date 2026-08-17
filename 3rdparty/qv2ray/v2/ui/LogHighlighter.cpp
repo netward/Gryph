@@ -19,8 +19,8 @@ namespace Qv2ray::ui {
         } else {
             ipHostFormat.setForeground(QColor(0, 52, 130));
             tcpudpFormat.setForeground(QColor(0, 52, 130));
-            warningFormat.setBackground(QColor(255, 160, 15));
-            warningFormat.setForeground(Qt::white);
+            warningFormat.setForeground(QColor(255, 160, 15));
+            //warningFormat.setForeground(Qt::white);
             warningFormat2.setForeground(Qt::darkCyan);
         }
         const static QColor darkGreenColor(10, 180, 0);
@@ -33,8 +33,8 @@ namespace Qv2ray::ui {
         highlightingRules.append(rule);
         //
         rejectedFormat.setFontWeight(QFont::Bold);
-        rejectedFormat.setBackground(Qt::red);
-        rejectedFormat.setForeground(Qt::white);
+        rejectedFormat.setForeground(Qt::red);
+        //rejectedFormat.setForeground(Qt::white);
         rejectedFormat.setFontWeight(QFont::Bold);
         rule.pattern = QRegularExpression("\\srejected\\s" TO_EOL);
         rule.format = rejectedFormat;

@@ -1,7 +1,7 @@
 #include "include/ui/profile/edit_wireguard.h"
 
 #include "include/api/RPC.h"
-#include "include/configs/sub/warp.h"
+#include "include/configs/sub/WARP.h"
 #include "include/global/Utils.hpp"
 
 
@@ -96,7 +96,7 @@ EditWireguard::EditWireguard(
                         MessageBoxWarning(
                             tr(
                                 "Failed to generate "
-                                "warp config"
+                                "WARP config"
                             ),
                             error
                         );

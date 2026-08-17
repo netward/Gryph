@@ -1328,16 +1328,135 @@ namespace Configs {
         return true;
     }
 
-    std::shared_ptr<Profile> ProfilesRepo::GetProfile(int id) const {
-        QMutexLocker locker(&mutex);
-        if (auto it = identityMap.find(id); it != identityMap.end()) {
-            if (auto shared = it->second.lock()) return shared;
-            identityMap.erase(it);
+    std::shared_ptr<Profile>
+        ProfilesRepo::GetProfile(
+            int id) const
+    {
+        if (id < 0)
+        {
+            return nullptr;
         }
-        auto profile = loadFromDatabase(id);
-        if (!profile) return nullptr;
-        identityMap[id] = std::weak_ptr<Profile>(profile);
-        return profile;
+
+
+        for (;;)
+        {
+            std::uint64_t
+                deletionEpochSnapshot = 0;
+
+
+            // =====================================================
+            // PHASE 1
+            //
+            // Check identity map.
+            // =====================================================
+
+            {
+                std::lock_guard<std::mutex>
+                    locker(
+                        mutex
+                    );
+
+
+                deletionEpochSnapshot =
+                    deletionEpoch_;
+
+
+                auto it =
+                    identityMap.find(
+                        id
+                    );
+
+
+                if (it !=
+                    identityMap.end())
+                {
+                    if (auto existing =
+                        it->second.lock())
+                    {
+                        return existing;
+                    }
+
+
+                    identityMap.erase(
+                        it
+                    );
+                }
+            }
+
+
+            // =====================================================
+            // PHASE 2
+            //
+            // SQLite read WITHOUT ProfilesRepo::mutex.
+            // =====================================================
+
+            auto loadedProfile =
+                loadFromDatabase(
+                    id
+                );
+
+
+            if (!loadedProfile)
+            {
+                return nullptr;
+            }
+
+
+            // =====================================================
+            // PHASE 3
+            //
+            // Publish result.
+            // =====================================================
+
+            {
+                std::lock_guard<std::mutex>
+                    locker(
+                        mutex
+                    );
+
+
+                // Profile may have been deleted while DB SELECT
+                // was running.
+                if (deletionEpoch_ !=
+                    deletionEpochSnapshot)
+                {
+                    continue;
+                }
+
+
+                // Another reader may already have published the
+                // same Profile.
+                auto it =
+                    identityMap.find(
+                        id
+                    );
+
+
+                if (it !=
+                    identityMap.end())
+                {
+                    if (auto existing =
+                        it->second.lock())
+                    {
+                        return existing;
+                    }
+
+
+                    identityMap.erase(
+                        it
+                    );
+                }
+
+
+                identityMap[id] =
+                    std::weak_ptr<Profile>(
+                        loadedProfile
+                    );
+
+
+                return loadedProfile;
+            }
+        }
     }
 
     std::map<int, std::shared_ptr<Profile>> ProfilesRepo::loadProfilesByIdsChunk(const QList<int>& chunkIds) const {
@@ -1361,46 +1480,385 @@ namespace Configs {
         return result;
     }
 
-    QList<std::shared_ptr<Profile>> ProfilesRepo::GetProfileBatch(QList<int> ids) {
-        QList<std::shared_ptr<Profile>> profiles;
-        if (ids.isEmpty()) return profiles;
+    QList<std::shared_ptr<Profile>>
+        ProfilesRepo::GetProfileBatch(
+            const QList<int>& ids)
+    {
+        if (ids.isEmpty())
+        {
+            return {};
+        }
 
-        std::map<int, std::shared_ptr<Profile>> byId;
-        QList<int> missingIds;
-        QMutexLocker locker(&mutex);
-        for (int id : ids) {
-            auto it = identityMap.find(id);
-            if (it != identityMap.end()) {
-                if (auto shared = it->second.lock()) {
-                    byId[id] = shared;
+
+        // =========================================================
+        // Retry loop
+        //
+        // Usually executes exactly once.
+        //
+        // A retry is necessary only when Profiles are deleted
+        // while this method performs SQLite I/O outside
+        // ProfilesRepo::mutex.
+        // =========================================================
+
+        for (;;)
+        {
+            std::map<
+                int,
+                std::shared_ptr<Profile>
+            > byId;
+
+
+            QList<int>
+                missingIds;
+
+
+            std::uint64_t
+                deletionEpochSnapshot = 0;
+
+
+            // =====================================================
+            // PHASE 1
+            //
+            // Read identityMap under a SHORT repository lock.
+            //
+            // NO SQLite access in this scope.
+            // =====================================================
+
+            {
+                std::lock_guard<std::mutex>
+                    locker(
+                        mutex
+                    );
+
+
+                deletionEpochSnapshot =
+                    deletionEpoch_;
+
+
+                for (const int id :
+                ids)
+                {
+                    if (id < 0)
+                    {
+                        continue;
+                    }
+
+
+                    auto it =
+                        identityMap.find(
+                            id
+                        );
+
+
+                    if (it !=
+                        identityMap.end())
+                    {
+                        if (auto existing =
+                            it->second.lock())
+                        {
+                            // Profile is already alive.
+                            byId[id] =
+                                std::move(
+                                    existing
+                                );
+
+
+                            continue;
+                        }
+
+
+                        // weak_ptr expired.
+                        //
+                        // Remove stale cache entry.
+                        identityMap.erase(
+                            it
+                        );
+                    }
+
+
+                    // Avoid duplicate DB lookup when input contains
+                    // the same profile ID several times.
+                    if (!missingIds.contains(
+                        id))
+                    {
+                        missingIds.append(
+                            id
+                        );
+                    }
+                }
+            }
+
+
+            // =====================================================
+            // Repository mutex is RELEASED here.
+            // =====================================================
+
+
+            // =====================================================
+            // Fast path
+            //
+            // Everything was found in identityMap.
+            // =====================================================
+
+            if (missingIds.isEmpty())
+            {
+                QList<
+                    std::shared_ptr<Profile>
+                > result;
+
+
+                result.reserve(
+                    ids.size()
+                );
+
+
+                for (const int id :
+                ids)
+                {
+                    const auto it =
+                        byId.find(
+                            id
+                        );
+
+
+                    if (it !=
+                        byId.end())
+                    {
+                        result.append(
+                            it->second
+                        );
+                    }
+                }
+
+
+                return result;
+            }
+
+
+            // =====================================================
+            // PHASE 2
+            //
+            // Load missing Profiles from SQLite.
+            //
+            // IMPORTANT:
+            // ProfilesRepo::mutex is NOT held here.
+            //
+            // Database has its own synchronization.
+            // =====================================================
+
+            std::map<
+                int,
+                std::shared_ptr<Profile>
+            > loadedById;
+
+
+            for (
+                int offset = 0;
+                offset < missingIds.size();
+                offset += Configs::BATCH_LIMIT_READ)
+            {
+                const int end =
+                    std::min(
+                        offset
+                        +
+                        Configs::BATCH_LIMIT_READ,
+
+                        static_cast<int>(
+                            missingIds.size()
+                            )
+                    );
+
+
+                const QList<int> chunk =
+                    missingIds.sliced(
+                        offset,
+                        end - offset
+                    );
+
+                if (chunk.isEmpty())
+                {
                     continue;
                 }
-                identityMap.erase(it);
-            }
-            missingIds.append(id);
-        }
-        if (missingIds.isEmpty()) {
-            for (int id : ids) {
-                auto it = byId.find(id);
-                if (it != byId.end()) profiles.push_back(it->second);
-            }
-            return profiles;
-        }
 
-        for (int off = 0; off < missingIds.size(); off += Configs::BATCH_LIMIT_READ) {
-            int end = std::min(off + Configs::BATCH_LIMIT_READ, static_cast<int>(missingIds.size()));
-            auto chunk = missingIds.sliced(off, end - off);
-            std::map<int, std::shared_ptr<Profile>> loaded = loadProfilesByIdsChunk(chunk);
-            for (auto& p : loaded) byId[p.first] = std::move(p.second);
+                auto loaded =
+                    loadProfilesByIdsChunk(
+                        chunk
+                    );
+
+                for (auto& [
+                    id,
+                    profile
+                ] :
+                    loaded)
+                {
+                    if (!profile)
+                    {
+                        continue;
+                    }
+
+
+                    loadedById[id] =
+                        std::move(
+                            profile
+                        );
+                }
+            }
+
+            // =====================================================
+            // PHASE 3
+            //
+            // Re-enter repository state.
+            //
+            // We must now:
+            //
+            // 1. detect concurrent deletions;
+            // 2. avoid replacing an object another thread has
+            //    already published;
+            // 3. publish newly loaded objects.
+            // =====================================================
+            bool retry =
+                false;
+            {
+                std::lock_guard<std::mutex>
+                    locker(
+                        mutex
+                    );
+
+
+                // -------------------------------------------------
+                // A delete happened while SQLite was being read.
+                //
+                // Some of loadedById may now represent rows which
+                // no longer exist.
+                //
+                // Do NOT publish them.
+                // -------------------------------------------------
+                if (deletionEpoch_ !=
+                    deletionEpochSnapshot)
+                {
+                    retry =
+                        true;
+                }
+                else
+                {
+                    for (auto& [
+                        id,
+                        loadedProfile
+                    ] :
+                        loadedById)
+                    {
+                        if (!loadedProfile)
+                        {
+                            continue;
+                        }
+
+                        // =========================================
+                        // Another thread may have loaded the same
+                        // Profile while our DB query was running.
+                        //
+                        // identityMap object wins.
+                        // =========================================
+                        auto existingIt =
+                            identityMap.find(
+                                id
+                            );
+
+
+                        if (existingIt !=
+                            identityMap.end())
+                        {
+                            if (auto existing =
+                                existingIt
+                                ->second
+                                .lock())
+                            {
+                                byId[id] =
+                                    std::move(
+                                        existing
+                                    );
+
+
+                                continue;
+                            }
+
+                            // Stale weak_ptr.
+                            identityMap.erase(
+                                existingIt
+                            );
+                        }
+
+                        // =========================================
+                        // Nobody else published it.
+                        //
+                        // Publish our loaded Profile.
+                        // =========================================
+                        identityMap[id] =
+                            std::weak_ptr<Profile>(
+                                loadedProfile
+                            );
+
+
+                        byId[id] =
+                            std::move(
+                                loadedProfile
+                            );
+                    }
+                }
+            }
+
+            // =====================================================
+            // Concurrent delete happened.
+            //
+            // Start again using the new persistent state.
+            // =====================================================
+            if (retry)
+            {
+                continue;
+            }
+
+
+            // =====================================================
+            // PHASE 4
+            //
+            // Restore exact caller order.
+            //
+            // The caller may supply:
+            //
+            //     [5, 2, 7, 5]
+            //
+            // and we preserve that order, including duplicates.
+            // =====================================================
+            QList<
+                std::shared_ptr<Profile>
+            > result;
+
+
+            result.reserve(
+                ids.size()
+            );
+
+
+            for (const int id :
+            ids)
+            {
+                const auto it =
+                    byId.find(
+                        id
+                    );
+
+
+                if (it !=
+                    byId.end())
+                {
+                    result.append(
+                        it->second
+                    );
+                }
+            }
+
+
+            return result;
         }
-        for (const auto& p : byId) {
-            identityMap[p.first] = std::weak_ptr<Profile>(p.second);
-        }
-        for (int id : ids) {
-            auto it = byId.find(id);
-            if (it != byId.end()) profiles.push_back(it->second);
-        }
-        return profiles;
     }
 
     QList<std::pair<int, QString> > ProfilesRepo::GetProfileIDNameMappedBatch(QList<int> ids) {
@@ -1516,11 +1974,64 @@ namespace Configs {
             group->RemoveProfileBatch(ids);
             dataManager->groupsRepo->Save(group);
         }
-        QMutexLocker locker(&mutex);
-        for (int id : ids) identityMap.erase(id);
-        if (!ids.isEmpty()) {
-            std::vector<int> idVec(ids.begin(), ids.end());
-            db.execDeleteByIdIn("profiles", "id", idVec);
+        // =========================================================
+// Delete persistent Profiles
+// =========================================================
+
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            if (!ids.isEmpty())
+            {
+                // -------------------------------------------------
+                // Invalidate any GetProfile/GetProfileBatch
+                // operation which started before this deletion.
+                //
+                // Increment while repository mutex is held.
+                // -------------------------------------------------
+
+                ++deletionEpoch_;
+
+
+                // -------------------------------------------------
+                // Remove cached objects first.
+                // -------------------------------------------------
+
+                for (const int id :
+                ids)
+                {
+                    identityMap.erase(
+                        id
+                    );
+                }
+
+
+                // -------------------------------------------------
+                // Keep the repository mutex during DELETE.
+                //
+                // Deletion is relatively rare.
+                //
+                // This is intentional: it guarantees that readers
+                // cannot enter their publication phase between
+                // epoch invalidation and persistent deletion.
+                // -------------------------------------------------
+
+                const std::vector<int> idVec(
+                    ids.begin(),
+                    ids.end()
+                );
+
+
+                db.execDeleteByIdIn(
+                    "profiles",
+                    "id",
+                    idVec
+                );
+            }
         }
         return true;
     }
