@@ -3,7 +3,7 @@
 #include <QUrlQuery>
 #include <include/global/Utils.hpp>
 
-#include "include/configs/common/utils.h"
+#include "include/configs/common/Utils.h"
 
 namespace Configs {
     bool anyTLS::ParseFromLink(const QString& link)

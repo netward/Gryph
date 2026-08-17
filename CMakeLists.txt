@@ -242,15 +242,15 @@ set(PROJECT_SOURCES
         include/configs/baseConfig.h
         include/configs/common/DialFields.h
         include/configs/common/TLS.h
-        include/configs/common/multiplex.h
-        include/configs/common/transport.h
+        include/configs/common/Multiplex.h
+        include/configs/common/Transport.h
         include/configs/common/Outbound.h
         
         # common impl
         src/configs/common/DialFields.cpp
         src/configs/common/TLS.cpp
-        src/configs/common/multiplex.cpp
-        src/configs/common/transport.cpp
+        src/configs/common/Multiplex.cpp
+        src/configs/common/Transport.cpp
         src/configs/common/Outbound.cpp
         include/configs/outbounds/socks.h
         include/configs/outbounds/http.h
@@ -286,8 +286,8 @@ set(PROJECT_SOURCES
         src/configs/outbounds/wireguard.cpp
         include/configs/Generate.h
         src/configs/Generate.cpp
-        include/configs/common/utils.h
-        src/configs/common/utils.cpp
+        include/configs/common/Utils.h
+        src/configs/common/Utils.cpp
         include/configs/outbounds/custom.h
         include/configs/outbounds/chain.h
         include/configs/outbounds/extracore.h
@@ -311,8 +311,8 @@ set(PROJECT_SOURCES
         include/ui/profile/edit_advanced.ui
         include/configs/common/xrayStreamSetting.h
         include/configs/outbounds/xrayVless.h
-        include/configs/common/xrayMultiplex.h
-        src/configs/common/xrayMultiplex.cpp
+        include/configs/common/XrayMultiplex.h
+        src/configs/common/XrayMultiplex.cpp
         src/configs/common/xrayStreamSetting.cpp
         src/configs/outbounds/xrayVless.cpp
         include/ui/profile/edit_xrayvless.h

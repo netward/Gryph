@@ -2,7 +2,7 @@
 #include <QHostInfo>
 #include <utility>
 #include "DialFields.h"
-#include "multiplex.h"
+#include "Multiplex.h"
 #include "TLS.h"
 #include "transport.h"
 #include "xrayMultiplex.h"

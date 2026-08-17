@@ -1,4 +1,4 @@
-#include "include/configs/common/xrayMultiplex.h"
+#include "include/configs/common/XrayMultiplex.h"
 
 #include <QUrlQuery>
 
