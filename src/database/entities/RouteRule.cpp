@@ -2,7 +2,6 @@
 #include <QJsonArray>
 #include "include/database/entities/RouteRule.h"
 
-
 #include "include/database/ProfilesRepo.h"
 #include "include/global/Configs.hpp"
 
@@ -127,7 +126,11 @@ namespace Configs {
                             MW_show_log("The outbound described in the rule chain is missing, maybe your data is corrupted");
                             return {};
                         }
-                        obj["outbound"] = prof->OutboundSnapshot()->DisplayName();
+                        const auto profileConfig =
+                            prof->ConfigSnapshot();
+
+                        obj["outbound"] =
+                            profileConfig.displayName;
                     }
                 } else {
                     if (!outboundTag.isEmpty()) obj["outbound"] = outboundTag;

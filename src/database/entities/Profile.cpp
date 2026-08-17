@@ -14,21 +14,16 @@
 namespace Configs
 {
     Profile::Profile(
-        Configs::outbound* outbound,
+        std::shared_ptr<Configs::outbound> outbound,
         const QString& type)
         :
-        type_(type)
-    {
-        if (outbound)
-        {
-            outbound_ =
-                std::shared_ptr<
-                Configs::outbound
-                >(
-                    outbound
-                );
-        }
-    }
+        type_(type),
+        outbound_(
+            std::move(
+                outbound
+            )
+        )
+    {}
 
     int Profile::Id() const
     {
@@ -181,83 +176,293 @@ namespace Configs
         return snapshot;
     }
 
+    // =========================================================
+// Create detached outbound from configuration snapshot
+// =========================================================
+
     std::shared_ptr<Configs::outbound>
-        Profile::OutboundSnapshot() const
+        Profile::CreateOutboundFromSnapshot(
+            const ProfileConfigSnapshot& snapshot) const
     {
-        QReadLocker locker(
-            &configLock_
-        );
+        // -----------------------------------------------------
+        // A Profile without a valid type cannot be cloned.
+        // -----------------------------------------------------
+
+        if (snapshot.type.isEmpty())
+        {
+            return nullptr;
+        }
 
 
-        return outbound_;
-    }
+        // -----------------------------------------------------
+        // Create a NEW outbound object of the same type.
+        //
+        // This must not return the live outbound_ object.
+        // -----------------------------------------------------
 
-    std::shared_ptr<Profile>
-        Profile::CloneForEditing() const
-    {
-        // Take one coherent snapshot of the persistent
-        // profile configuration.
-        const auto config =
-            ConfigSnapshot();
-
-
-        // Create a completely new Profile with a completely
-        // new outbound object of the same type.
-        auto clone =
-            Configs::ProfilesRepo::NewProfile(
-                config.type
+        auto outbound =
+            Configs::ProfilesRepo
+            ::NewOutbound(
+                snapshot.type
             );
 
 
-        if (!clone)
+        if (!outbound)
         {
             return nullptr;
         }
 
 
-        auto cloneOutbound =
-            clone->OutboundSnapshot();
+        // -----------------------------------------------------
+        // Deep-copy configuration through JSON.
+        // -----------------------------------------------------
 
-
-        if (!cloneOutbound)
+        if (!snapshot
+            .outboundJson
+            .isEmpty())
         {
-            return nullptr;
-        }
-
-
-        // Deep-copy outbound configuration through JSON.
-        //
-        // This is important:
-        // clone must NOT share the same mutable outbound
-        // instance with the original Profile.
-        if (!config.outboundJson.isEmpty())
-        {
-            if (!cloneOutbound->ParseFromJson(
-                config.outboundJson))
+            if (!outbound
+                ->ParseFromJson(
+                    snapshot.outboundJson
+                ))
             {
                 return nullptr;
             }
         }
 
 
-        // Preserve identity in the editing copy.
+        return outbound;
+    }
+
+
+    // =========================================================
+    // Safe detached outbound snapshot
+    // =========================================================
+
+    std::shared_ptr<Configs::outbound>
+        Profile::OutboundClone() const
+    {
+        // -----------------------------------------------------
+        // ConfigSnapshot() holds configLock_ while serializing
+        // the current configuration.
+        // -----------------------------------------------------
+
+        const auto snapshot =
+            ConfigSnapshot();
+
+
+        // -----------------------------------------------------
+        // Create a completely independent outbound object.
         //
-        // The clone is NOT inserted into ProfilesRepo,
-        // these values are only needed by the editor.
+        // The returned shared_ptr does NOT point to outbound_.
+        // -----------------------------------------------------
+
+        return CreateOutboundFromSnapshot(
+            snapshot
+        );
+    }
+
+    bool Profile::MutateOutboundBase(
+        const OutboundMutator& mutator)
+    {
+        if (!mutator)
+        {
+            return false;
+        }
+
+
+        // -----------------------------------------------------
+        // Obtain one coherent configuration snapshot.
+        // -----------------------------------------------------
+
+        const auto snapshot =
+            ConfigSnapshot();
+
+
+        return MutateOutboundBaseAtRevision(
+            snapshot.revision,
+            mutator
+        );
+    }
+
+
+    bool Profile::MutateOutboundBaseAtRevision(
+        quint64 expectedRevision,
+        const OutboundMutator& mutator)
+    {
+        if (!mutator)
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Step 1:
+        // Snapshot current configuration.
+        // =====================================================
+
+        const auto snapshot =
+            ConfigSnapshot();
+
+
+        // Somebody changed Profile before this operation
+        // even began.
+        if (snapshot.revision !=
+            expectedRevision)
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Step 2:
+        // Create a completely detached mutable copy.
+        //
+        // No Profile lock is held while parsing or editing it.
+        // =====================================================
+
+        auto replacement =
+            CreateOutboundFromSnapshot(
+                snapshot
+            );
+
+
+        if (!replacement)
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Step 3:
+        // Modify only detached copy.
+        // =====================================================
+
+        if (!mutator(
+            *replacement))
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Step 4:
+        // Atomically publish replacement.
+        // =====================================================
+
+        return CommitOutboundReplacement(
+            std::move(
+                replacement
+            ),
+            expectedRevision
+        );
+    }
+
+
+    bool Profile::CommitOutboundReplacement(
+        std::shared_ptr<Configs::outbound> replacement,
+        quint64 expectedRevision)
+    {
+        if (!replacement)
+        {
+            return false;
+        }
+
+
+        QWriteLocker locker(
+            &configLock_
+        );
+
+
+        // -----------------------------------------------------
+        // Optimistic concurrency control.
+        //
+        // If another thread published newer configuration,
+        // this stale mutation must NOT overwrite it.
+        // -----------------------------------------------------
+
+        if (configRevision_ !=
+            expectedRevision)
+        {
+            return false;
+        }
+
+
+        outbound_ =
+            std::move(
+                replacement
+            );
+
+
+        ++configRevision_;
+
+
+        return true;
+    }
+
+    std::shared_ptr<Profile>
+        Profile::CloneForEditing() const
+    {
+        // =====================================================
+        // One coherent configuration snapshot
+        // =====================================================
+
+        const auto config =
+            ConfigSnapshot();
+
+
+        // =====================================================
+        // Deep-copy outbound
+        // =====================================================
+
+        auto clonedOutbound =
+            CreateOutboundFromSnapshot(
+                config
+            );
+
+
+        if (!clonedOutbound)
+        {
+            return nullptr;
+        }
+
+
+        // =====================================================
+        // Detached Profile
+        // =====================================================
+
+        auto clone =
+            std::make_shared<
+            Profile
+            >(
+                std::move(
+                    clonedOutbound
+                ),
+                config.type
+            );
+
+
+        // Editing copy keeps original identity only so dialogs
+        // know what object they are editing.
         clone->LoadIdentity(
             config.id,
             config.gid
         );
 
 
-        // Test state is independent from configuration,
-        // but copying it makes the detached Profile complete.
+        // =====================================================
+        // Test state
+        // =====================================================
+
         clone->SetTestSnapshot(
             TestSnapshot()
         );
 
 
-        // Same for traffic counters.
+        // =====================================================
+        // Traffic
+        // =====================================================
+
         const auto traffic =
             TrafficSnapshot();
 
@@ -268,7 +473,10 @@ namespace Configs
         );
 
 
-        // Runtime display information.
+        // =====================================================
+        // Runtime information
+        // =====================================================
+
         clone->SetRunningCountryInfo(
             RunningCountryInfo()
         );
@@ -282,16 +490,71 @@ namespace Configs
     // =========================================================
 
     bool Profile::CommitConfigurationFrom(
-        const Profile& edited)
+        const Profile& edited,
+        quint64 expectedRevision)
     {
-        const auto current =
-            ConfigSnapshot();
+        // =====================================================
+        // Snapshot detached editor
+        // =====================================================
+
+        const auto editedSnapshot =
+            edited.ConfigSnapshot();
 
 
-        return CommitConfigurationFrom(
-            edited,
-            current.revision
+        if (editedSnapshot
+            .type
+            .isEmpty())
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Create completely independent outbound
+        // =====================================================
+
+        auto replacement =
+            CreateOutboundFromSnapshot(
+                editedSnapshot
+            );
+
+
+        if (!replacement)
+        {
+            return false;
+        }
+
+
+        // =====================================================
+        // Atomic commit
+        // =====================================================
+
+        QWriteLocker locker(
+            &configLock_
         );
+
+
+        if (configRevision_ !=
+            expectedRevision)
+        {
+            return false;
+        }
+
+
+        type_ =
+            editedSnapshot.type;
+
+
+        outbound_ =
+            std::move(
+                replacement
+            );
+
+
+        ++configRevision_;
+
+
+        return true;
     }
 
     QString
@@ -361,36 +624,33 @@ namespace Configs
 
                 if (!addresses.isEmpty())
                 {
-                    auto edited =
-                        self
-                        ->CloneForEditing();
+                    const QString resolvedAddress =
+                        addresses
+                        .first()
+                        .toString();
 
 
-                    if (edited)
-                    {
-                        auto out =
-                            edited
-                            ->OutboundSnapshot();
+                    self
+                        ->MutateOutboundAtRevision<
+                        Configs::outbound
+                        >(
+                            expectedRevision,
 
-
-                        if (out)
-                        {
-                            out->SetAddress(
-                                addresses
-                                .first()
-                                .toString()
-                            );
-
-
-                            self
-                                ->CommitConfigurationFrom(
-                                    *edited,
-                                    expectedRevision
+                            [
+                                resolvedAddress
+                            ](
+                                Configs::outbound& out
+                                ) -> bool
+                            {
+                                out.SetAddress(
+                                    resolvedAddress
                                 );
-                        }
-                    }
-                }
 
+
+                                return true;
+                            }
+                                    );
+                }
 
                 if (onFinished)
                 {
@@ -421,115 +681,6 @@ namespace Configs
 
 
         runningCountryInfo_.clear();
-    }
-
-    bool Profile::CommitConfigurationFrom(
-        const Profile& edited,
-        quint64 expectedRevision)
-    {
-        // -----------------------------------------------------
-        // Take immutable snapshot from detached edited Profile.
-        //
-        // IMPORTANT:
-        // do this BEFORE locking this Profile.
-        // -----------------------------------------------------
-
-        const auto editedSnapshot =
-            edited.ConfigSnapshot();
-
-
-        if (editedSnapshot.type.isEmpty())
-        {
-            return false;
-        }
-
-
-        // -----------------------------------------------------
-        // Create a completely new outbound instance.
-        //
-        // Do not reuse edited.outbound directly.
-        // Otherwise both Profile objects could share
-        // mutable configuration.
-        // -----------------------------------------------------
-
-        auto temporary =
-            Configs::ProfilesRepo::NewProfile(
-                editedSnapshot.type
-            );
-
-
-        if (!temporary)
-        {
-            return false;
-        }
-
-
-        auto newOutbound =
-            temporary->OutboundSnapshot();
-
-
-        if (!newOutbound)
-        {
-            return false;
-        }
-
-
-        // -----------------------------------------------------
-        // Deep-copy outbound configuration.
-        // -----------------------------------------------------
-
-        if (!editedSnapshot
-            .outboundJson
-            .isEmpty())
-        {
-            if (!newOutbound
-                ->ParseFromJson(
-                    editedSnapshot
-                    .outboundJson
-                ))
-            {
-                return false;
-            }
-        }
-
-
-        // -----------------------------------------------------
-        // Atomic replacement.
-        //
-        // No expensive JSON parsing while holding the lock.
-        // -----------------------------------------------------
-
-        QWriteLocker locker(
-            &configLock_
-        );
-
-
-        // The live Profile changed after the editor/worker
-        // obtained its snapshot.
-        //
-        // Reject stale result instead of overwriting
-        // newer configuration.
-        if (configRevision_ !=
-            expectedRevision)
-        {
-            return false;
-        }
-
-
-        type_ =
-            editedSnapshot.type;
-
-
-        outbound_ =
-            std::move(
-                newOutbound
-            );
-
-
-        ++configRevision_;
-
-
-        return true;
     }
 
     ProfileTestSnapshot
@@ -803,23 +954,84 @@ namespace Configs
         const std::shared_ptr<Configs::Profile>& ent,
         bool ignoreMetadata)
     {
+        // =====================================================
+        // Validate Profile
+        // =====================================================
+
         if (!ent)
         {
             return {};
         }
 
-        const auto outbound =
-            ent->OutboundSnapshot();
 
-        if (!outbound)
+        // =====================================================
+        // Take one immutable configuration snapshot
+        //
+        // Do NOT expose or access the live outbound_ object.
+        // =====================================================
+
+        const auto config =
+            ent->ConfigSnapshot();
+
+
+        if (config.outboundJson.isEmpty())
         {
             return {};
         }
 
-        return outbound
-            ->ExportJsonLink(
-                ignoreMetadata
+
+        // =====================================================
+        // Work only with a local JSON copy
+        // =====================================================
+
+        QJsonObject json =
+            config.outboundJson;
+
+
+        // ExportJsonLink(stripMetadata) previously removed
+        // the "tag" field when ignoreMetadata == true.
+        if (ignoreMetadata)
+        {
+            json.remove(
+                QStringLiteral("tag")
             );
+        }
+
+
+        // =====================================================
+        // Reproduce outbound::ExportJsonLink()
+        //
+        // json://Gryph#<Base64Url(JSON)>
+        // =====================================================
+
+        QUrl url;
+
+
+        url.setScheme(
+            QStringLiteral("json")
+        );
+
+
+        url.setHost(
+            QStringLiteral("Gryph")
+        );
+
+
+        url.setFragment(
+            QJsonObject2QString(
+                json,
+                true
+            )
+            .toUtf8()
+            .toBase64(
+                QByteArray::Base64UrlEncoding
+            )
+        );
+
+
+        return url.toString(
+            QUrl::FullyEncoded
+        );
     }
 
     void ProfileFilter::Uniq(const QList<std::shared_ptr<Profile>> &in,

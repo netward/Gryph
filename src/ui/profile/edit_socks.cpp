@@ -1,30 +1,105 @@
 #include "include/ui/profile/edit_socks.h"
 
-EditSocks::EditSocks(QWidget *parent)
-    : QWidget(parent),
-      ui(new Ui::EditSocks) {
 
+EditSocks::EditSocks(
+    QWidget* parent)
+    :
+    QWidget(parent),
+    ui(new Ui::EditSocks)
+{
     ui->setupUi(this);
 }
 
-EditSocks::~EditSocks() {
+
+EditSocks::~EditSocks()
+{
     delete ui;
 }
 
-void EditSocks::onStart(std::shared_ptr<Configs::Profile> _ent) {
-    this->ent = _ent;
-    auto outbound = this->ent->Socks();
 
-    ui->version->setCurrentText(Int2String(outbound->version));
-    ui->username->setText(outbound->username);
-    ui->password->setText(outbound->password);
+void EditSocks::onStart(
+    std::shared_ptr<Configs::Profile> _ent)
+{
+    ent = _ent;
+
+    if (!ent)
+    {
+        return;
+    }
+
+
+    // Read SOCKS configuration from a detached copy.
+    const auto outbound =
+        ent->OutboundCloneAs<
+        Configs::socks
+        >();
+
+    if (!outbound)
+    {
+        return;
+    }
+
+
+    ui->version->setCurrentText(
+        Int2String(
+            outbound->version
+        )
+    );
+
+    ui->username->setText(
+        outbound->username
+    );
+
+    ui->password->setText(
+        outbound->password
+    );
 }
 
-bool EditSocks::onEnd() {
-    auto outbound = this->ent->Socks();
 
-    outbound->version = ui->version->currentText().toInt();
-    outbound->username = ui->username->text();
-    outbound->password = ui->password->text();
-    return true;
+bool EditSocks::onEnd()
+{
+    if (!ent)
+    {
+        return false;
+    }
+
+
+    const int version =
+        ui->version
+        ->currentText()
+        .toInt();
+
+    const QString username =
+        ui->username
+        ->text();
+
+    const QString password =
+        ui->password
+        ->text();
+
+
+    return ent
+        ->MutateOutbound<
+        Configs::socks
+        >(
+            [
+                version,
+                username,
+                password
+            ](
+                Configs::socks& outbound
+                ) -> bool
+            {
+                outbound.version =
+                    version;
+
+                outbound.username =
+                    username;
+
+                outbound.password =
+                    password;
+
+                return true;
+            }
+        );
 }

@@ -71,7 +71,7 @@ namespace Configs {
         }
 
         const auto chain =
-            ent->Chain();
+            ent->OutboundCloneAs<Configs::chain>();
 
         if (!chain)
         {
@@ -94,7 +94,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                subEnt->OutboundSnapshot();
+                subEnt->OutboundClone();
 
             if (!outbound)
             {
@@ -139,7 +139,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                ent->OutboundSnapshot();
+                ent->OutboundClone();
 
             if (!outbound)
             {
@@ -192,67 +192,75 @@ namespace Configs {
             return nullptr;
         }
 
-        const auto outbound =
-            warpProfile->Wireguard();
-
-        if (!outbound)
-        {
-            return nullptr;
-        }
-
-        outbound->name =
-            "warp";
-
         const QString warpEndpoint =
             dataManager
             ->settingsRepo
             ->warp_ep;
 
-        outbound->server =
-            warpEndpoint.contains(":")
-            ? SubStrBefore(
-                warpEndpoint,
-                ":"
-            )
-            : warpEndpoint;
+        const bool configured =
+            warpProfile
+            ->MutateOutbound<
+            Configs::wireguard
+            >(
+                [&](Configs::wireguard& outbound) -> bool
+                {
+                    outbound.name =
+                        "warp";
 
-        outbound->server_port =
-            warpEndpoint.contains(":")
-            ? SubStrAfter(
-                warpEndpoint,
-                ":"
-            ).toInt()
-            : 2408;
+                    outbound.server =
+                        warpEndpoint.contains(":")
+                        ? SubStrBefore(
+                            warpEndpoint,
+                            ":"
+                        )
+                        : warpEndpoint;
 
-        outbound->private_key =
-            dataManager
-            ->settingsRepo
-            ->warp_private_key;
+                    outbound.server_port =
+                        warpEndpoint.contains(":")
+                        ? SubStrAfter(
+                            warpEndpoint,
+                            ":"
+                        ).toInt()
+                        : 2408;
 
-        outbound->address =
-            dataManager
-            ->settingsRepo
-            ->warp_ifc_addrs;
+                    outbound.private_key =
+                        dataManager
+                        ->settingsRepo
+                        ->warp_private_key;
 
-        auto peer =
-            std::make_shared<Peer>();
+                    outbound.address =
+                        dataManager
+                        ->settingsRepo
+                        ->warp_ifc_addrs;
 
-        peer->public_key =
-            dataManager
-            ->settingsRepo
-            ->warp_public_key;
+                    auto peer =
+                        std::make_shared<Peer>();
 
-        peer->address =
-            outbound->server;
+                    peer->public_key =
+                        dataManager
+                        ->settingsRepo
+                        ->warp_public_key;
 
-        peer->port =
-            outbound->server_port;
+                    peer->address =
+                        outbound.server;
 
-        outbound->peer =
-            peer;
+                    peer->port =
+                        outbound.server_port;
 
-        outbound->mtu =
-            1280;
+                    outbound.peer =
+                        std::move(peer);
+
+                    outbound.mtu =
+                        1280;
+
+                    return true;
+                }
+            );
+
+        if (!configured)
+        {
+            return nullptr;
+        }
 
         // Synthetic profile; it is never persisted.
         warpProfile->LoadIdentity(
@@ -351,7 +359,7 @@ namespace Configs {
                 }
 
                 const auto custom =
-                    profile->Custom();
+                    profile->OutboundCloneAs<Configs::Custom>();
 
                 return
                     custom &&
@@ -368,7 +376,7 @@ namespace Configs {
                 }
 
                 const auto outbound =
-                    profile->OutboundSnapshot();
+                    profile->OutboundClone();
 
                 return
                     outbound &&
@@ -399,7 +407,7 @@ namespace Configs {
                 }
 
                 const auto neededOutbound =
-                    neededEnt->OutboundSnapshot();
+                    neededEnt->OutboundClone();
 
                 if (!neededOutbound)
                 {
@@ -422,7 +430,7 @@ namespace Configs {
                 if (neededEnt->Type() == "chain")
                 {
                     const auto chain =
-                        neededEnt->Chain();
+                        neededEnt->OutboundCloneAs<Configs::chain>();
 
                     if (!chain ||
                         chain->list.isEmpty())
@@ -449,7 +457,7 @@ namespace Configs {
                         }
 
                         const auto hopOutbound =
-                            hopEnt->OutboundSnapshot();
+                            hopEnt->OutboundClone();
 
                         if (!hopOutbound)
                         {
@@ -775,7 +783,7 @@ namespace Configs {
         std::shared_ptr<Profile> extraCoreEnt;
 
         const auto rootOutbound =
-            ctx->ent->OutboundSnapshot();
+            ctx->ent->OutboundClone();
 
         if (rootOutbound &&
             rootOutbound->IsExtraCore())
@@ -786,7 +794,7 @@ namespace Configs {
         else if (ctx->ent->Type() == "chain")
         {
             const auto chain =
-                ctx->ent->Chain();
+                ctx->ent->OutboundCloneAs<Configs::chain>();
 
             if (chain &&
                 !chain->list.isEmpty())
@@ -801,7 +809,7 @@ namespace Configs {
                 if (firstEnt)
                 {
                     const auto firstOutbound =
-                        firstEnt->OutboundSnapshot();
+                        firstEnt->OutboundClone();
 
                     if (firstOutbound &&
                         firstOutbound->IsExtraCore())
@@ -816,7 +824,7 @@ namespace Configs {
         if (extraCoreEnt)
         {
             const auto outbound =
-                extraCoreEnt->ExtraCore();
+                extraCoreEnt->OutboundCloneAs<Configs::extracore>();
 
             if (!outbound)
             {
@@ -972,7 +980,7 @@ namespace Configs {
 
             if (isTailscale)
             {
-                auto tailscale = ctx->ent->Tailscale();
+                auto tailscale = ctx->ent->OutboundCloneAs<Configs::tailscale>();
                 if (tailscale != nullptr)
                 {
                     // Add an additional DNS server for Tailscale MagicDNS
@@ -1306,7 +1314,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                ent->OutboundSnapshot();
+                ent->OutboundClone();
 
             if (!outbound)
             {
@@ -1367,7 +1375,7 @@ namespace Configs {
             if (ent->Type() == "custom")
             {
                 const auto custom =
-                    ent->Custom();
+                    ent->OutboundCloneAs<Configs::Custom>();
 
                 if (custom &&
                     custom->type ==
@@ -1476,7 +1484,7 @@ namespace Configs {
         }
 
         const auto chain =
-            ent->Chain();
+            ent->OutboundCloneAs<Configs::chain>();
 
         if (!chain)
         {
@@ -1568,7 +1576,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                ent->OutboundSnapshot();
+                ent->OutboundClone();
 
             if (!outbound)
             {
@@ -1677,7 +1685,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                ent->OutboundSnapshot();
+                ent->OutboundClone();
 
             if (!outbound)
             {
@@ -1862,7 +1870,7 @@ namespace Configs {
             const auto terminalOutbound =
                 buildEnts
                 .last()
-                ->OutboundSnapshot();
+                ->OutboundClone();
 
             if (terminalOutbound &&
                 terminalOutbound->IsXrayFullConfig())
@@ -1880,10 +1888,13 @@ namespace Configs {
                     return;
                 }
 
-                auto custom =
-                    buildProfile->Custom();
+                const auto customSnapshot =
+                    buildProfile
+                    ->OutboundCloneAs<
+                    Configs::Custom
+                    >();
 
-                if (!custom)
+                if (!customSnapshot)
                 {
                     ctx->error =
                         "Failed to cast to Custom for "
@@ -1893,7 +1904,7 @@ namespace Configs {
 
                 QJsonObject userXrayConfig =
                     QString2QJsonObject(
-                        custom->config
+                        customSnapshot->config
                     );
 
                 if (userXrayConfig.isEmpty())
@@ -1915,18 +1926,44 @@ namespace Configs {
                     return;
                 }
 
-                // These fields are intentionally written only to
-                // the detached build copy. Custom::Build() uses
-                // them to produce the matching sing-box SOCKS
-                // outbound.
-                custom->bridgePort =
+                const int bridgePort =
                     bridgePorts[0];
 
-                custom->bridgeAuth =
+                const QString bridgeAuth =
                     GetRandomString(32);
 
-                custom->bridgeHost =
+                const QString bridgeHost =
                     GenRandomLoopback();
+
+                // These fields are build-only state.
+                // Write them only into the detached build profile.
+                const bool bridgeConfigured =
+                    buildProfile
+                    ->MutateOutbound<
+                    Configs::Custom
+                    >(
+                        [&](Configs::Custom& custom) -> bool
+                        {
+                            custom.bridgePort =
+                                bridgePort;
+
+                            custom.bridgeAuth =
+                                bridgeAuth;
+
+                            custom.bridgeHost =
+                                bridgeHost;
+
+                            return true;
+                        }
+                    );
+
+                if (!bridgeConfigured)
+                {
+                    ctx->error =
+                        "Failed to configure Custom Xray "
+                        "full-config bridge";
+                    return;
+                }
 
                 QJsonArray inbounds =
                     userXrayConfig[
@@ -1941,11 +1978,11 @@ namespace Configs {
                         },
                         {
                             "listen",
-                            custom->bridgeHost
+                            bridgeHost
                         },
                         {
                             "port",
-                            custom->bridgePort
+                            bridgePort
                         },
                         {
                             "protocol",
@@ -1968,11 +2005,11 @@ namespace Configs {
                                         QJsonObject{
                                             {
                                                 "user",
-                                                custom->bridgeAuth
+                                                bridgeAuth
                                             },
                                             {
                                                 "pass",
-                                                custom->bridgeAuth
+                                                bridgeAuth
                                             }
                                         }
                                     }
@@ -2022,7 +2059,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                ent->OutboundSnapshot();
+                ent->OutboundClone();
 
             if (!outbound)
             {
@@ -2107,28 +2144,36 @@ namespace Configs {
                 return;
             }
 
-            auto socksOutbound =
-                bridgeEnt->Socks();
+            const bool socksConfigured =
+                bridgeEnt
+                ->MutateOutbound<
+                Configs::socks
+                >(
+                    [&](Configs::socks& socksOutbound) -> bool
+                    {
+                        socksOutbound.username =
+                            singToXrayBridgeConf.auth;
 
-            if (!socksOutbound)
+                        socksOutbound.password =
+                            singToXrayBridgeConf.auth;
+
+                        socksOutbound.server =
+                            singToXrayBridgeConf.host;
+
+                        socksOutbound.server_port =
+                            singToXrayBridgeConf.port;
+
+                        return true;
+                    }
+                );
+
+            if (!socksConfigured)
             {
                 ctx->error =
                     "Failed to create sing-to-Xray "
                     "SOCKS outbound";
                 return;
             }
-
-            socksOutbound->username =
-                singToXrayBridgeConf.auth;
-
-            socksOutbound->password =
-                singToXrayBridgeConf.auth;
-
-            socksOutbound->server =
-                singToXrayBridgeConf.host;
-
-            socksOutbound->server_port =
-                singToXrayBridgeConf.port;
 
             initialSingEnts <<
                 bridgeEnt;
@@ -2304,7 +2349,7 @@ namespace Configs {
         if (ctx->ent->Type() == "chain")
         {
             auto chain =
-                ctx->ent->Chain();
+                ctx->ent->OutboundCloneAs<Configs::chain>();
 
 
             if (!chain)
@@ -2753,7 +2798,7 @@ namespace Configs {
         if (ent->Type() == "custom")
         {
             auto res = std::make_shared<BuildConfigResult>();
-            auto custom = ent->Custom();
+            auto custom = ent->OutboundCloneAs<Configs::Custom>();
             if (custom == nullptr)
             {
                 res->error = "Corrupted data, needed custom ent, got nullptr";
@@ -2856,7 +2901,7 @@ namespace Configs {
         if (ent->Type() == "chain")
         {
             const auto chain =
-                ent->Chain();
+                ent->OutboundCloneAs<Configs::chain>();
 
             if (!chain)
             {
@@ -2902,7 +2947,7 @@ namespace Configs {
         if (ent->Type() == "custom")
         {
             const auto custom =
-                ent->Custom();
+                ent->OutboundCloneAs<Configs::Custom>();
 
             if (!custom)
             {
@@ -2946,7 +2991,7 @@ namespace Configs {
         if (!fullConf)
         {
             const auto outbound =
-                ent->OutboundSnapshot();
+                ent->OutboundClone();
 
             if (!outbound)
             {
@@ -3131,7 +3176,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                proxy->OutboundSnapshot();
+                proxy->OutboundClone();
 
             if (outbound &&
                 outbound->IsXray())
@@ -3179,7 +3224,7 @@ namespace Configs {
             }
 
             const auto outbound =
-                item->OutboundSnapshot();
+                item->OutboundClone();
 
             if (!outbound)
             {
@@ -3217,7 +3262,7 @@ namespace Configs {
                     false;
 
                 const auto chain =
-                    item->Chain();
+                    item->OutboundCloneAs<Configs::chain>();
 
                 if (!chain)
                 {
@@ -3246,7 +3291,7 @@ namespace Configs {
 
                     const auto hopOutbound =
                         hopEnt
-                        ->OutboundSnapshot();
+                        ->OutboundClone();
 
                     if (!hopOutbound)
                     {
@@ -3300,7 +3345,7 @@ namespace Configs {
             if (itemType == "custom")
             {
                 const auto custom =
-                    item->Custom();
+                    item->OutboundCloneAs<Configs::Custom>();
 
                 if (!custom)
                 {

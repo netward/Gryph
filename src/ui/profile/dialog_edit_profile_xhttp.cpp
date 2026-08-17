@@ -167,15 +167,78 @@ void DialogEditProfile::updateXrayXHTTPControls() {
     }
 }
 
-bool DialogEditProfile::validateXrayXHTTPSettings() {
-    if (!ent->OutboundSnapshot()->IsXray() || ui->xray_network->currentText() != "xhttp") return true;
+bool DialogEditProfile::validateXrayXHTTPSettings()
+{
+    // =====================================================
+    // Validate Profile
+    // =====================================================
 
-    if (!ui->xray_max_connections->text().trimmed().isEmpty() &&
-        !ui->xray_max_concurrency->text().trimmed().isEmpty()) {
-        MessageBoxWarning(software_name,
-                          tr("XHTTP maxConnections cannot be specified together with maxConcurrency."));
+    if (!ent)
+    {
         return false;
     }
 
+
+    // =====================================================
+    // Read-only detached outbound copy
+    //
+    // Do NOT expose the live Profile::outbound_ object.
+    // =====================================================
+
+    const auto outbound =
+        ent->OutboundClone();
+
+
+    if (!outbound)
+    {
+        return false;
+    }
+
+
+    // =====================================================
+    // Validation is relevant only for Xray + XHTTP
+    // =====================================================
+
+    if (!outbound->IsXray())
+    {
+        return true;
+    }
+
+
+    if (ui->xray_network
+        ->currentText() !=
+        QStringLiteral("xhttp"))
+    {
+        return true;
+    }
+
+
+    // =====================================================
+    // maxConnections and maxConcurrency are mutually
+    // exclusive
+    // =====================================================
+
+    const QString maxConnections =
+        ui->xray_max_connections
+        ->text()
+        .trimmed();
+
+
+    const QString maxConcurrency =
+        ui->xray_max_concurrency
+        ->text()
+        .trimmed();
+    if (!maxConnections.isEmpty() &&
+        !maxConcurrency.isEmpty())
+    {
+        MessageBoxWarning(
+            software_name,
+            tr(
+                "XHTTP maxConnections cannot be "
+                "specified together with maxConcurrency."
+            )
+        );
+        return false;
+    }
     return true;
 }

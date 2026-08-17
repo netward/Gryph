@@ -274,23 +274,21 @@ DialogEditProfile::DialogEditProfile(const QString& _type, int profileOrGroupId,
         const auto loadType =
             [this](const QString& profileType)
             {
-                const auto profile =
-                    Configs::dataManager
-                    ->profilesRepo
-                    ->NewProfile(profileType);
-
-                if (!profile)
-                {
-                    return;
-                }
-
+                // No Profile object is needed here.
+                // We only need a temporary outbound to obtain
+                // its display type.
                 const auto outbound =
-                    profile->OutboundSnapshot();
+                    Configs::ProfilesRepo
+                    ::NewOutbound(
+                        profileType
+                    );
+
 
                 if (!outbound)
                 {
                     return;
                 }
+
 
                 ui->type->addItem(
                     outbound->DisplayType(),
@@ -494,16 +492,76 @@ void DialogEditProfile::typeSelected(const QString& newType) {
         innerWidget = _innerWidget;
         innerEditor = _innerWidget;
     }
-    else if (type == Configs::Custom::CustomOutbound || type == Configs::Custom::CustomFullConfig ||
-        type == Configs::Custom::CustomXrayOutbound || type == Configs::Custom::CustomXrayFullConfig ||
-        type == "custom") {
-        auto _innerWidget = new EditCustom(this);
-        innerWidget = _innerWidget;
-        innerEditor = _innerWidget;
-        customType = newEnt ? type : ent->Custom()->type;
-        _innerWidget->preset_core = customType;
-        type = "custom";
-    }
+    else if (
+        type == Configs::Custom::CustomOutbound
+        ||
+        type == Configs::Custom::CustomFullConfig
+        ||
+        type == Configs::Custom::CustomXrayOutbound
+        ||
+        type == Configs::Custom::CustomXrayFullConfig
+        ||
+        type == "custom")
+        {
+            auto* const _innerWidget =
+                new EditCustom(
+                    this
+                );
+
+
+            innerWidget =
+                _innerWidget;
+
+
+            innerEditor =
+                _innerWidget;
+
+
+            // =====================================================
+            // Resolve Custom subtype
+            // =====================================================
+
+            if (newEnt)
+            {
+                customType =
+                    type;
+            }
+            else
+            {
+                const auto custom =
+                    ent
+                    ? ent->OutboundCloneAs<
+                    Configs::Custom
+                    >()
+                    : nullptr;
+
+
+                if (!custom)
+                {
+                    MessageBoxWarning(
+                        tr("Error"),
+                        tr(
+                            "Cannot read custom profile "
+                            "configuration."
+                        )
+                    );
+
+                    return;
+                }
+
+
+                customType =
+                    custom->type;
+            }
+
+
+            _innerWidget->preset_core =
+                customType;
+
+
+            type =
+                "custom";
+                }
     else if (type == "extracore")
     {
         auto _innerWidget = new EditExtraCore(this);
@@ -536,10 +594,30 @@ void DialogEditProfile::typeSelected(const QString& newType) {
             ->NewProfile(type);
     }
 
+    // =====================================================
+    // Detached outbound snapshot for UI initialization
+    //
+    // typeSelected() only READS configuration here.
+    // It must never receive the live Profile::outbound_.
+    // =====================================================
+
     const auto outbound =
         ent
-        ? ent->OutboundSnapshot()
+        ? ent->OutboundClone()
         : nullptr;
+
+
+    if (!outbound)
+    {
+        MessageBoxWarning(
+            tr("Error"),
+            tr(
+                "Profile outbound is not available."
+            )
+        );
+
+        return;
+    }
 
     if (!outbound)
     {
@@ -758,11 +836,22 @@ void DialogEditProfile::typeSelected(const QString& newType) {
         }, this);
 }
 
-void DialogEditProfile::updateXrayCommons(QString network) {
+void DialogEditProfile::updateXrayCommons(
+    QString network)
+{
+    if (!ent)
+    {
+        return;
+    }
+
+
+    // =====================================================
+    // Read-only detached copy
+    // =====================================================
+
     const auto outbound =
-        ent
-        ? ent->OutboundSnapshot()
-        : nullptr;
+        ent->OutboundClone();
+
 
     if (!outbound ||
         !outbound->IsXray())
@@ -770,32 +859,129 @@ void DialogEditProfile::updateXrayCommons(QString network) {
         return;
     }
 
-    auto stream =
-        outbound->GetXrayStream();
 
-    if (network == "xhttp") {
-        ui->xray_host->setText(stream->xhttp->host);
-        ui->xray_path->setText(stream->xhttp->path);
-        ui->xray_mode->setCurrentText(stream->xhttp->mode);
-        ui->xray_headers->setText(Configs::getHeadersString(stream->xhttp->headers));
+    const auto stream =
+        outbound
+        ->GetXrayStream();
+
+
+    if (!stream)
+    {
+        return;
+    }
+
+
+    if (network == "xhttp")
+    {
+        ui->xray_host
+            ->setText(
+                stream->xhttp->host
+            );
+
+
+        ui->xray_path
+            ->setText(
+                stream->xhttp->path
+            );
+
+
+        ui->xray_mode
+            ->setCurrentText(
+                stream->xhttp->mode
+            );
+
+
+        ui->xray_headers
+            ->setText(
+                Configs::getHeadersString(
+                    stream->xhttp->headers
+                )
+            );
+
+
         updateXrayXHTTPControls();
     }
-    else if (network == "grpc") {
-        ui->xray_host->setText(stream->grpc->authority);
-        ui->xray_path->setText(stream->grpc->serviceName);
-        ui->xray_multi_mode->setChecked(stream->grpc->multiMode);
+
+    else if (network == "grpc")
+    {
+        ui->xray_host
+            ->setText(
+                stream->grpc->authority
+            );
+
+
+        ui->xray_path
+            ->setText(
+                stream->grpc->serviceName
+            );
+
+
+        ui->xray_multi_mode
+            ->setChecked(
+                stream->grpc->multiMode
+            );
     }
-    else if (network == "ws") {
-        ui->xray_host->setText(stream->ws->host);
-        ui->xray_path->setText(stream->ws->path);
-        ui->xray_ed_length->setText(QString::number(stream->ws->ed));
-        ui->xray_headers->setText(Configs::getHeadersString(stream->ws->headers));
+
+    else if (network == "ws")
+    {
+        ui->xray_host
+            ->setText(
+                stream->ws->host
+            );
+
+
+        ui->xray_path
+            ->setText(
+                stream->ws->path
+            );
+
+
+        ui->xray_ed_length
+            ->setText(
+                QString::number(
+                    stream->ws->ed
+                )
+            );
+
+
+        ui->xray_headers
+            ->setText(
+                Configs::getHeadersString(
+                    stream->ws->headers
+                )
+            );
     }
-    else if (network == "httpupgrade") {
-        ui->xray_host->setText(stream->httpupgrade->host);
-        ui->xray_path->setText(stream->httpupgrade->path);
-        ui->xray_ed_length->setText(QString::number(stream->httpupgrade->ed));
-        ui->xray_headers->setText(Configs::getHeadersString(stream->httpupgrade->headers));
+
+    else if (network == "httpupgrade")
+    {
+        ui->xray_host
+            ->setText(
+                stream->httpupgrade->host
+            );
+
+
+        ui->xray_path
+            ->setText(
+                stream->httpupgrade->path
+            );
+
+
+        ui->xray_ed_length
+            ->setText(
+                QString::number(
+                    stream->httpupgrade->ed
+                )
+            );
+
+
+        ui->xray_headers
+            ->setText(
+                Configs::getHeadersString(
+                    stream
+                    ->httpupgrade
+                    ->headers
+                )
+            );
     }
 }
 
@@ -803,136 +989,769 @@ bool DialogEditProfile::validateHeaders() {
     return !ui->headers->text().contains("|");
 }
 
-bool DialogEditProfile::onEnd() {
+bool DialogEditProfile::onEnd()
+{
+    // =====================================================
+    // Apply protocol-specific editor settings first
+    // =====================================================
 
-    if (!innerEditor->onEnd()) {
-        return false;
-    }
-
-    if (!validateHeaders()) return false;
-    if (!validateXrayXHTTPSettings()) return false;
-
-    const auto outbound =
-        ent
-        ? ent->OutboundSnapshot()
-        : nullptr;
-
-    if (!outbound)
+    if (!innerEditor)
     {
         return false;
     }
 
-    outbound->name = ui->name->text();
-    outbound->SetAddress(ui->address->text().remove(' '));
-    outbound->SetServerPort(ui->port->text().toInt());
 
-    if (outbound->HasTLS() || outbound->HasTransport()) {
-        auto tls = outbound->GetTLS();
-        auto transport = outbound->GetTransport();
-        transport->type = ui->network->currentText();
-        tls->enabled = ui->security->currentText() == "tls";
-        transport->path = ui->path->text();
-        transport->host = ui->host->text();
-        tls->server_name = ui->sni->text();
-        tls->alpn = SplitAndTrim(ui->alpn->text(), ",");
-        tls->utls->fingerPrint = ui->utlsFingerprint->currentText();
-        tls->utls->enabled = !tls->utls->fingerPrint.isEmpty();
-        tls->fragment = ui->tls_frag->isChecked();
-        tls->fragment_fallback_delay = ui->tls_frag_fall_delay->text();
-        tls->record_fragment = ui->tls_rec_frag->isChecked();
-        tls->insecure = ui->insecure->isChecked();
-        transport->headers = Configs::parseHeaderPairs(ui->headers->text());
-        transport->method = ui->method->text();
-        transport->service_name = ui->service_name->text();
-        transport->early_data_header_name = ui->ws_early_data_name->text();
-        transport->max_early_data = ui->ws_early_data_length->text().toInt();
-        tls->reality->public_key = ui->reality_pbk->text();
-        tls->reality->short_id = ui->reality_sid->text();
-        tls->reality->enabled = !tls->reality->public_key.isEmpty();
-        tls->certificate = CACHE.certificate;
+    if (!innerEditor->onEnd())
+    {
+        return false;
     }
-    if (outbound->HasMux()) {
-        auto mux = outbound->GetMux();
-        mux->saveMuxState(ui->multiplex->currentIndex());
-        mux->brutal->enabled = ui->brutal_enable->isChecked();
-        mux->brutal->down_mbps = ui->brutal_d_speed->text().toInt();
-        mux->brutal->up_mbps = ui->brutal_u_speed->text().toInt();
+
+
+    // =====================================================
+    // Validate common UI
+    // =====================================================
+
+    if (!validateHeaders())
+    {
+        return false;
     }
-    if (outbound->IsXray()) {
-        auto xrayStream = outbound->GetXrayStream();
-        auto xrayMux = outbound->GetXrayMultiplex();
 
-        xrayStream->network = ui->xray_network->currentText();
-        xrayStream->security = ui->xray_security->currentText();
-        xrayMux->saveMuxState(ui->xray_mux->currentIndex());
 
-        auto sni = ui->xray_sni->text();
-        if (xrayStream->security == "tls") xrayStream->TLS->serverName = sni;
-        else if (xrayStream->security == "reality") xrayStream->reality->serverName = sni;
-
-        auto fp = ui->xray_fp->currentText();
-        if (xrayStream->security == "tls") xrayStream->TLS->fingerprint = fp;
-        else if (xrayStream->security == "reality") xrayStream->reality->fingerprint = fp;
-
-        xrayStream->TLS->alpn = SplitAndTrim(ui->xray_alpn->text(), ",", false);;
-        xrayStream->TLS->pinnedPeerCertSha256 = ui->xray_pinned_peer_cert_sha256->text();
-        xrayStream->TLS->verifyPeerCertByName = ui->xray_verify_peer_cert_by_name->text();
-        xrayStream->reality->password = ui->xray_reality_pbk->text();
-        xrayStream->reality->shortId = ui->xray_reality_sid->text();
-        xrayStream->reality->spiderX = ui->xray_reality_spiderx->text();
-
-        if (xrayStream->network == "xhttp") {
-            xrayStream->xhttp->host = ui->xray_host->text();
-            xrayStream->xhttp->path = ui->xray_path->text();
-            xrayStream->xhttp->mode = ui->xray_mode->currentText();
-            xrayStream->xhttp->headers = Configs::parseHeaderPairs(ui->xray_headers->text());
-            xrayStream->xhttp->xPaddingBytes = ui->xray_xpaddingbytes->text();
-            xrayStream->xhttp->xPaddingObfsMode = ui->xray_xpadding_obfs_mode->isChecked();
-            xrayStream->xhttp->xPaddingKey = ui->xray_xpadding_key->text();
-            xrayStream->xhttp->xPaddingHeader = ui->xray_xpadding_header->text();
-            xrayStream->xhttp->xPaddingPlacement = ui->xray_xpadding_placement->currentText();
-            xrayStream->xhttp->xPaddingMethod = ui->xray_xpadding_method->currentText();
-            xrayStream->xhttp->uplinkHTTPMethod = ui->xray_uplink_http_method->currentText();
-            xrayStream->xhttp->sessionPlacement = ui->xray_session_placement->currentText();
-            xrayStream->xhttp->sessionKey = ui->xray_session_key->text();
-            xrayStream->xhttp->seqPlacement = ui->xray_seq_placement->currentText();
-            xrayStream->xhttp->seqKey = ui->xray_seq_key->text();
-            xrayStream->xhttp->uplinkDataPlacement = ui->xray_uplink_data_placement->currentText();
-            xrayStream->xhttp->uplinkDataKey = ui->xray_uplink_data_key->text();
-            xrayStream->xhttp->uplinkChunkSize = ui->xray_uplink_chunk_size->text();
-            xrayStream->xhttp->noGRPCHeader = ui->xray_no_grpc->isChecked();
-            xrayStream->xhttp->noSSEHeader = ui->xray_no_sse->isChecked();
-            xrayStream->xhttp->scMaxEachPostBytes = ui->xray_scMaxEachPostBytes->text();
-            xrayStream->xhttp->scMinPostsIntervalMs = ui->xray_scMinPostsIntervalMs->text();
-            xrayStream->xhttp->scMaxBufferedPosts = ui->xray_scMaxBufferedPosts->text().toLongLong();
-            xrayStream->xhttp->scStreamUpServerSecs = ui->xray_scStreamUpServerSecs->text();
-            xrayStream->xhttp->serverMaxHeaderBytes = ui->xray_serverMaxHeaderBytes->text().toInt();
-            xrayStream->xhttp->maxConcurrency = ui->xray_max_concurrency->text();
-            xrayStream->xhttp->maxConnections = ui->xray_max_connections->text();
-            xrayStream->xhttp->hMaxRequestTimes = ui->xray_hMaxRequestTimes->text();
-            xrayStream->xhttp->hMaxReusableSecs = ui->xray_hMaxReusableSecs->text();
-            xrayStream->xhttp->cMaxReuseTimes = ui->xray_max_reuse_times->text();
-            xrayStream->xhttp->hKeepAlivePeriod = ui->xray_keep_alive_period->text().toLongLong();
-            xrayStream->xhttp->downloadSettings = xrayStream->xhttp->mode == "stream-one" ? QString() : CACHE.XrayDownloadSettings;
-        }
-        else if (xrayStream->network == "grpc") {
-            xrayStream->grpc->authority = ui->xray_host->text();
-            xrayStream->grpc->serviceName = ui->xray_path->text();
-            xrayStream->grpc->multiMode = ui->xray_multi_mode->isChecked();
-        }
-        else if (xrayStream->network == "ws") {
-            xrayStream->ws->host = ui->xray_host->text();
-            xrayStream->ws->path = ui->xray_path->text();
-            xrayStream->ws->ed = ui->xray_ed_length->text().toInt();
-            xrayStream->ws->headers = Configs::parseHeaderPairs(ui->xray_headers->text());
-        }
-        else if (xrayStream->network == "httpupgrade") {
-            xrayStream->httpupgrade->host = ui->xray_host->text();
-            xrayStream->httpupgrade->path = ui->xray_path->text();
-            xrayStream->httpupgrade->ed = ui->xray_ed_length->text().toInt();
-            xrayStream->httpupgrade->headers = Configs::parseHeaderPairs(ui->xray_headers->text());
-        }
+    if (!validateXrayXHTTPSettings())
+    {
+        return false;
     }
+
+
+    if (!ent)
+    {
+        return false;
+    }
+
+
+    // =====================================================
+    // Apply common configuration atomically
+    //
+    // IMPORTANT:
+    //
+    // MutateOutbound creates a detached copy,
+    // modifies it here and publishes it only after the
+    // whole mutation succeeds.
+    // =====================================================
+
+    const bool updated =
+        ent
+        ->MutateOutbound<
+        Configs::outbound
+        >(
+            [this](
+                Configs::outbound& outbound
+                ) -> bool
+            {
+                // =========================================
+                // Common
+                // =========================================
+
+                outbound.name =
+                    ui->name->text();
+
+
+                QString address =
+                    ui->address
+                    ->text();
+
+
+                address.remove(
+                    ' '
+                );
+
+
+                outbound.SetAddress(
+                    address
+                );
+
+
+                outbound.SetServerPort(
+                    ui->port
+                    ->text()
+                    .toInt()
+                );
+
+
+                // =========================================
+                // TLS / Transport
+                // =========================================
+
+                if (outbound.HasTLS() ||
+                    outbound.HasTransport())
+                {
+                    const auto tls =
+                        outbound.GetTLS();
+
+
+                    const auto transport =
+                        outbound.GetTransport();
+
+
+                    if (!tls ||
+                        !transport)
+                    {
+                        return false;
+                    }
+
+
+                    transport->type =
+                        ui->network
+                        ->currentText();
+
+
+                    tls->enabled =
+                        ui->security
+                        ->currentText()
+                        ==
+                        "tls";
+
+
+                    transport->path =
+                        ui->path
+                        ->text();
+
+
+                    transport->host =
+                        ui->host
+                        ->text();
+
+
+                    tls->server_name =
+                        ui->sni
+                        ->text();
+
+
+                    tls->alpn =
+                        SplitAndTrim(
+                            ui->alpn->text(),
+                            ","
+                        );
+
+
+                    if (tls->utls)
+                    {
+                        tls->utls
+                            ->fingerPrint =
+                            ui->utlsFingerprint
+                            ->currentText();
+
+
+                        tls->utls
+                            ->enabled =
+                            !tls->utls
+                            ->fingerPrint
+                            .isEmpty();
+                    }
+
+
+                    tls->fragment =
+                        ui->tls_frag
+                        ->isChecked();
+
+
+                    tls->fragment_fallback_delay =
+                        ui->tls_frag_fall_delay
+                        ->text();
+
+
+                    tls->record_fragment =
+                        ui->tls_rec_frag
+                        ->isChecked();
+
+
+                    tls->insecure =
+                        ui->insecure
+                        ->isChecked();
+
+
+                    transport->headers =
+                        Configs::parseHeaderPairs(
+                            ui->headers->text()
+                        );
+
+
+                    transport->method =
+                        ui->method
+                        ->text();
+
+
+                    transport->service_name =
+                        ui->service_name
+                        ->text();
+
+
+                    transport
+                        ->early_data_header_name =
+                        ui->ws_early_data_name
+                        ->text();
+
+
+                    transport
+                        ->max_early_data =
+                        ui->ws_early_data_length
+                        ->text()
+                        .toInt();
+
+
+                    if (tls->reality)
+                    {
+                        tls->reality
+                            ->public_key =
+                            ui->reality_pbk
+                            ->text();
+
+
+                        tls->reality
+                            ->short_id =
+                            ui->reality_sid
+                            ->text();
+
+
+                        tls->reality
+                            ->enabled =
+                            !tls->reality
+                            ->public_key
+                            .isEmpty();
+                    }
+
+
+                    tls->certificate =
+                        CACHE.certificate;
+                }
+
+
+                // =========================================
+                // Sing-box multiplex
+                // =========================================
+
+                if (outbound.HasMux())
+                {
+                    const auto mux =
+                        outbound.GetMux();
+
+
+                    if (!mux)
+                    {
+                        return false;
+                    }
+
+
+                    mux->saveMuxState(
+                        ui->multiplex
+                        ->currentIndex()
+                    );
+
+
+                    if (mux->brutal)
+                    {
+                        mux->brutal
+                            ->enabled =
+                            ui->brutal_enable
+                            ->isChecked();
+
+
+                        mux->brutal
+                            ->down_mbps =
+                            ui->brutal_d_speed
+                            ->text()
+                            .toInt();
+
+
+                        mux->brutal
+                            ->up_mbps =
+                            ui->brutal_u_speed
+                            ->text()
+                            .toInt();
+                    }
+                }
+
+
+                // =========================================
+                // Xray
+                // =========================================
+
+                if (outbound.IsXray())
+                {
+                    const auto xrayStream =
+                        outbound
+                        .GetXrayStream();
+
+
+                    const auto xrayMux =
+                        outbound
+                        .GetXrayMultiplex();
+
+
+                    if (!xrayStream ||
+                        !xrayMux)
+                    {
+                        return false;
+                    }
+
+
+                    xrayStream->network =
+                        ui->xray_network
+                        ->currentText();
+
+
+                    xrayStream->security =
+                        ui->xray_security
+                        ->currentText();
+
+
+                    xrayMux->saveMuxState(
+                        ui->xray_mux
+                        ->currentIndex()
+                    );
+
+
+                    // -------------------------------------
+                    // SNI
+                    // -------------------------------------
+
+                    const QString sni =
+                        ui->xray_sni
+                        ->text();
+
+
+                    if (xrayStream->security ==
+                        "tls")
+                    {
+                        xrayStream
+                            ->TLS
+                            ->serverName =
+                            sni;
+                    }
+                    else if (
+                        xrayStream->security ==
+                        "reality")
+                    {
+                        xrayStream
+                            ->reality
+                            ->serverName =
+                            sni;
+                    }
+
+
+                    // -------------------------------------
+                    // Fingerprint
+                    // -------------------------------------
+
+                    const QString fp =
+                        ui->xray_fp
+                        ->currentText();
+
+
+                    if (xrayStream->security ==
+                        "tls")
+                    {
+                        xrayStream
+                            ->TLS
+                            ->fingerprint =
+                            fp;
+                    }
+                    else if (
+                        xrayStream->security ==
+                        "reality")
+                    {
+                        xrayStream
+                            ->reality
+                            ->fingerprint =
+                            fp;
+                    }
+
+
+                    // -------------------------------------
+                    // TLS
+                    // -------------------------------------
+
+                    xrayStream
+                        ->TLS
+                        ->alpn =
+                        SplitAndTrim(
+                            ui->xray_alpn
+                            ->text(),
+                            ",",
+                            false
+                        );
+
+
+                    xrayStream
+                        ->TLS
+                        ->pinnedPeerCertSha256 =
+                        ui
+                        ->xray_pinned_peer_cert_sha256
+                        ->text();
+
+
+                    xrayStream
+                        ->TLS
+                        ->verifyPeerCertByName =
+                        ui
+                        ->xray_verify_peer_cert_by_name
+                        ->text();
+
+
+                    // -------------------------------------
+                    // Reality
+                    // -------------------------------------
+
+                    xrayStream
+                        ->reality
+                        ->password =
+                        ui->xray_reality_pbk
+                        ->text();
+
+
+                    xrayStream
+                        ->reality
+                        ->shortId =
+                        ui->xray_reality_sid
+                        ->text();
+
+
+                    xrayStream
+                        ->reality
+                        ->spiderX =
+                        ui->xray_reality_spiderx
+                        ->text();
+
+
+                    // =====================================
+                    // XHTTP
+                    // =====================================
+
+                    if (xrayStream->network ==
+                        "xhttp")
+                    {
+                        auto& xhttp =
+                            xrayStream->xhttp;
+
+
+                        xhttp->host =
+                            ui->xray_host
+                            ->text();
+
+
+                        xhttp->path =
+                            ui->xray_path
+                            ->text();
+
+
+                        xhttp->mode =
+                            ui->xray_mode
+                            ->currentText();
+
+
+                        xhttp->headers =
+                            Configs::parseHeaderPairs(
+                                ui->xray_headers
+                                ->text()
+                            );
+
+
+                        xhttp->xPaddingBytes =
+                            ui->xray_xpaddingbytes
+                            ->text();
+
+
+                        xhttp->xPaddingObfsMode =
+                            ui
+                            ->xray_xpadding_obfs_mode
+                            ->isChecked();
+
+
+                        xhttp->xPaddingKey =
+                            ui->xray_xpadding_key
+                            ->text();
+
+
+                        xhttp->xPaddingHeader =
+                            ui->xray_xpadding_header
+                            ->text();
+
+
+                        xhttp->xPaddingPlacement =
+                            ui
+                            ->xray_xpadding_placement
+                            ->currentText();
+
+
+                        xhttp->xPaddingMethod =
+                            ui
+                            ->xray_xpadding_method
+                            ->currentText();
+
+
+                        xhttp->uplinkHTTPMethod =
+                            ui
+                            ->xray_uplink_http_method
+                            ->currentText();
+
+
+                        xhttp->sessionPlacement =
+                            ui
+                            ->xray_session_placement
+                            ->currentText();
+
+
+                        xhttp->sessionKey =
+                            ui->xray_session_key
+                            ->text();
+
+
+                        xhttp->seqPlacement =
+                            ui
+                            ->xray_seq_placement
+                            ->currentText();
+
+
+                        xhttp->seqKey =
+                            ui->xray_seq_key
+                            ->text();
+
+
+                        xhttp->uplinkDataPlacement =
+                            ui
+                            ->xray_uplink_data_placement
+                            ->currentText();
+
+
+                        xhttp->uplinkDataKey =
+                            ui
+                            ->xray_uplink_data_key
+                            ->text();
+
+
+                        xhttp->uplinkChunkSize =
+                            ui
+                            ->xray_uplink_chunk_size
+                            ->text();
+
+
+                        xhttp->noGRPCHeader =
+                            ui->xray_no_grpc
+                            ->isChecked();
+
+
+                        xhttp->noSSEHeader =
+                            ui->xray_no_sse
+                            ->isChecked();
+
+
+                        xhttp->scMaxEachPostBytes =
+                            ui
+                            ->xray_scMaxEachPostBytes
+                            ->text();
+
+
+                        xhttp->scMinPostsIntervalMs =
+                            ui
+                            ->xray_scMinPostsIntervalMs
+                            ->text();
+
+
+                        xhttp->scMaxBufferedPosts =
+                            ui
+                            ->xray_scMaxBufferedPosts
+                            ->text()
+                            .toLongLong();
+
+
+                        xhttp->scStreamUpServerSecs =
+                            ui
+                            ->xray_scStreamUpServerSecs
+                            ->text();
+
+
+                        xhttp->serverMaxHeaderBytes =
+                            ui
+                            ->xray_serverMaxHeaderBytes
+                            ->text()
+                            .toInt();
+
+
+                        xhttp->maxConcurrency =
+                            ui
+                            ->xray_max_concurrency
+                            ->text();
+
+
+                        xhttp->maxConnections =
+                            ui
+                            ->xray_max_connections
+                            ->text();
+
+
+                        xhttp->hMaxRequestTimes =
+                            ui
+                            ->xray_hMaxRequestTimes
+                            ->text();
+
+
+                        xhttp->hMaxReusableSecs =
+                            ui
+                            ->xray_hMaxReusableSecs
+                            ->text();
+
+
+                        xhttp->cMaxReuseTimes =
+                            ui
+                            ->xray_max_reuse_times
+                            ->text();
+
+
+                        xhttp->hKeepAlivePeriod =
+                            ui
+                            ->xray_keep_alive_period
+                            ->text()
+                            .toLongLong();
+
+
+                        xhttp->downloadSettings =
+                            xhttp->mode ==
+                            "stream-one"
+                            ? QString()
+                            : CACHE
+                            .XrayDownloadSettings;
+                    }
+
+                    // =====================================
+                    // gRPC
+                    // =====================================
+
+                    else if (
+                        xrayStream->network ==
+                        "grpc")
+                    {
+                        xrayStream
+                            ->grpc
+                            ->authority =
+                            ui->xray_host
+                            ->text();
+
+
+                        xrayStream
+                            ->grpc
+                            ->serviceName =
+                            ui->xray_path
+                            ->text();
+
+
+                        xrayStream
+                            ->grpc
+                            ->multiMode =
+                            ui->xray_multi_mode
+                            ->isChecked();
+                    }
+
+                    // =====================================
+                    // WebSocket
+                    // =====================================
+
+                    else if (
+                        xrayStream->network ==
+                        "ws")
+                    {
+                        xrayStream
+                            ->ws
+                            ->host =
+                            ui->xray_host
+                            ->text();
+
+
+                        xrayStream
+                            ->ws
+                            ->path =
+                            ui->xray_path
+                            ->text();
+
+
+                        xrayStream
+                            ->ws
+                            ->ed =
+                            ui->xray_ed_length
+                            ->text()
+                            .toInt();
+
+
+                        xrayStream
+                            ->ws
+                            ->headers =
+                            Configs::parseHeaderPairs(
+                                ui
+                                ->xray_headers
+                                ->text()
+                            );
+                    }
+
+                    // =====================================
+                    // HTTP Upgrade
+                    // =====================================
+
+                    else if (
+                        xrayStream->network ==
+                        "httpupgrade")
+                    {
+                        xrayStream
+                            ->httpupgrade
+                            ->host =
+                            ui->xray_host
+                            ->text();
+
+
+                        xrayStream
+                            ->httpupgrade
+                            ->path =
+                            ui->xray_path
+                            ->text();
+
+
+                        xrayStream
+                            ->httpupgrade
+                            ->ed =
+                            ui->xray_ed_length
+                            ->text()
+                            .toInt();
+
+
+                        xrayStream
+                            ->httpupgrade
+                            ->headers =
+                            Configs::parseHeaderPairs(
+                                ui
+                                ->xray_headers
+                                ->text()
+                            );
+                    }
+                }
+
+
+                return true;
+            }
+        );
+
+
+    if (!updated)
+    {
+        MessageBoxWarning(
+            tr("Error"),
+            tr(
+                "Failed to update profile "
+                "configuration."
+            )
+        );
+
+
+        return false;
+    }
+
 
     return true;
 }
@@ -1039,35 +1858,83 @@ void DialogEditProfile::accept()
 }
 
 // cached editor (dialog)
+void DialogEditProfile::editor_cache_updated_impl()
+{
+    // =====================================================
+    // Read-only detached configuration
+    // =====================================================
 
-void DialogEditProfile::editor_cache_updated_impl() {
     const auto outbound =
         ent
-        ? ent->OutboundSnapshot()
+        ? ent->OutboundClone()
         : nullptr;
 
-    if (CACHE.certificate.isEmpty()) {
-        ui->certificate_edit->setText(tr("Not set"));
+
+    // =====================================================
+    // Certificate
+    // =====================================================
+
+    if (CACHE.certificate.isEmpty())
+    {
+        ui->certificate_edit
+            ->setText(
+                tr("Not set")
+            );
     }
-    else {
-        ui->certificate_edit->setText(tr("Already set"));
+    else
+    {
+        ui->certificate_edit
+            ->setText(
+                tr("Already set")
+            );
     }
+
+
+    // =====================================================
+    // Xray download settings
+    // =====================================================
+
     if (outbound &&
         outbound->IsXray())
     {
-        ui->xray_downloadsettings_edit->setText(
-            CACHE.XrayDownloadSettings.isEmpty()
-            ? "Not Set"
-            : "Already Set"
-        );
+        ui->xray_downloadsettings_edit
+            ->setText(
+                CACHE
+                .XrayDownloadSettings
+                .isEmpty()
+                ? "Not Set"
+                : "Already Set"
+            );
     }
-    // CACHE macro
-    for (auto a : innerEditor->get_editor_cached()) {
-        if (a.second.isEmpty()) {
-            a.first->setText(tr("Not set"));
+
+
+    // =====================================================
+    // Generic editor cache
+    // =====================================================
+
+    if (!innerEditor)
+    {
+        return;
+    }
+
+
+    for (auto a :
+        innerEditor
+        ->get_editor_cached())
+    {
+        if (a.second.isEmpty())
+        {
+            a.first
+                ->setText(
+                    tr("Not set")
+                );
         }
-        else {
-            a.first->setText(tr("Already set"));
+        else
+        {
+            a.first
+                ->setText(
+                    tr("Already set")
+                );
         }
     }
 }

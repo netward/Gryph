@@ -48,10 +48,30 @@ namespace Configs {
         int NewProfileIDRange(int n) const;
 
     public:
-        explicit ProfilesRepo(Database& database);
-        
-        // Create a new profile (doesn't save to DB yet, id will be -1)
-        [[nodiscard]] static std::shared_ptr<Profile> NewProfile(const QString &type);
+
+        explicit ProfilesRepo(
+            Database& database
+        );
+
+        // -----------------------------------------------------
+        // Create outbound object without publishing a Profile.
+        //
+        // Used by Profile copy-on-write configuration.
+        // -----------------------------------------------------
+        [[nodiscard]]
+        static std::shared_ptr<Configs::outbound>
+            NewOutbound(
+                const QString& type
+            );
+
+        // -----------------------------------------------------
+        // Create detached/unpublished Profile
+        // -----------------------------------------------------
+        [[nodiscard]]
+        static std::shared_ptr<Profile>
+            NewProfile(
+                const QString& type
+            );
         
         // Add profile to database (assigns ID and saves)
         bool AddProfile(std::shared_ptr<Profile>& profile, int gid = -1);

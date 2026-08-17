@@ -136,27 +136,69 @@ namespace Configs {
         // Outbound
         // =====================================================
 
-        const auto outbound =
-            profile->OutboundSnapshot();
-
-        if (!outbound)
-        {
-            return nullptr;
-        }
-
-
         if (json.contains("outbound") &&
             json["outbound"].isObject())
         {
-            outbound->ParseFromJson(
-                json["outbound"].toObject()
-            );
+            const QJsonObject outboundJson =
+                json["outbound"]
+                .toObject();
+
+
+            const bool parsed =
+                profile
+                ->MutateOutbound<
+                Configs::outbound
+                >(
+                    [
+                        outboundJson
+                    ](
+                        Configs::outbound& out
+                        ) -> bool
+                    {
+                        return out
+                            .ParseFromJson(
+                                outboundJson
+                            );
+                    }
+                            );
+
+
+            if (!parsed)
+            {
+                return nullptr;
+            }
         }
         else
         {
-            // Compatibility with old DB records.
-            outbound->name =
-                json["name"].toString();
+            const QString name =
+                json["name"]
+                .toString();
+
+
+            const bool updated =
+                profile
+                ->MutateOutbound<
+                Configs::outbound
+                >(
+                    [
+                        name
+                    ](
+                        Configs::outbound& out
+                        ) -> bool
+                    {
+                        out.name =
+                            name;
+
+
+                        return true;
+                    }
+                            );
+
+
+            if (!updated)
+            {
+                return nullptr;
+            }
         }
 
 
@@ -462,59 +504,190 @@ namespace Configs {
         return profileFromRow(*query);
     }
 
-    std::shared_ptr<Profile> ProfilesRepo::NewProfile(const QString &type) {
-        Configs::outbound *outbound = nullptr;
-        
-        // Create outbound based on type (bean is legacy, not needed)
-        if (type == "socks") {
-            outbound = new Configs::socks();
-        } else if (type == "http") {
-            outbound = new Configs::http();
-        } else if (type == "shadowsocks") {
-            outbound = new Configs::shadowsocks();
-        } else if (type == "chain") {
-            outbound = new Configs::chain();
-        } else if (type == "vmess") {
-            outbound = new Configs::vmess();
-        } else if (type == "trojan") {
-            outbound = new Configs::Trojan();
-        } else if (type == "vless") {
-            outbound = new Configs::vless();
-        } else if (type == "xrayvless") {
-            outbound = new Configs::xrayVless();
-        } else if (type == "hysteria" || type == "hysteria2") {
-            outbound = new Configs::hysteria();
-        } else if (type == "tuic") {
-            outbound = new Configs::tuic();
-        } else if (type == "juicity") {
-            outbound = new Configs::juicity();
-        } else if (type == "trusttunnel") {
-            outbound = new Configs::trusttunnel();
-        } else if (type == "anytls") {
-            outbound = new Configs::anyTLS();
-        } else if (type == "shadowtls") {
-            outbound = new Configs::shadowtls();
-        } else if (type == "wireguard") {
-            outbound = new Configs::wireguard();
-        } else if (type == "tailscale") {
-            outbound = new Configs::tailscale();
-        } else if (type == "ssh") {
-            outbound = new Configs::ssh();
-        } else if (type == "custom") {
-            outbound = new Configs::Custom();
-        } else if (type == "extracore") {
-            outbound = new Configs::extracore();
-        } else if (type == "naive") {
-            outbound = new Configs::naive();
-        } else if (type == "direct") {
-            outbound = new Configs::direct();
-        } else {
-            outbound = new Configs::outbound();
-            outbound->invalid = true;
+    std::shared_ptr<Configs::outbound>
+        Configs::ProfilesRepo::NewOutbound(
+            const QString& type)
+    {
+        if (type == "socks")
+        {
+            return std::make_shared<
+                Configs::socks
+            >();
         }
 
-        // Bean is legacy, pass nullptr
-        return std::make_shared<Profile>(outbound, type);
+        if (type == "http")
+        {
+            return std::make_shared<
+                Configs::http
+            >();
+        }
+
+        if (type == "shadowsocks")
+        {
+            return std::make_shared<
+                Configs::shadowsocks
+            >();
+        }
+
+        if (type == "chain")
+        {
+            return std::make_shared<
+                Configs::chain
+            >();
+        }
+
+        if (type == "vmess")
+        {
+            return std::make_shared<
+                Configs::vmess
+            >();
+        }
+
+        if (type == "trojan")
+        {
+            return std::make_shared<
+                Configs::Trojan
+            >();
+        }
+
+        if (type == "vless")
+        {
+            return std::make_shared<
+                Configs::vless
+            >();
+        }
+
+        if (type == "xrayvless")
+        {
+            return std::make_shared<
+                Configs::xrayVless
+            >();
+        }
+
+        if (type == "hysteria" ||
+            type == "hysteria2")
+        {
+            return std::make_shared<
+                Configs::hysteria
+            >();
+        }
+
+        if (type == "tuic")
+        {
+            return std::make_shared<
+                Configs::tuic
+            >();
+        }
+
+        if (type == "juicity")
+        {
+            return std::make_shared<
+                Configs::juicity
+            >();
+        }
+
+        if (type == "trusttunnel")
+        {
+            return std::make_shared<
+                Configs::trusttunnel
+            >();
+        }
+
+        if (type == "anytls")
+        {
+            return std::make_shared<
+                Configs::anyTLS
+            >();
+        }
+
+        if (type == "shadowtls")
+        {
+            return std::make_shared<
+                Configs::shadowtls
+            >();
+        }
+
+        if (type == "wireguard")
+        {
+            return std::make_shared<
+                Configs::wireguard
+            >();
+        }
+
+        if (type == "tailscale")
+        {
+            return std::make_shared<
+                Configs::tailscale
+            >();
+        }
+
+        if (type == "ssh")
+        {
+            return std::make_shared<
+                Configs::ssh
+            >();
+        }
+
+        if (type == "custom")
+        {
+            return std::make_shared<
+                Configs::Custom
+            >();
+        }
+
+        if (type == "extracore")
+        {
+            return std::make_shared<
+                Configs::extracore
+            >();
+        }
+
+        if (type == "naive")
+        {
+            return std::make_shared<
+                Configs::naive
+            >();
+        }
+
+        if (type == "direct")
+        {
+            return std::make_shared<
+                Configs::direct
+            >();
+        }
+        auto invalid =
+            std::make_shared<
+            Configs::outbound
+            >();
+        invalid->invalid =
+            true;
+        return invalid;
+    }
+
+    std::shared_ptr<Configs::Profile>
+        Configs::ProfilesRepo::NewProfile(
+            const QString& type)
+    {
+        auto outbound =
+            NewOutbound(
+                type
+            );
+
+
+        if (!outbound)
+        {
+            return nullptr;
+        }
+
+
+        return std::make_shared<
+            Configs::Profile
+        >(
+            std::move(
+                outbound
+            ),
+            type
+        );
     }
 
     bool ProfilesRepo::AddProfile(

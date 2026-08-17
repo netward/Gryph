@@ -5,6 +5,7 @@
 #include "include/configs/sub/clash.hpp"
 
 #include <atomic>
+#include <utility>
 
 #include <QDateTime>
 #include <QSet>
@@ -19,24 +20,39 @@
 
 namespace Subscription {
 
-    GroupUpdater *groupUpdater = new GroupUpdater;
+    GroupUpdater* groupUpdater = new GroupUpdater;
 
-    int JsonEndIdx(const QString &str, int begin) {
+    template <typename T, typename Mutator>
+    bool mutateProfileOutbound(
+        const std::shared_ptr<Configs::Profile>& profile,
+        Mutator&& mutator)
+    {
+        if (!profile)
+        {
+            return false;
+        }
+
+        return profile->MutateOutbound<T>(
+            std::forward<Mutator>(mutator)
+        );
+    }
+
+    int JsonEndIdx(const QString& str, int begin) {
         int sz = str.length();
         int counter = 1;
-        for (int i=begin+1;i<sz;i++) {
+        for (int i = begin + 1; i < sz; i++) {
             if (str[i] == '{') counter++;
             if (str[i] == '}') counter--;
-            if (counter==0) return i;
+            if (counter == 0) return i;
         }
         return -1;
     }
 
-    QList<QString> Disect(const QString &str) {
+    QList<QString> Disect(const QString& str) {
         QList<QString> res = QList<QString>();
-        int idx=0;
+        int idx = 0;
         int sz = str.size();
-        while(idx < sz) {
+        while (idx < sz) {
             if (str[idx] == '\n') {
                 idx++;
                 continue;
@@ -44,19 +60,19 @@ namespace Subscription {
             if (str[idx] == '{') {
                 int endIdx = JsonEndIdx(str, idx);
                 if (endIdx == -1) return res;
-                res.append(str.mid(idx, endIdx-idx + 1));
-                idx = endIdx+1;
+                res.append(str.mid(idx, endIdx - idx + 1));
+                idx = endIdx + 1;
                 continue;
             }
             int nlineIdx = str.indexOf('\n', idx);
             if (nlineIdx == -1) nlineIdx = sz;
-            res.append(str.mid(idx, nlineIdx-idx));
-            idx = nlineIdx+1;
+            res.append(str.mid(idx, nlineIdx - idx));
+            idx = nlineIdx + 1;
         }
         return res;
     }
 
-    SingBoxSubType getSingBoxSubType(const QJsonDocument &doc) {
+    SingBoxSubType getSingBoxSubType(const QJsonDocument& doc) {
         if (doc.isObject()) {
             auto obj = doc.object();
             bool hasInbound = obj.contains("inbounds");
@@ -81,11 +97,11 @@ namespace Subscription {
     // Xray uses "protocol" instead of sing-box's "type" field on outbounds, so
     // we can disambiguate by inspecting individual outbound objects rather than
     // the wrapper.
-    XraySubType getXraySubType(const QJsonDocument &doc) {
+    XraySubType getXraySubType(const QJsonDocument& doc) {
         if (doc.isObject()) {
             auto obj = doc.object();
             if (obj.contains("outbounds")) {
-                for (const auto &item : obj["outbounds"].toArray()) {
+                for (const auto& item : obj["outbounds"].toArray()) {
                     if (item.isObject() && item.toObject().contains("protocol")) {
                         return XraySubType::outboundInJson;
                     }
@@ -106,7 +122,7 @@ namespace Subscription {
     // Convert a real Xray VLESS outbound (settings.vnext[0].address etc.) into
     // the simplified shape Gryph's xrayVless::ParseFromJson expects. Returns
     // an empty object if the input doesn't have the expected structure.
-    QJsonObject normalizeXrayVlessForParse(const QJsonObject &out) {
+    QJsonObject normalizeXrayVlessForParse(const QJsonObject& out) {
         if (out["protocol"].toString() != "vless") return {};
         auto settings = out["settings"].toObject();
         // Already in simplified form.
@@ -129,28 +145,108 @@ namespace Subscription {
         return normalized;
     }
 
-    std::shared_ptr<Configs::Profile> makeProfileForXrayOutbound(const QJsonObject &out) {
-        if (out.isEmpty()) return nullptr;
-        auto protocol = out["protocol"].toString();
-        // System protocols don't make sense as user profiles.
-        if (protocol == "freedom" || protocol == "blackhole" || protocol == "dns" || protocol == "loopback") {
+    std::shared_ptr<Configs::Profile>
+        makeProfileForXrayOutbound(
+            const QJsonObject& out)
+    {
+        if (out.isEmpty())
+        {
             return nullptr;
         }
-        std::shared_ptr<Configs::Profile> ent;
-        if (protocol == "vless") {
-            if (auto normalized = normalizeXrayVlessForParse(out); !normalized.isEmpty()) {
-                ent = Configs::ProfilesRepo::NewProfile("xrayvless");
-                if (ent->XrayVLESS()->ParseFromJson(normalized)) return ent;
+
+        const QString protocol =
+            out["protocol"].toString();
+
+        // System protocols do not make sense as user profiles.
+        if (protocol == "freedom" ||
+            protocol == "blackhole" ||
+            protocol == "dns" ||
+            protocol == "loopback")
+        {
+            return nullptr;
+        }
+
+        if (protocol == "vless")
+        {
+            const auto normalized =
+                normalizeXrayVlessForParse(out);
+
+            if (!normalized.isEmpty())
+            {
+                auto ent =
+                    Configs::ProfilesRepo::NewProfile(
+                        "xrayvless"
+                    );
+
+                const bool parsed =
+                    mutateProfileOutbound<
+                    Configs::xrayVless
+                    >(
+                        ent,
+                        [&](Configs::xrayVless& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                normalized
+                            );
+                        }
+                    );
+
+                if (parsed)
+                {
+                    return ent;
+                }
             }
         }
-        ent = Configs::ProfilesRepo::NewProfile("custom");
-        ent->Custom()->type = Configs::Custom::CustomXrayOutbound;
-        ent->Custom()->config = QJsonObject2QString(out, false);
-        if (auto tag = out["tag"].toString(); !tag.isEmpty()) ent->Custom()->name = tag;
-        return ent;
+
+        auto ent =
+            Configs::ProfilesRepo::NewProfile(
+                "custom"
+            );
+
+        if (!ent)
+        {
+            return nullptr;
+        }
+
+        const QString tag =
+            out["tag"].toString();
+
+        const QString config =
+            QJsonObject2QString(
+                out,
+                false
+            );
+
+        const bool configured =
+            mutateProfileOutbound<
+            Configs::Custom
+            >(
+                ent,
+                [&](Configs::Custom& custom)
+                {
+                    custom.type =
+                        Configs::Custom::
+                        CustomXrayOutbound;
+
+                    custom.config =
+                        config;
+
+                    if (!tag.isEmpty())
+                    {
+                        custom.name =
+                            tag;
+                    }
+
+                    return true;
+                }
+            );
+
+        return configured
+            ? ent
+            : nullptr;
     }
 
-    void RawUpdater::update(const QString &str, bool needParse, bool isBase64Decoded) {
+    void RawUpdater::update(const QString& str, bool needParse, bool isBase64Decoded) {
         // Base64 encoded subscription
         if (!isBase64Decoded) {
             if (auto str2 = DecodeB64IfValid(str); !str2.isEmpty()) {
@@ -182,17 +278,68 @@ namespace Subscription {
 
             // SingBox
             auto subType = getSingBoxSubType(doc);
-            if (subType == SingBoxSubType::fullConfig) {
-                ent = Configs::ProfilesRepo::NewProfile("custom");
-                ent->Custom()->type = Configs::Custom::CustomFullConfig;
-                ent->Custom()->config = str;
-                updated_order += ent;
-            } else if (subType == SingBoxSubType::outboundObject) {
-                ent = Configs::ProfilesRepo::NewProfile("custom");
-                ent->Custom()->type = Configs::Custom::CustomOutbound;
-                ent->Custom()->config = str;
-                updated_order += ent;
-            } else if (subType == SingBoxSubType::outboundInJson || subType == SingBoxSubType::outboundJsonArray) {
+            if (subType == SingBoxSubType::fullConfig)
+            {
+                ent =
+                    Configs::ProfilesRepo::NewProfile(
+                        "custom"
+                    );
+
+                const bool configured =
+                    mutateProfileOutbound<
+                    Configs::Custom
+                    >(
+                        ent,
+                        [&](Configs::Custom& custom)
+                        {
+                            custom.type =
+                                Configs::Custom::
+                                CustomFullConfig;
+
+                            custom.config =
+                                str;
+
+                            return true;
+                        }
+                    );
+
+                if (configured)
+                {
+                    updated_order += ent;
+                }
+            }
+            else if (subType == SingBoxSubType::outboundObject)
+            {
+                ent =
+                    Configs::ProfilesRepo::NewProfile(
+                        "custom"
+                    );
+
+                const bool configured =
+                    mutateProfileOutbound<
+                    Configs::Custom
+                    >(
+                        ent,
+                        [&](Configs::Custom& custom)
+                        {
+                            custom.type =
+                                Configs::Custom::
+                                CustomOutbound;
+
+                            custom.config =
+                                str;
+
+                            return true;
+                        }
+                    );
+
+                if (configured)
+                {
+                    updated_order += ent;
+                }
+            }
+            else if (subType == SingBoxSubType::outboundInJson ||
+                subType == SingBoxSubType::outboundJsonArray) {
                 updateSingBox(doc, subType);
                 return;
             }
@@ -223,7 +370,7 @@ namespace Subscription {
         // Multi line
         if (str.count("\n") > 0 && needParse) {
             auto list = Disect(str);
-            for (const auto &str2: list) {
+            for (const auto& str2 : list) {
                 update(str2.trimmed(), false);
             }
             return;
@@ -244,25 +391,85 @@ namespace Subscription {
             if (data.isEmpty()) return;
             if (data.contains("protocol")) {
                 ent = Configs::ProfilesRepo::NewProfile("xray" + data["protocol"].toString());
-            } else {
+            }
+            else {
                 ent = data["type"].toString() == "hysteria2" ? Configs::ProfilesRepo::NewProfile("hysteria") : Configs::ProfilesRepo::NewProfile(data["type"].toString());
             }
-            if (ent->OutboundSnapshot()->invalid) return;
-            ent->OutboundSnapshot()->ParseFromJson(data);
+            const bool parsed =
+                mutateProfileOutbound<
+                Configs::outbound
+                >(
+                    ent,
+                    [&](Configs::outbound& outbound)
+                    {
+                        if (outbound.invalid)
+                        {
+                            return false;
+                        }
+
+                        return outbound.ParseFromJson(
+                            data
+                        );
+                    }
+                );
+
+            if (!parsed)
+            {
+                return;
+            }
         }
 
         // Json
-        if (str.startsWith('{')) {
-            ent = Configs::ProfilesRepo::NewProfile("custom");
-            auto custom = ent->Custom();
-            auto obj = QString2QJsonObject(str);
-            if (obj.contains("outbounds")) {
-                custom->type = Configs::Custom::CustomFullConfig;
-                custom->config = str;
-            } else if (obj.contains("server")) {
-                custom->type = Configs::Custom::CustomOutbound;
-                custom->config = str;
-            } else {
+        if (str.startsWith('{'))
+        {
+            const auto obj =
+                QString2QJsonObject(
+                    str
+                );
+
+            QString customType;
+
+            if (obj.contains("outbounds"))
+            {
+                customType =
+                    Configs::Custom::
+                    CustomFullConfig;
+            }
+            else if (obj.contains("server"))
+            {
+                customType =
+                    Configs::Custom::
+                    CustomOutbound;
+            }
+            else
+            {
+                return;
+            }
+
+            ent =
+                Configs::ProfilesRepo::NewProfile(
+                    "custom"
+                );
+
+            const bool configured =
+                mutateProfileOutbound<
+                Configs::Custom
+                >(
+                    ent,
+                    [&](Configs::Custom& custom)
+                    {
+                        custom.type =
+                            customType;
+
+                        custom.config =
+                            str;
+
+                        return true;
+                    }
+                );
+
+            if (!configured)
+            {
                 return;
             }
         }
@@ -271,28 +478,72 @@ namespace Subscription {
         if (str.startsWith("socks5://") || str.startsWith("socks4://") ||
             str.startsWith("socks4a://") || str.startsWith("socks://")) {
             ent = Configs::ProfilesRepo::NewProfile("socks");
-            auto ok = ent->Socks()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::socks
+                >(
+                    ent,
+                    [&](Configs::socks& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // HTTP
         if (str.startsWith("http://") || str.startsWith("https://")) {
             ent = Configs::ProfilesRepo::NewProfile("http");
-            auto ok = ent->Http()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::http
+                >(
+                    ent,
+                    [&](Configs::http& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // ShadowSocks
         if (str.startsWith("ss://")) {
             ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-            auto ok = ent->ShadowSocks()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::shadowsocks
+                >(
+                    ent,
+                    [&](Configs::shadowsocks& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // VMess
         if (str.startsWith("vmess://")) {
             ent = Configs::ProfilesRepo::NewProfile("vmess");
-            auto ok = ent->VMess()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::vmess
+                >(
+                    ent,
+                    [&](Configs::vmess& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
@@ -300,11 +551,34 @@ namespace Subscription {
         if (str.startsWith("vless://")) {
             if (Configs::useXrayVless(str)) {
                 ent = Configs::ProfilesRepo::NewProfile("xrayvless");
-                auto ok = ent->XrayVLESS()->ParseFromLink(str);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::xrayVless
+                    >(
+                        ent,
+                        [&](Configs::xrayVless& outbound)
+                        {
+                            return outbound.ParseFromLink(
+                                str
+                            );
+                        }
+                    );
                 if (!ok) return;
-            } else {
+            }
+            else {
                 ent = Configs::ProfilesRepo::NewProfile("vless");
-                auto ok = ent->VLESS()->ParseFromLink(str);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::vless
+                    >(
+                        ent,
+                        [&](Configs::vless& outbound)
+                        {
+                            return outbound.ParseFromLink(
+                                str
+                            );
+                        }
+                    );
                 if (!ok) return;
             }
         }
@@ -312,70 +586,180 @@ namespace Subscription {
         // Trojan
         if (str.startsWith("trojan://")) {
             ent = Configs::ProfilesRepo::NewProfile("trojan");
-            auto ok = ent->Trojan()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::Trojan
+                >(
+                    ent,
+                    [&](Configs::Trojan& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // AnyTLS
         if (str.startsWith("anytls://")) {
             ent = Configs::ProfilesRepo::NewProfile("anytls");
-            auto ok = ent->AnyTLS()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::anyTLS
+                >(
+                    ent,
+                    [&](Configs::anyTLS& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // Hysteria
         if (str.startsWith("hysteria://") || str.startsWith("hysteria2://") || str.startsWith("hy2://")) {
             ent = Configs::ProfilesRepo::NewProfile("hysteria");
-            auto ok = ent->Hysteria()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::hysteria
+                >(
+                    ent,
+                    [&](Configs::hysteria& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // TUIC
         if (str.startsWith("tuic://")) {
             ent = Configs::ProfilesRepo::NewProfile("tuic");
-            auto ok = ent->TUIC()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::tuic
+                >(
+                    ent,
+                    [&](Configs::tuic& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // Juicity
         if (str.startsWith("juicity://")) {
             ent = Configs::ProfilesRepo::NewProfile("juicity");
-            auto ok = ent->Juicity()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::juicity
+                >(
+                    ent,
+                    [&](Configs::juicity& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // TrustTunnel
         if (str.startsWith("tt://")) {
             ent = Configs::ProfilesRepo::NewProfile("trusttunnel");
-            auto ok = ent->TrustTunnel()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::trusttunnel
+                >(
+                    ent,
+                    [&](Configs::trusttunnel& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // ShadowTLS
         if (str.startsWith("shadowtls://")) {
             ent = Configs::ProfilesRepo::NewProfile("shadowtls");
-            auto ok = ent->ShadowTLS()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::shadowtls
+                >(
+                    ent,
+                    [&](Configs::shadowtls& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // Wireguard
         if (str.startsWith("wg://")) {
             ent = Configs::ProfilesRepo::NewProfile("wireguard");
-            auto ok = ent->Wireguard()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::wireguard
+                >(
+                    ent,
+                    [&](Configs::wireguard& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // SSH
         if (str.startsWith("ssh://")) {
             ent = Configs::ProfilesRepo::NewProfile("ssh");
-            auto ok = ent->SSH()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::ssh
+                >(
+                    ent,
+                    [&](Configs::ssh& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
         // Naive
         if (str.startsWith("naive+https://") || str.startsWith("naive+quic://")) {
             ent = Configs::ProfilesRepo::NewProfile("naive");
-            auto ok = ent->Naive()->ParseFromLink(str);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::naive
+                >(
+                    ent,
+                    [&](Configs::naive& outbound)
+                    {
+                        return outbound.ParseFromLink(
+                            str
+                        );
+                    }
+                );
             if (!ok) return;
         }
 
@@ -385,16 +769,18 @@ namespace Subscription {
         updated_order += ent;
     }
 
-    void RawUpdater::updateSingBox(const QJsonDocument &doc, SingBoxSubType type)
+    void RawUpdater::updateSingBox(const QJsonDocument& doc, SingBoxSubType type)
     {
         QJsonArray outbounds, endpoints;
         if (type == SingBoxSubType::outboundInJson) {
             auto json = doc.object();
             outbounds = json["outbounds"].toArray();
             endpoints = json["endpoints"].toArray();
-        } else if (type == SingBoxSubType::outboundJsonArray) {
+        }
+        else if (type == SingBoxSubType::outboundJsonArray) {
             outbounds = doc.array();
-        } else {
+        }
+        else {
             return;
         }
         QJsonArray items;
@@ -423,105 +809,270 @@ namespace Subscription {
             // SOCKS
             if (out["type"] == "socks") {
                 ent = Configs::ProfilesRepo::NewProfile("socks");
-                auto ok = ent->Socks()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::socks
+                    >(
+                        ent,
+                        [&](Configs::socks& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // HTTP
             if (out["type"] == "http") {
                 ent = Configs::ProfilesRepo::NewProfile("http");
-                auto ok = ent->Http()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::http
+                    >(
+                        ent,
+                        [&](Configs::http& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // ShadowSocks
             if (out["type"] == "shadowsocks") {
                 ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-                auto ok = ent->ShadowSocks()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::shadowsocks
+                    >(
+                        ent,
+                        [&](Configs::shadowsocks& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // VMess
             if (out["type"] == "vmess") {
                 ent = Configs::ProfilesRepo::NewProfile("vmess");
-                auto ok = ent->VMess()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::vmess
+                    >(
+                        ent,
+                        [&](Configs::vmess& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // VLESS
             if (out["type"] == "vless") {
                 ent = Configs::ProfilesRepo::NewProfile("vless");
-                auto ok = ent->VLESS()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::vless
+                    >(
+                        ent,
+                        [&](Configs::vless& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // Trojan
             if (out["type"] == "trojan") {
                 ent = Configs::ProfilesRepo::NewProfile("trojan");
-                auto ok = ent->Trojan()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::Trojan
+                    >(
+                        ent,
+                        [&](Configs::Trojan& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // AnyTLS
             if (out["type"] == "anytls") {
                 ent = Configs::ProfilesRepo::NewProfile("anytls");
-                auto ok = ent->AnyTLS()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::anyTLS
+                    >(
+                        ent,
+                        [&](Configs::anyTLS& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // Hysteria
             if (out["type"] == "hysteria" || out["type"] == "hysteria2") {
                 ent = Configs::ProfilesRepo::NewProfile("hysteria");
-                auto ok = ent->Hysteria()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::hysteria
+                    >(
+                        ent,
+                        [&](Configs::hysteria& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // TUIC
             if (out["type"] == "tuic") {
                 ent = Configs::ProfilesRepo::NewProfile("tuic");
-                auto ok = ent->TUIC()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::tuic
+                    >(
+                        ent,
+                        [&](Configs::tuic& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // Juicity
             if (out["type"] == "juicity") {
                 ent = Configs::ProfilesRepo::NewProfile("juicity");
-                auto ok = ent->Juicity()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::juicity
+                    >(
+                        ent,
+                        [&](Configs::juicity& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // TrustTunnel
             if (out["type"] == "trusttunnel") {
                 ent = Configs::ProfilesRepo::NewProfile("trusttunnel");
-                auto ok = ent->TrustTunnel()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::trusttunnel
+                    >(
+                        ent,
+                        [&](Configs::trusttunnel& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // ShadowTLS
             if (out["type"] == "shadowtls") {
                 ent = Configs::ProfilesRepo::NewProfile("shadowtls");
-                auto ok = ent->ShadowTLS()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::shadowtls
+                    >(
+                        ent,
+                        [&](Configs::shadowtls& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // Wireguard
             if (out["type"] == "wireguard") {
                 ent = Configs::ProfilesRepo::NewProfile("wireguard");
-                auto ok = ent->Wireguard()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::wireguard
+                    >(
+                        ent,
+                        [&](Configs::wireguard& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // SSH
             if (out["type"] == "ssh") {
                 ent = Configs::ProfilesRepo::NewProfile("ssh");
-                auto ok = ent->SSH()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::ssh
+                    >(
+                        ent,
+                        [&](Configs::ssh& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
             // Naive
             if (out["type"] == "naive") {
                 ent = Configs::ProfilesRepo::NewProfile("naive");
-                auto ok = ent->Naive()->ParseFromJson(out);
+                const bool ok =
+                    mutateProfileOutbound<
+                    Configs::naive
+                    >(
+                        ent,
+                        [&](Configs::naive& outbound)
+                        {
+                            return outbound.ParseFromJson(
+                                out
+                            );
+                        }
+                    );
                 if (!ok) continue;
             }
 
@@ -531,17 +1082,19 @@ namespace Subscription {
         }
     }
 
-    void RawUpdater::updateXray(const QJsonDocument &doc, XraySubType type)
+    void RawUpdater::updateXray(const QJsonDocument& doc, XraySubType type)
     {
         QJsonArray outbounds;
         if (type == XraySubType::outboundInJson) {
             outbounds = doc.object()["outbounds"].toArray();
-        } else if (type == XraySubType::outboundJsonArray) {
+        }
+        else if (type == XraySubType::outboundJsonArray) {
             outbounds = doc.array();
-        } else {
+        }
+        else {
             return;
         }
-        for (const auto &o : outbounds) {
+        for (const auto& o : outbounds) {
             if (!o.isObject()) continue;
             if (auto e = makeProfileForXrayOutbound(o.toObject()); e != nullptr) {
                 updated_order += e;
@@ -554,102 +1107,236 @@ namespace Subscription {
         try {
             fkyaml::node node = fkyaml::node::deserialize(str.toStdString());
             clash::Clash clash_config = node.get_value<clash::Clash>();
-    
+
             for (const auto& out : clash_config.proxies)
             {
                 std::shared_ptr<Configs::Profile> ent;
-    
+
                 // SOCKS
                 if (out.type == "socks5") {
                     ent = Configs::ProfilesRepo::NewProfile("socks");
-                    auto ok = ent->Socks()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::socks
+                        >(
+                            ent,
+                            [&](Configs::socks& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // HTTP
                 if (out.type == "http") {
                     ent = Configs::ProfilesRepo::NewProfile("http");
-                    auto ok = ent->Http()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::http
+                        >(
+                            ent,
+                            [&](Configs::http& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // ShadowSocks
                 if (out.type == "ss") {
                     ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-                    auto ok = ent->ShadowSocks()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::shadowsocks
+                        >(
+                            ent,
+                            [&](Configs::shadowsocks& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // VMess
                 if (out.type == "vmess") {
                     ent = Configs::ProfilesRepo::NewProfile("vmess");
-                    auto ok = ent->VMess()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::vmess
+                        >(
+                            ent,
+                            [&](Configs::vmess& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // VLESS
                 if (out.type == "vless") {
                     if (out.network == "xhttp" || (!out.encryption.empty() && out.encryption != "none")) {
                         ent = Configs::ProfilesRepo::NewProfile("xrayvless");
-                        auto ok = ent->XrayVLESS()->ParseFromClash(out);
+                        const bool ok =
+                            mutateProfileOutbound<
+                            Configs::xrayVless
+                            >(
+                                ent,
+                                [&](Configs::xrayVless& outbound)
+                                {
+                                    return outbound.ParseFromClash(
+                                        out
+                                    );
+                                }
+                            );
                         if (!ok) continue;
-                    } else {
+                    }
+                    else {
                         ent = Configs::ProfilesRepo::NewProfile("vless");
-                        auto ok = ent->VLESS()->ParseFromClash(out);
+                        const bool ok =
+                            mutateProfileOutbound<
+                            Configs::vless
+                            >(
+                                ent,
+                                [&](Configs::vless& outbound)
+                                {
+                                    return outbound.ParseFromClash(
+                                        out
+                                    );
+                                }
+                            );
                         if (!ok) continue;
                     }
                 }
-    
+
                 // Trojan
                 if (out.type == "trojan") {
                     ent = Configs::ProfilesRepo::NewProfile("trojan");
-                    auto ok = ent->Trojan()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::Trojan
+                        >(
+                            ent,
+                            [&](Configs::Trojan& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // AnyTLS
                 if (out.type == "anytls") {
                     ent = Configs::ProfilesRepo::NewProfile("anytls");
-                    auto ok = ent->AnyTLS()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::anyTLS
+                        >(
+                            ent,
+                            [&](Configs::anyTLS& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // Hysteria
                 if (out.type == "hysteria" || out.type == "hysteria2") {
                     ent = Configs::ProfilesRepo::NewProfile("hysteria");
-                    auto ok = ent->Hysteria()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::hysteria
+                        >(
+                            ent,
+                            [&](Configs::hysteria& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // TUIC
                 if (out.type == "tuic") {
                     ent = Configs::ProfilesRepo::NewProfile("tuic");
-                    auto ok = ent->TUIC()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::tuic
+                        >(
+                            ent,
+                            [&](Configs::tuic& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 // SSH
                 if (out.type == "ssh") {
                     ent = Configs::ProfilesRepo::NewProfile("ssh");
-                    auto ok = ent->SSH()->ParseFromClash(out);
+                    const bool ok =
+                        mutateProfileOutbound<
+                        Configs::ssh
+                        >(
+                            ent,
+                            [&](Configs::ssh& outbound)
+                            {
+                                return outbound.ParseFromClash(
+                                    out
+                                );
+                            }
+                        );
                     if (!ok) continue;
                 }
-    
+
                 if (ent == nullptr) continue;
-    
+
                 updated_order += ent;
             }
-        } catch (const fkyaml::exception &ex) {
+        }
+        catch (const fkyaml::exception& ex) {
             runOnUiThread([=] {
                 MessageBoxWarning("YAML Exception", ex.what());
-            });
+                });
         }
     }
 
     void RawUpdater::updateWireguardFileConfig(const QString& str)
     {
         auto ent = Configs::ProfilesRepo::NewProfile("wireguard");
-        auto ok = ent->Wireguard()->ParseFromLink(str);
+        const bool ok =
+            mutateProfileOutbound<
+            Configs::wireguard
+            >(
+                ent,
+                [&](Configs::wireguard& outbound)
+                {
+                    return outbound.ParseFromLink(
+                        str
+                    );
+                }
+            );
         if (!ok) return;
         updated_order += ent;
     }
@@ -668,14 +1355,25 @@ namespace Subscription {
             }
 
             auto ent = Configs::ProfilesRepo::NewProfile("shadowsocks");
-            auto ok = ent->ShadowSocks()->ParseFromSIP008(out);
+            const bool ok =
+                mutateProfileOutbound<
+                Configs::shadowsocks
+                >(
+                    ent,
+                    [&](Configs::shadowsocks& outbound)
+                    {
+                        return outbound.ParseFromSIP008(
+                            out
+                        );
+                    }
+                );
             if (!ok) continue;
             updated_order += ent;
         }
     }
 
     // 在新的 thread 运行
-    void GroupUpdater::AsyncUpdate(const QString &str, int _sub_gid, const std::function<void()> &finish) {
+    void GroupUpdater::AsyncUpdate(const QString& str, int _sub_gid, const std::function<void()>& finish) {
         auto content = str.trimmed();
         bool asURL = false;
         bool createNewGroup = false;
@@ -688,13 +1386,13 @@ namespace Subscription {
             };
             bool ok;
             auto a = QInputDialog::getItem(nullptr,
-                                           QObject::tr("url detected"),
-                                           QObject::tr("%1\nHow to update?").arg(content),
-                                           items, 0, false, &ok);
+                QObject::tr("url detected"),
+                QObject::tr("%1\nHow to update?").arg(content),
+                items, 0, false, &ok);
             if (!ok) return;
             switch (items.indexOf(a)) {
-                case 1: createNewGroup = true;
-                case 0: asURL = true; break;
+            case 1: createNewGroup = true;
+            case 0: asURL = true; break;
             }
         }
 
@@ -739,7 +1437,7 @@ namespace Subscription {
             if (finish != nullptr) {
                 finish();
             }
-        });
+            });
     }
 
     void GroupUpdater::Update(
@@ -1088,18 +1786,22 @@ namespace Subscription {
                 }
 
 
-                const auto outbound =
-                    profile->OutboundSnapshot();
+                const auto config =
+                    profile->ConfigSnapshot();
 
 
-                if (!outbound)
+                if (config.displayName.isEmpty() &&
+                    config.displayType.isEmpty())
                 {
                     return profile->Name();
                 }
 
 
-                return outbound
-                    ->DisplayTypeAndName();
+                return QString("[%1] %2")
+                    .arg(
+                        config.displayType,
+                        config.displayName
+                    );
             };
 
 

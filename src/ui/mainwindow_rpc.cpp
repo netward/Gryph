@@ -61,6 +61,26 @@ namespace
     };
 
 
+    [[nodiscard]]
+    QString profileDisplayTypeAndName(
+        const std::shared_ptr<Configs::Profile>& profile)
+    {
+        if (!profile)
+        {
+            return {};
+        }
+
+        const auto config =
+            profile->ConfigSnapshot();
+
+        return QStringLiteral("[%1] %2")
+            .arg(
+                config.displayType,
+                config.displayName
+            );
+    }
+
+
     class SemaphoreReleaseGuard final
     {
     public:
@@ -90,7 +110,7 @@ namespace
     };
 }
 
-void MainWindow::setup_rpc(QLocalSocket *socket) {
+void MainWindow::setup_rpc(QLocalSocket* socket) {
     // The Client is long-lived and never recreated; on core restart we only
     // swap the underlying connection so worker threads holding `defaultClient`
     // never touch freed memory.
@@ -115,7 +135,7 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
     }
 
     libcore::TestReq req;
-    for (const auto &item: outboundTags) {
+    for (const auto& item : outboundTags) {
         req.outbound_tags.push_back(item.toStdString());
     }
     req.config = config.toStdString();
@@ -128,141 +148,142 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
 
     auto done = new QMutex;
     done->lock();
-    runOnNewThread([=,this]
-    {
-        bool ok;
-        while (true)
+    runOnNewThread([=, this]
         {
-            QThread::msleep(200);
-            if (done->try_lock()) break;
-            auto resp = defaultClient->QueryURLTest(&ok);
-            if (!ok || resp.results.empty())
+            bool ok;
+            while (true)
             {
-                continue;
-            }
-
-            bool needRefresh = false;
-            QList<int> profileIDs;
-            for (const auto& res : resp.results)
-            {
-                dataViewHtmlGenerator_.addTestProgress();
-                UpdateDataView();
-                int entid = -1;
-
-
-                if (!tag2entID.empty())
+                QThread::msleep(200);
+                if (done->try_lock()) break;
+                auto resp = defaultClient->QueryURLTest(&ok);
+                if (!ok || resp.results.empty())
                 {
-                    const QString outboundTag =
-                        QString::fromStdString(
-                            res.outbound_tag.value()
-                        );
+                    continue;
+                }
+
+                bool needRefresh = false;
+                QList<int> profileIDs;
+                for (const auto& res : resp.results)
+                {
+                    dataViewHtmlGenerator_.addTestProgress();
+                    UpdateDataView();
+                    int entid = -1;
 
 
-                    const auto it =
-                        tag2entID.constFind(
-                            outboundTag
-                        );
-
-
-                    if (it != tag2entID.constEnd())
+                    if (!tag2entID.empty())
                     {
-                        entid =
-                            it.value();
+                        const QString outboundTag =
+                            QString::fromStdString(
+                                res.outbound_tag.value()
+                            );
+
+
+                        const auto it =
+                            tag2entID.constFind(
+                                outboundTag
+                            );
+
+
+                        if (it != tag2entID.constEnd())
+                        {
+                            entid =
+                                it.value();
+                        }
                     }
-                }
 
 
-                if (entid == -1)
-                {
-                    continue;
-                }
+                    if (entid == -1)
+                    {
+                        continue;
+                    }
 
 
-                // IMPORTANT:
-                // refresh exactly the profile whose result
-                // was returned by QueryURLTest().
-                profileIDs << entid;
+                    // IMPORTANT:
+                    // refresh exactly the profile whose result
+                    // was returned by QueryURLTest().
+                    profileIDs << entid;
 
 
-                auto ent =
-                    Configs::dataManager
-                    ->profilesRepo
-                    ->GetProfile(
-                        entid
-                    );
-
-
-                if (!ent)
-                {
-                    continue;
-                }
-
-
-                if (res.error.value().empty())
-                {
-                    ent->SetLatency(
-                        res.latency_ms.value()
-                    );
-                }
-                else
-                {
-                    const QString error =
-                        QString::fromStdString(
-                            res.error.value()
+                    auto ent =
+                        Configs::dataManager
+                        ->profilesRepo
+                        ->GetProfile(
+                            entid
                         );
 
 
-                    if (error.contains(
-                        "test aborted")
-                        ||
-                        error.contains(
-                            "context canceled"))
+                    if (!ent)
                     {
-                        ent->SetLatency(0);
+                        continue;
+                    }
+
+
+                    if (res.error.value().empty())
+                    {
+                        ent->SetLatency(
+                            res.latency_ms.value()
+                        );
                     }
                     else
                     {
-                        ent->SetLatency(-1);
+                        const QString error =
+                            QString::fromStdString(
+                                res.error.value()
+                            );
 
 
-                        MW_show_log(
-                            tr("[%1] test error: %2")
-                            .arg(
-                                ent->OutboundSnapshot()
-                                ->DisplayTypeAndName(),
-                                error
-                            )
-                        );
+                        if (error.contains(
+                            "test aborted")
+                            ||
+                            error.contains(
+                                "context canceled"))
+                        {
+                            ent->SetLatency(0);
+                        }
+                        else
+                        {
+                            ent->SetLatency(-1);
+
+
+                            MW_show_log(
+                                tr("[%1] test error: %2")
+                                .arg(
+                                    profileDisplayTypeAndName(
+                                        ent
+                                    ),
+                                    error
+                                )
+                            );
+                        }
                     }
+
+
+                    Configs::dataManager
+                        ->profilesRepo
+                        ->Save(ent);
+
+
+                    needRefresh = true;
                 }
 
-
-                Configs::dataManager
-                    ->profilesRepo
-                    ->Save(ent);
-
-
-                needRefresh = true;
+                if (needRefresh)
+                {
+                    UpdateDataView(true);
+                    runOnUiThread([=, this] {
+                        refresh_proxy_list(profileIDs);
+                        });
+                }
             }
-
-            if (needRefresh)
-            {
-                UpdateDataView(true);
-                runOnUiThread([=,this]{
-                    refresh_proxy_list(profileIDs);
-                });
-            }
-        }
-        done->unlock();
-        delete done;
-    });
+            done->unlock();
+            delete done;
+        });
     bool rpcOK;
     auto result = defaultClient->Test(&rpcOK, req);
     done->unlock();
     //
     if (!rpcOK || result.results.empty()) return;
 
-    for (const auto &res: result.results) {
+    for (const auto& res : result.results) {
         if (!tag2entID.empty()) {
             entID = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
         }
@@ -309,8 +330,9 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                 MW_show_log(
                     tr("[%1] test error: %2")
                     .arg(
-                        ent->OutboundSnapshot()
-                        ->DisplayTypeAndName(),
+                        profileDisplayTypeAndName(
+                            ent
+                        ),
                         error
                     )
                 );
@@ -327,7 +349,7 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
     }
 
     libcore::IPTestRequest req;
-    for (const auto &item: outboundTags) {
+    for (const auto& item : outboundTags) {
         req.outbound_tags.push_back(item.toStdString());
     }
     req.config = config.toStdString();
@@ -339,75 +361,76 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
 
     auto done = new QMutex;
     done->lock();
-    runOnNewThread([=,this]
-    {
-        bool ok;
-        while (true)
+    runOnNewThread([=, this]
         {
-            QThread::msleep(200);
-            if (done->try_lock()) break;
-            auto resp = defaultClient->QueryIPTest(&ok);
-            if (!ok || resp.results.empty())
+            bool ok;
+            while (true)
             {
-                continue;
-            }
-
-            bool needRefresh = false;
-            QList<int> profileIDs;
-            for (const auto& res : resp.results)
-            {
-                dataViewHtmlGenerator_.addTestProgress();
-                UpdateDataView();
-                int entid = -1;
-                if (!tag2entID.empty()) {
-                    entid = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
-                }
-                if (entid == -1) {
+                QThread::msleep(200);
+                if (done->try_lock()) break;
+                auto resp = defaultClient->QueryIPTest(&ok);
+                if (!ok || resp.results.empty())
+                {
                     continue;
                 }
-                profileIDs << entid;
-                auto ent = Configs::dataManager->profilesRepo->GetProfile(entid);
-                if (ent == nullptr) {
-                    continue;
-                }
-                if (res.error.value().empty()) {
-                    ent->SetIpTestResult(
-                        QString::fromStdString(
-                            res.ip.value()
-                        ),
 
-                        QString::fromStdString(
-                            res.country_code.value()
-                        )
-                    );
-                } else {
-                    if (!QString::fromStdString(res.error.value()).contains("test aborted") &&
-                        !QString::fromStdString(res.error.value()).contains("context canceled")) {
-                        MW_show_log(tr("[%1] IP test error: %2").arg(ent->OutboundSnapshot()->DisplayTypeAndName(), QString::fromStdString(res.error.value())));
+                bool needRefresh = false;
+                QList<int> profileIDs;
+                for (const auto& res : resp.results)
+                {
+                    dataViewHtmlGenerator_.addTestProgress();
+                    UpdateDataView();
+                    int entid = -1;
+                    if (!tag2entID.empty()) {
+                        entid = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
                     }
-                    ent->ClearIpTestResult();
+                    if (entid == -1) {
+                        continue;
+                    }
+                    profileIDs << entid;
+                    auto ent = Configs::dataManager->profilesRepo->GetProfile(entid);
+                    if (ent == nullptr) {
+                        continue;
+                    }
+                    if (res.error.value().empty()) {
+                        ent->SetIpTestResult(
+                            QString::fromStdString(
+                                res.ip.value()
+                            ),
+
+                            QString::fromStdString(
+                                res.country_code.value()
+                            )
+                        );
+                    }
+                    else {
+                        if (!QString::fromStdString(res.error.value()).contains("test aborted") &&
+                            !QString::fromStdString(res.error.value()).contains("context canceled")) {
+                            MW_show_log(tr("[%1] IP test error: %2").arg(profileDisplayTypeAndName(ent), QString::fromStdString(res.error.value())));
+                        }
+                        ent->ClearIpTestResult();
+                    }
+                    Configs::dataManager->profilesRepo->Save(ent);
+                    needRefresh = true;
                 }
-                Configs::dataManager->profilesRepo->Save(ent);
-                needRefresh = true;
+                if (needRefresh)
+                {
+                    UpdateDataView(true);
+                    runOnUiThread([=, this] {
+                        refresh_proxy_list(profileIDs);
+                        });
+                }
             }
-            if (needRefresh)
-            {
-                UpdateDataView(true);
-                runOnUiThread([=,this]{
-                    refresh_proxy_list(profileIDs);
-                });
-            }
-        }
-        done->unlock();
-        delete done;
-    });
+            done->unlock();
+            delete done;
+        });
     bool rpcOK;
     auto result = defaultClient->IPTest(&rpcOK, req);
     done->unlock();
     //
     if (!rpcOK || result.results.empty()) return;
 
-    for (const auto &res: result.results) {
+    for (const auto& res : result.results) {
         if (!tag2entID.empty()) {
             entID = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
         }
@@ -449,8 +472,9 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
                 MW_show_log(
                     tr("[%1] IP test error: %2")
                     .arg(
-                        ent->OutboundSnapshot()
-                        ->DisplayTypeAndName(),
+                        profileDisplayTypeAndName(
+                            ent
+                        ),
                         error
                     )
                 );
@@ -800,7 +824,7 @@ void MainWindow::url_test_current() {
     last_test_time = QDateTime::currentSecsSinceEpoch();
     ui->label_running->setText(tr("Testing"));
 
-    runOnNewThread([=,this] {
+    runOnNewThread([=, this] {
         libcore::TestReq req;
         req.test_current = true;
         req.url = Configs::dataManager->settingsRepo->test_latency_url.toStdString();
@@ -812,17 +836,18 @@ void MainWindow::url_test_current() {
         auto latency = result.results[0].latency_ms.value();
         last_test_time = QDateTime::currentSecsSinceEpoch();
 
-        runOnUiThread([=,this] {
+        runOnUiThread([=, this] {
             if (!result.results[0].error.value().empty()) {
                 MW_show_log(QString("UrlTest error: %1").arg(QString::fromStdString(result.results[0].error.value())));
             }
             if (latency <= 0) {
                 ui->label_running->setText(tr("Test Result") + ": " + tr("Unavailable"));
-            } else if (latency > 0) {
+            }
+            else if (latency > 0) {
                 ui->label_running->setText(tr("Test Result") + ": " + QString("%1 ms").arg(latency));
             }
+            });
         });
-    });
 }
 
 void MainWindow::iptest_current_group(
@@ -1155,7 +1180,7 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
                     return;
                 }
 
-                for (const auto &entID: buildObject->fullConfigs.keys()) {
+                for (const auto& entID : buildObject->fullConfigs.keys()) {
                     auto configStr = buildObject->fullConfigs[entID];
                     runSpeedTest(configStr, "", true, false, {}, {}, entID);
                 }
@@ -1164,15 +1189,16 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
                     auto xrayConf = buildObject->isXrayNeeded ? QJsonObject2QString(buildObject->xrayConfig, true) : "";
                     runSpeedTest(QJsonObject2QString(buildObject->coreConfig, false), xrayConf, false, false, buildObject->outboundTags, buildObject->tag2entID, -1);
                 }
-            };
+                };
             int stepSize = Configs::dataManager->settingsRepo->speed_test_mode == Configs::TestConfig::COUNTRY ? 100 : 1;
-            for (int i=0;i<profileIDs.length();i+=stepSize) {
+            for (int i = 0; i < profileIDs.length(); i += stepSize) {
                 if (stopSpeedtest.load()) break;
                 auto profileIDsSlice = profileIDs.mid(i, stepSize);
                 auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(profileIDsSlice);
                 speedTestFunc(profiles);
             }
-        } else
+        }
+        else
         {
             dataViewHtmlGenerator_.seedSpeedTest(1);
             runSpeedTest("", "", true, true, {}, {}, -1);
@@ -1180,11 +1206,11 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
         }
         dataViewHtmlGenerator_.clearTestSections();
         UpdateDataView(true);
-        runOnUiThread([=,this]{
+        runOnUiThread([=, this] {
             refresh_proxy_list(profileIDs);
             MW_show_log(tr("Speedtest finished!"));
+            });
         });
-    });
 }
 
 void MainWindow::querySpeedtest(
@@ -2046,7 +2072,8 @@ bool MainWindow::set_system_dns(bool set, bool save_set) {
     QString res;
     if (set) {
         res = defaultClient->SetSystemDNS(&rpcOK, false);
-    } else {
+    }
+    else {
         res = defaultClient->SetSystemDNS(&rpcOK, true);
     }
     if (!rpcOK) {
@@ -2222,7 +2249,7 @@ void MainWindow::profile_start(int _id) {
                     if (r == 0) {
                         StopVPNProcess();
                     }
-                });
+                    });
                 return false;
             }
             runOnUiThread([=] { MessageBoxWarning("LoadConfig return error", error); });
@@ -2402,7 +2429,7 @@ void MainWindow::profile_start(int _id) {
         );
 
         return true;
-    };
+        };
 
     if (!mu_starting.tryLock()) {
         MessageBoxWarning(software_name, tr("Another profile is starting..."));
@@ -2430,8 +2457,8 @@ void MainWindow::profile_start(int _id) {
 
     // timeout message
     auto restartMsgbox = new QMessageBox(QMessageBox::Question, software_name, tr("If there is no response for a long time, it is recommended to restart the software."),
-                                         QMessageBox::Yes | QMessageBox::No, this);
-    connect(restartMsgbox, &QMessageBox::accepted, this, [=,this] { MW_dialog_message(MwMessage::RestartProgram, {}); });
+        QMessageBox::Yes | QMessageBox::No, this);
+    connect(restartMsgbox, &QMessageBox::accepted, this, [=, this] { MW_dialog_message(MwMessage::RestartProgram, {}); });
     auto restartMsgboxTimer = new MessageBoxTimer(this, restartMsgbox, 10000);
 
     runOnNewThread([=, this] {
@@ -2449,9 +2476,9 @@ void MainWindow::profile_start(int _id) {
             mu_stopping.unlock();
         }
         // do start
-        MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(ent->OutboundSnapshot()->DisplayTypeAndName()));
+        MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(profileDisplayTypeAndName(ent)));
         if (!profile_start_stage2()) {
-            MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(ent->OutboundSnapshot()->DisplayTypeAndName()));
+            MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(profileDisplayTypeAndName(ent)));
         }
         mu_starting.unlock();
         // cancel timeout
@@ -2459,8 +2486,8 @@ void MainWindow::profile_start(int _id) {
             restartMsgboxTimer->cancel();
             restartMsgboxTimer->deleteLater();
             restartMsgbox->deleteLater();
+            });
         });
-    });
 }
 
 void MainWindow::profile_stop(

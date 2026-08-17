@@ -365,24 +365,205 @@ DialogEditGroup::DialogEditGroup(
         LANDING.landing_proxy = ui->landing_proxy->itemData(index).value<int>();
     });
 
-    connect(ui->copy_links, &QPushButton::clicked, this, [=] {
-        QStringList links;
-        auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(ent->Profiles());
-        for (const auto &profile: profiles) {
-            links += profile->OutboundSnapshot()->ExportToLink();
+    // =====================================================
+// Copy standard profile links
+// =====================================================
+
+    connect(
+        ui->copy_links,
+        &QPushButton::clicked,
+        this,
+        [this]()
+        {
+            // -------------------------------------------------
+            // Group may theoretically no longer exist.
+            // -------------------------------------------------
+
+            if (!this->ent)
+            {
+                return;
+            }
+
+
+            QStringList links;
+
+
+            // -------------------------------------------------
+            // IMPORTANT:
+            //
+            // Use this->ent, NOT ent.
+            //
+            // "ent" without this-> refers to the constructor
+            // parameter, which is not captured by [this].
+            // -------------------------------------------------
+
+            const auto profileIds =
+                this->ent->Profiles();
+
+
+            const auto profiles =
+                Configs::dataManager
+                ->profilesRepo
+                ->GetProfileBatch(
+                    profileIds
+                );
+
+
+            // -------------------------------------------------
+            // Export standard links
+            // -------------------------------------------------
+
+            for (const auto& profile :
+                profiles)
+            {
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                // Detached outbound copy.
+                // The live Profile::outbound_ is not exposed.
+                const auto outbound =
+                    profile
+                    ->OutboundClone();
+
+
+                if (!outbound)
+                {
+                    continue;
+                }
+
+
+                const QString link =
+                    outbound
+                    ->ExportToLink();
+
+
+                if (!link.isEmpty())
+                {
+                    links.append(
+                        link
+                    );
+                }
+            }
+
+
+            // -------------------------------------------------
+            // Copy to clipboard
+            // -------------------------------------------------
+
+            QApplication
+                ::clipboard()
+                ->setText(
+                    links.join(
+                        '\n'
+                    )
+                );
+
+
+            MessageBoxInfo(
+                software_name,
+                tr("Copied")
+            );
         }
-        QApplication::clipboard()->setText(links.join("\n"));
-        MessageBoxInfo(software_name, tr("Copied"));
-    });
-    connect(ui->copy_links_nkr, &QPushButton::clicked, this, [=] {
-        QStringList links;
-        auto profiles = Configs::dataManager->profilesRepo->GetProfileBatch(ent->Profiles());
-        for (const auto &profile: profiles) {
-            links += profile->OutboundSnapshot()->ExportJsonLink();
+    );
+
+
+    // =====================================================
+    // Copy Gryph JSON links
+    // =====================================================
+
+    connect(
+        ui->copy_links_nkr,
+        &QPushButton::clicked,
+        this,
+        [this]()
+        {
+            if (!this->ent)
+            {
+                return;
+            }
+
+
+            QStringList links;
+
+
+            // -------------------------------------------------
+            // Same rule here:
+            //
+            // this->ent
+            //
+            // NOT:
+            //
+            // ent
+            // -------------------------------------------------
+
+            const auto profileIds =
+                this->ent->Profiles();
+
+
+            const auto profiles =
+                Configs::dataManager
+                ->profilesRepo
+                ->GetProfileBatch(
+                    profileIds
+                );
+
+
+            // -------------------------------------------------
+            // Export Gryph JSON links
+            // -------------------------------------------------
+
+            for (const auto& profile :
+                profiles)
+            {
+                if (!profile)
+                {
+                    continue;
+                }
+
+
+                const auto outbound =
+                    profile
+                    ->OutboundClone();
+
+
+                if (!outbound)
+                {
+                    continue;
+                }
+
+
+                const QString link =
+                    outbound
+                    ->ExportJsonLink();
+
+
+                if (!link.isEmpty())
+                {
+                    links.append(
+                        link
+                    );
+                }
+            }
+
+
+            QApplication
+                ::clipboard()
+                ->setText(
+                    links.join(
+                        '\n'
+                    )
+                );
+
+
+            MessageBoxInfo(
+                software_name,
+                tr("Copied")
+            );
         }
-        QApplication::clipboard()->setText(links.join("\n"));
-        MessageBoxInfo(software_name, tr("Copied"));
-    });
+    );
 
     ui->name->setFocus();
 

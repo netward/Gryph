@@ -2309,7 +2309,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         ui->menu_export_config->setVisible(true);
 
         const auto outbound =
-            profile->OutboundSnapshot();
+            profile->OutboundClone();
 
         if ((outbound &&
             outbound->IsXray()) ||
@@ -3462,7 +3462,7 @@ MainWindow::filterProfilesList(
             profile->TestSnapshot();
 
         const auto outbound =
-            profile->OutboundSnapshot();
+            profile->OutboundClone();
 
 
         if (!outbound)
@@ -4457,7 +4457,7 @@ void MainWindow::on_menu_clone_triggered() {
         }
 
         const auto outbound =
-            ent->OutboundSnapshot();
+            ent->OutboundClone();
 
         if (!outbound)
         {
@@ -4545,7 +4545,7 @@ void MainWindow::on_menu_delete_repeat_triggered()
         }
 
         const auto outbound =
-            profile->OutboundSnapshot();
+            profile->OutboundClone();
 
         if (!outbound)
         {
@@ -4711,7 +4711,7 @@ void MainWindow::on_menu_copy_links_triggered() {
         }
 
         const auto outbound =
-            ent->OutboundSnapshot();
+            ent->OutboundClone();
 
         if (!outbound)
         {
@@ -4749,7 +4749,7 @@ void MainWindow::on_menu_copy_links_nkr_triggered() {
         }
 
         const auto outbound =
-            ent->OutboundSnapshot();
+            ent->OutboundClone();
 
         if (!outbound)
         {
@@ -4895,7 +4895,7 @@ void MainWindow::display_qr_link(bool nkrFormat) {
     }
 
     const auto outbound =
-        ent->OutboundSnapshot();
+        ent->OutboundClone();
 
     if (!outbound)
     {
@@ -5300,7 +5300,7 @@ void MainWindow::on_menu_remove_invalid_triggered()
 
                 const auto outbound =
 
-                    profile->OutboundSnapshot();
+                    profile->OutboundClone();
 
 
                 if (!outbound)
@@ -5476,7 +5476,7 @@ void MainWindow::on_menu_resolve_selected_triggered()
         }
 
         const auto outbound =
-            profile->OutboundSnapshot();
+            profile->OutboundClone();
 
         if (!outbound)
         {
@@ -5635,7 +5635,7 @@ on_menu_resolve_domain_triggered()
         }
 
         const auto outbound =
-            profile->OutboundSnapshot();
+            profile->OutboundClone();
 
         if (!outbound)
         {
@@ -6020,7 +6020,7 @@ void MainWindow::clearUnavailableProfiles(bool confirm, QList<int> profileIDs) {
             else if (remove_display_count < 20)
             {
                 const auto outbound =
-                    profile->OutboundSnapshot();
+                    profile->OutboundClone();
 
                 if (outbound)
                 {

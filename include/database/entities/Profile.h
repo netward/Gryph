@@ -26,6 +26,10 @@
 
 #include "include/global/CountryHelper.hpp"
 
+#include <functional>
+#include <memory>
+#include <utility>
+
 #include <QReadWriteLock>
 #include <QJsonObject>
 #include <QMutex>
@@ -570,8 +574,8 @@ namespace Configs {
         Profile() = default;
 
         Profile(
-            Configs::outbound* outbound,
-            const QString& type_
+            std::shared_ptr<Configs::outbound> outbound,
+            const QString& type
         );
 
         // =====================================================
@@ -609,9 +613,130 @@ namespace Configs {
         ProfileConfigSnapshot
             ConfigSnapshot() const;
 
+        // =====================================================
+        // Safe outbound access
+        //
+        // The live outbound_ object is NEVER exposed.
+        // =====================================================
+        
+        
+        // -----------------------------------------------------
+        // Deep detached copy.
+        //
+        // Safe for complex reading/building.
+        // Modifying this object DOES NOT modify Profile.
+        // -----------------------------------------------------
+
         [[nodiscard]]
         std::shared_ptr<Configs::outbound>
-            OutboundSnapshot() const;
+            OutboundClone() const;
+
+
+        // -----------------------------------------------------
+        // Typed detached copy
+        // -----------------------------------------------------
+
+        template <typename T>
+        [[nodiscard]]
+        std::shared_ptr<T>
+            OutboundCloneAs() const
+        {
+            return std::dynamic_pointer_cast<T>(
+                OutboundClone()
+            );
+        }
+
+
+        // -----------------------------------------------------
+        // Copy-on-write mutation.
+        //
+        // Lambda must return true when mutation succeeded.
+        // -----------------------------------------------------
+
+        template <
+            typename T,
+            typename Mutator
+        >
+        bool MutateOutbound(
+            Mutator&& mutator)
+        {
+            return MutateOutboundBase(
+                [
+                    fn =
+                        std::forward<Mutator>(
+                            mutator
+                        )
+                ](
+                    Configs::outbound& base
+                    ) mutable -> bool
+                {
+                    auto* typed =
+                        dynamic_cast<T*>(
+                            &base
+                            );
+
+
+                    if (!typed)
+                    {
+                        return false;
+                    }
+
+
+                    return std::invoke(
+                        fn,
+                        *typed
+                    );
+                }
+                        );
+        }
+
+
+        // -----------------------------------------------------
+        // Same mutation, but only when configuration still has
+        // exactly expectedRevision.
+        //
+        // Useful for async DNS / workers.
+        // -----------------------------------------------------
+
+        template <
+            typename T,
+            typename Mutator
+        >
+        bool MutateOutboundAtRevision(
+            quint64 expectedRevision,
+            Mutator&& mutator)
+        {
+            return MutateOutboundBaseAtRevision(
+                expectedRevision,
+
+                [
+                    fn =
+                        std::forward<Mutator>(
+                            mutator
+                        )
+                ](
+                    Configs::outbound& base
+                    ) mutable -> bool
+                {
+                    auto* typed =
+                        dynamic_cast<T*>(
+                            &base
+                            );
+
+
+                    if (!typed)
+                    {
+                        return false;
+                    }
+
+
+                    return std::invoke(
+                        fn,
+                        *typed
+                    );
+                }
+                        );
+        }
 
         [[nodiscard]]
         std::shared_ptr<Profile>
@@ -732,163 +857,43 @@ namespace Configs {
         // Profile or its detached editing copy.
         // =====================================================
 
-        [[nodiscard]]
-        std::shared_ptr<Configs::socks>
-            Socks() const
-        {
-            return OutboundAs<Configs::socks>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::http>
-            Http() const
-        {
-            return OutboundAs<Configs::http>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::shadowsocks>
-            ShadowSocks() const
-        {
-            return OutboundAs<Configs::shadowsocks>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::vmess>
-            VMess() const
-        {
-            return OutboundAs<Configs::vmess>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::Trojan>
-            Trojan() const
-        {
-            return OutboundAs<Configs::Trojan>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::vless>
-            VLESS() const
-        {
-            return OutboundAs<Configs::vless>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::xrayVless>
-            XrayVLESS() const
-        {
-            return OutboundAs<Configs::xrayVless>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::hysteria>
-            Hysteria() const
-        {
-            return OutboundAs<Configs::hysteria>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::anyTLS>
-            AnyTLS() const
-        {
-            return OutboundAs<Configs::anyTLS>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::ssh>
-            SSH() const
-        {
-            return OutboundAs<Configs::ssh>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::tailscale>
-            Tailscale() const
-        {
-            return OutboundAs<Configs::tailscale>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::tuic>
-            TUIC() const
-        {
-            return OutboundAs<Configs::tuic>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::juicity>
-            Juicity() const
-        {
-            return OutboundAs<Configs::juicity>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::trusttunnel>
-            TrustTunnel() const
-        {
-            return OutboundAs<Configs::trusttunnel>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::naive>
-            Naive() const
-        {
-            return OutboundAs<Configs::naive>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::shadowtls>
-            ShadowTLS() const
-        {
-            return OutboundAs<Configs::shadowtls>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::wireguard>
-            Wireguard() const
-        {
-            return OutboundAs<Configs::wireguard>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::Custom>
-            Custom() const
-        {
-            return OutboundAs<Configs::Custom>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::chain>
-            Chain() const
-        {
-            return OutboundAs<Configs::chain>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::direct>
-            Direct() const
-        {
-            return OutboundAs<Configs::direct>();
-        }
-
-        [[nodiscard]]
-        std::shared_ptr<Configs::extracore>
-            ExtraCore() const
-        {
-            return OutboundAs<Configs::extracore>();
-        }
-
-        template <typename T>
-        [[nodiscard]]
-        std::shared_ptr<T> OutboundAs() const
-        {
-            return std::dynamic_pointer_cast<T>(
-                OutboundSnapshot()
-            );
-        }
 
     private:
+
+        // =====================================================
+        // Internal configuration copy-on-write machinery
+        // =====================================================
+
+        using OutboundMutator =
+            std::function<
+            bool(
+                Configs::outbound&
+                )
+            >;
+
+
+        [[nodiscard]]
+        std::shared_ptr<Configs::outbound>
+            CreateOutboundFromSnapshot(
+                const ProfileConfigSnapshot& snapshot
+            ) const;
+
+
+        bool MutateOutboundBase(
+            const OutboundMutator& mutator
+        );
+
+
+        bool MutateOutboundBaseAtRevision(
+            quint64 expectedRevision,
+            const OutboundMutator& mutator
+        );
+
+
+        bool CommitOutboundReplacement(
+            std::shared_ptr<Configs::outbound> replacement,
+            quint64 expectedRevision
+        );
 
         // =====================================================
         // Persistent/configuration state
