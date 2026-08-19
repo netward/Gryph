@@ -7,7 +7,7 @@
 
 
 
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 
 namespace Configs_sys {
     CoreProcess::~CoreProcess() {

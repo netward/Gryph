@@ -2,7 +2,7 @@
 
 #include <include/global/GuiUtils.hpp>
 
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 #include <QAction>
 
 DialogHotkey::DialogHotkey(QWidget *parent, const QList<QAction*>& actions) : QDialog(parent), ui(new Ui::DialogHotkey) {

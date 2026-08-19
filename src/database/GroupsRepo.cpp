@@ -7,7 +7,7 @@
 
 #include "include/database/ProfilesRepo.h"
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindow.h"
+#include "include/ui/MainWindow.h"
 
 
 namespace Configs {

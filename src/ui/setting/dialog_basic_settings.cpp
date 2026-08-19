@@ -33,7 +33,7 @@
 
 
 
-#include "include/ui/mainwindow.h"
+#include "include/ui/MainWindow.h"
 
 DialogBasicSettings::DialogBasicSettings(QWidget* parent)
     : QDialog(parent), ui(new Ui::DialogBasicSettings) {

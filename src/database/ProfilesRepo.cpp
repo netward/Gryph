@@ -5,7 +5,7 @@
 #include <map>
 
 #include "include/database/GroupsRepo.h"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 
 
 namespace Configs {

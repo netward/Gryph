@@ -2,7 +2,7 @@
 
 #include "include/global/GuiUtils.hpp"
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 #ifdef Q_OS_WIN
 #include "include/sys/windows/WinVersion.h"
 #endif

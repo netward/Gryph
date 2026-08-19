@@ -7,7 +7,7 @@
 #include <QMessageBox>
 
 #include "include/database/GroupsRepo.h"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 
 
 QString ParseSubInfo(const QString &info) {

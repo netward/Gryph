@@ -1,7 +1,7 @@
 #include "include/ui/profile/edit_chain.h"
 
 #include "include/database/ProfilesRepo.h"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 #include "include/ui/profile/ProxyItem.h"
 
 

@@ -13,7 +13,7 @@
 
 
 #include "include/global/Configs.hpp"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 #include "include/global/DeviceDetailsHelper.hpp"
 
 namespace Configs_network {

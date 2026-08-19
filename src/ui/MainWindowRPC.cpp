@@ -270,9 +270,19 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
                 if (needRefresh)
                 {
                     UpdateDataView(true);
-                    runOnUiThread([=, this] {
-                        refresh_proxy_list(profileIDs);
-                        });
+                    runOnUiThread(
+                        this,
+
+                        [
+                            this,
+                            profileIDs
+                        ]()
+                        {
+                            refresh_proxy_list(
+                                profileIDs
+                            );
+                        }
+                    );
                 }
             }
             done->unlock();

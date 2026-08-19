@@ -5,10 +5,14 @@
 #include <random>
 #include <utility>
 
+#include <QApplication>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QEventLoop>
+#include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
-#include <QApplication>
+#include <QThread>
 #include <QUrlQuery>
 #include <QTcpServer>
 #include <QTimer>
@@ -648,56 +652,268 @@ void HideWindow(QWidget *w) {
 #endif
 }
 
-void runOnUiThread(
+// =============================================================
+// Context-bound UI dispatcher
+// =============================================================
+
+bool runOnUiThread(
+    QObject* context,
     const std::function<void()>& callback,
     bool wait)
 {
-    QWidget* mainWindow = MainWindowApi::Widget();
+    // =========================================================
+    // Validate callback
+    // =========================================================
 
-    // Главное окно ещё не создано.
-    if (mainWindow == nullptr) {
-        callback();
-        return;
+    if (!callback)
+    {
+        return false;
     }
 
-    QThread* uiThread = mainWindow->thread();
 
-    if (uiThread == QThread::currentThread()) {
-        callback();
-        return;
+    // =========================================================
+    // QApplication/QCoreApplication is the canonical owner of
+    // the UI thread.
+    //
+    // Do NOT use MainWindowApi::Widget() for discovering the UI
+    // thread:
+    //
+    // MainWindow may:
+    //   - not exist yet during startup;
+    //   - already be detached during shutdown.
+    //
+    // QApplication still gives us the correct UI thread.
+    // =========================================================
+
+    QCoreApplication* app =
+        QCoreApplication::instance();
+
+
+    if (!app)
+    {
+        // -----------------------------------------------------
+        // CRITICAL:
+        //
+        // Never execute callback() here.
+        //
+        // We do not know whether the caller is the UI thread.
+        // Executing it directly would violate runOnUiThread()
+        // semantics.
+        // -----------------------------------------------------
+
+        qWarning()
+            << "runOnUiThread: "
+            "QCoreApplication does not exist; "
+            "callback discarded.";
+
+        return false;
     }
 
-    auto* timer = new QTimer;
-    timer->moveToThread(uiThread);
-    timer->setSingleShot(true);
 
-    QEventLoop loop;
+    // =========================================================
+    // During QCoreApplication destruction the event loop can no
+    // longer be relied upon.
+    //
+    // Queuing work at this stage may either never execute or,
+    // with a blocking request, cause a shutdown deadlock.
+    // =========================================================
 
-    QObject::connect(
-        timer,
-        &QTimer::timeout,
-        [callback, timer, wait, &loop]()
+    if (QCoreApplication::closingDown())
+    {
+        qWarning()
+            << "runOnUiThread: "
+            "application is shutting down; "
+            "callback discarded.";
+
+        return false;
+    }
+
+
+    QThread* const uiThread =
+        app->thread();
+
+
+    if (!uiThread)
+    {
+        qWarning()
+            << "runOnUiThread: "
+            "application has no UI thread.";
+
+        return false;
+    }
+
+
+    // =========================================================
+    // Choose QObject context
+    //
+    // No explicit context:
+    //     QApplication becomes the context.
+    //
+    // Explicit context:
+    //     queued callback is tied to that QObject's lifetime.
+    // =========================================================
+
+    QObject* target =
+        context
+        ? context
+        : static_cast<QObject*>(app);
+
+
+    if (!target)
+    {
+        return false;
+    }
+
+
+    // =========================================================
+    // Contract enforcement
+    //
+    // runOnUiThread() must NEVER dispatch to an object which
+    // belongs to another thread.
+    // =========================================================
+
+    if (target->thread() !=
+        uiThread)
+    {
+        qWarning()
+            << "runOnUiThread: supplied context does not "
+            "belong to the QApplication/UI thread.";
+
+        return false;
+    }
+
+
+    // =========================================================
+    // Already on UI thread
+    //
+    // Execute synchronously.
+    // =========================================================
+
+    if (QThread::currentThread() ==
+        uiThread)
+    {
+        callback();
+
+        return true;
+    }
+
+
+    // =========================================================
+    // Worker -> UI, asynchronous
+    //
+    // QMetaObject::invokeMethod with QObject context has an
+    // important property:
+    //
+    // If `target` dies before callback delivery, Qt removes the
+    // pending invocation instead of executing it against the
+    // destroyed QObject.
+    // =========================================================
+
+    if (!wait)
+    {
+        const bool queued =
+            QMetaObject::invokeMethod(
+                target,
+
+                [
+                    callback
+                ]()
+                {
+                    callback();
+                },
+
+                        Qt::QueuedConnection
+                        );
+
+
+        if (!queued)
         {
-            callback();
-            timer->deleteLater();
+            qWarning()
+                << "runOnUiThread: "
+                "failed to queue callback.";
+        }
 
-            if (wait) {
-                QMetaObject::invokeMethod(
-                    &loop,
-                    "quit",
-                    Qt::QueuedConnection);
-            }
-        });
 
-    QMetaObject::invokeMethod(
-        timer,
-        "start",
-        Qt::QueuedConnection,
-        Q_ARG(int, 0));
-
-    if (wait && QThread::currentThread() != uiThread) {
-        loop.exec();
+        return queued;
     }
+
+
+    // =========================================================
+    // Worker -> UI, synchronous
+    //
+    // The caller explicitly requested wait=true.
+    //
+    // BlockingQueuedConnection waits until callback has
+    // completed in the UI thread.
+    //
+    // We already handled the same-thread case above, therefore
+    // BlockingQueuedConnection cannot self-deadlock merely from
+    // being called on the UI thread.
+    // =========================================================
+
+    const bool invoked =
+        QMetaObject::invokeMethod(
+            target,
+
+            [
+                callback
+            ]()
+            {
+                callback();
+            },
+
+                    Qt::BlockingQueuedConnection
+                    );
+
+
+    if (!invoked)
+    {
+        qWarning()
+            << "runOnUiThread: "
+            "failed to execute blocking callback.";
+    }
+
+
+    return invoked;
+}
+
+// =============================================================
+// Default UI dispatcher
+//
+// Application object itself is used as QObject context.
+//
+// This overload is source-compatible with all existing:
+//
+//     runOnUiThread(lambda);
+//     runOnUiThread(lambda, true);
+//
+// calls.
+// =============================================================
+bool runOnUiThread(
+    const std::function<void()>& callback,
+    bool wait)
+{
+    QCoreApplication* app =
+        QCoreApplication::instance();
+
+
+    if (!app)
+    {
+        // Again: NEVER fall back to callback() in caller thread.
+        qWarning()
+            << "runOnUiThread: "
+            "QCoreApplication does not exist; "
+            "callback discarded.";
+
+        return false;
+    }
+
+
+    return runOnUiThread(
+        app,
+        callback,
+        wait
+    );
 }
 
 namespace

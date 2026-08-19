@@ -1,6 +1,6 @@
 #include "include/ui/profile/dialog_edit_profile.h"
 #include "ui_dialog_edit_profile.h"
-#include "include/ui/mainwindowapi.h"
+#include "include/ui/MainWindowAPI.h"
 #include "include/ui/profile/edit_http.h"
 #include "include/ui/profile/edit_shadowsocks.h"
 #include "include/ui/profile/edit_chain.h"

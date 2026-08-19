@@ -283,22 +283,132 @@ void HideWindow(QWidget *w);
 
 //
 
-void runOnUiThread(const std::function<void()> &callback, bool wait = false);
+// =============================================================
+// Thread dispatch helpers
+// =============================================================
 
-void runOnNewThread(const std::function<void()> &callback, bool wait = false);
 
-void runOnThread(const std::function<void()> &callback, QObject *parent, bool wait = false);
+// -------------------------------------------------------------
+// Execute callback on QApplication / UI thread.
+//
+// If called from UI thread:
+//     callback is executed immediately.
+//
+// If called from worker thread:
+//     callback is queued to UI thread.
+//
+// If wait == true:
+//     worker waits until UI callback has finished.
+//
+// IMPORTANT:
+// callback is NEVER executed in an arbitrary worker thread
+// merely because MainWindow does not exist.
+// -------------------------------------------------------------
+bool runOnUiThread(
+    const std::function<void()>& callback,
+    bool wait = false
+);
 
-template<typename EMITTER, typename SIGNAL, typename RECEIVER, typename ReceiverFunc>
-inline void connectOnce(EMITTER *emitter, SIGNAL signal, RECEIVER *receiver, ReceiverFunc f,
-                        Qt::ConnectionType connectionType = Qt::AutoConnection) {
-    auto connection = std::make_shared<QMetaObject::Connection>();
-    auto onTriggered = [connection, f](auto... arguments) {
-        std::invoke(f, arguments...);
-        QObject::disconnect(*connection);
-    };
 
-    *connection = QObject::connect(emitter, signal, receiver, onTriggered, connectionType);
+// -------------------------------------------------------------
+// Context-bound UI dispatch.
+//
+// Prefer this overload for callbacks which access a particular
+// QObject, especially MainWindow:
+//
+//     runOnUiThread(
+//         this,
+//         [this]()
+//         {
+//             refresh_status();
+//         }
+//     );
+//
+// `context` must belong to QApplication/UI thread.
+//
+// When a queued callback is associated with `context`, Qt will
+// discard the pending invocation if that QObject is destroyed
+// before the callback is delivered.
+// -------------------------------------------------------------
+bool runOnUiThread(
+    QObject* context,
+    const std::function<void()>& callback,
+    bool wait = false
+);
+
+
+// -------------------------------------------------------------
+// Run callback in a temporary dedicated QThread.
+//
+// Existing implementation remains unchanged for now.
+// -------------------------------------------------------------
+void runOnNewThread(
+    const std::function<void()>& callback,
+    bool wait = false
+);
+
+
+// -------------------------------------------------------------
+// Run callback in the thread associated with `parent`.
+//
+// Existing implementation remains unchanged for now.
+// -------------------------------------------------------------
+void runOnThread(
+    const std::function<void()>& callback,
+    QObject* parent,
+    bool wait = false
+);
+
+
+// =============================================================
+// Connect signal only once
+// =============================================================
+template<
+    typename EMITTER,
+    typename SIGNAL,
+    typename RECEIVER,
+    typename ReceiverFunc
+>
+inline void connectOnce(
+    EMITTER* emitter,
+    SIGNAL signal,
+    RECEIVER* receiver,
+    ReceiverFunc f,
+    Qt::ConnectionType connectionType =
+    Qt::AutoConnection)
+{
+    auto connection =
+        std::make_shared<
+        QMetaObject::Connection
+        >();
+
+
+    auto onTriggered =
+        [
+            connection,
+            f
+        ](auto... arguments)
+        {
+            std::invoke(
+                f,
+                arguments...
+            );
+
+
+            QObject::disconnect(
+                *connection
+            );
+        };
+
+
+    *connection =
+        QObject::connect(
+            emitter,
+            signal,
+            receiver,
+            onTriggered,
+            connectionType
+        );
 }
 
 void setTimeout(const std::function<void()> &callback, QObject *obj, int timeout = 0);
