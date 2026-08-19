@@ -1,6 +1,9 @@
 #include "include/database/entities/Group.h"
 #include "include/database/GroupsRepo.h"
 #include "include/global/Utils.hpp"
+
+#include <stdexcept>
+
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QMutexLocker>
@@ -9,60 +12,136 @@
 #include "include/global/Configs.hpp"
 #include "include/ui/MainWindow.h"
 
-
 namespace Configs {
-    GroupsRepo::GroupsRepo(Database& database) : db(database) {
-        createTables();
+    GroupsRepo::GroupsRepo(
+        Database& database)
+        :
+        db(database)
+    {
+        if (!createTables())
+        {
+            throw std::runtime_error(
+                "Failed to initialize GroupsRepo database schema"
+            );
+        }
     }
 
     bool GroupsRepo::createTables() const
     {
-        // Create groups table
-        db.exec(R"(
-            CREATE TABLE IF NOT EXISTS groups (
+        // =========================================================
+        // groups
+        // =========================================================
+        if (!db.exec(
+            R"(
+            CREATE TABLE IF NOT EXISTS groups
+            (
                 id INTEGER PRIMARY KEY,
+
                 archive INTEGER NOT NULL DEFAULT 0,
+
                 skip_auto_update INTEGER NOT NULL DEFAULT 0,
+
                 name TEXT NOT NULL DEFAULT '',
+
                 url TEXT,
+
                 info TEXT,
+
                 sub_last_update INTEGER NOT NULL DEFAULT 0,
+
                 front_proxy_id INTEGER NOT NULL DEFAULT -1,
+
                 landing_proxy_id INTEGER NOT NULL DEFAULT -1,
+
                 column_width_json TEXT,
+
                 profiles_json TEXT NOT NULL DEFAULT '[]',
 
                 default_profile_order_json
                     TEXT NOT NULL DEFAULT '[]',
 
                 scroll_last_profile INTEGER NOT NULL DEFAULT -1,
-                auto_clear_unavailable INTEGER NOT NULL DEFAULT 0,
+
+                auto_clear_unavailable
+                    INTEGER NOT NULL DEFAULT 0,
+
                 test_sort_by INTEGER NOT NULL DEFAULT 0,
+
                 traffic_sort_by INTEGER NOT NULL DEFAULT 0,
+
                 test_items_to_show INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
-                )
-            )");
 
-        // Create groups_order table to store UI tab order
-        db.exec(R"(
-            CREATE TABLE IF NOT EXISTS groups_order (
-                group_id INTEGER NOT NULL PRIMARY KEY,
-                display_order INTEGER NOT NULL
+                created_at INTEGER NOT NULL
+                    DEFAULT (strftime('%s', 'now')),
+
+                updated_at INTEGER NOT NULL
+                    DEFAULT (strftime('%s', 'now'))
             )
-        )");
+            )"))
+        {
+            MW_show_log(
+                "GroupsRepo::createTables: "
+                "failed to create groups table"
+            );
 
+            return false;
+        }
+
+
+        // =========================================================
+        // groups_order
+        // =========================================================
+        if (!db.exec(
+            R"(
+        CREATE TABLE IF NOT EXISTS groups_order
+        (
+            group_id INTEGER NOT NULL PRIMARY KEY,
+
+            display_order INTEGER NOT NULL
+        )
+        )"))
+        {
+            MW_show_log(
+                "GroupsRepo::createTables: "
+                "failed to create groups_order table"
+            );
+
+            return false;
+        }
+
+        // =========================================================
+        // Migration:
+        //
+        // Older Gryph databases may already contain `groups`,
+        // but without default_profile_order_json.
+        //
+        // CREATE TABLE IF NOT EXISTS does NOT add a missing column
+        // to an existing table, therefore ALTER TABLE is still
+        // required for old databases.
+        // =========================================================
         if (!groupsColumnExists(
             "default_profile_order_json"))
         {
-            db.exec(
+            if (!db.exec(
                 "ALTER TABLE groups "
                 "ADD COLUMN "
                 "default_profile_order_json "
-                "TEXT NOT NULL DEFAULT '[]'"
-            );
+                "TEXT NOT NULL DEFAULT '[]'"))
+            {
+                MW_show_log(
+                    "GroupsRepo::createTables: "
+                    "failed to add "
+                    "default_profile_order_json column"
+                );
+
+                return false;
+            }
         }
+
+        // =========================================================
+        // Entire schema initialization succeeded.
+        // =========================================================
+        return true;
     }
 
     QJsonObject GroupsRepo::groupToJson(
@@ -254,6 +333,13 @@ namespace Configs {
     bool GroupsRepo::groupsColumnExists(
         const char* columnName) const
     {
+        if (!columnName ||
+            *columnName == '\0')
+        {
+            return false;
+        }
+
+
         auto pragma =
             db.query(
                 "PRAGMA table_info(groups)"
@@ -262,20 +348,44 @@ namespace Configs {
 
         if (!pragma)
         {
+            MW_show_log(
+                "GroupsRepo::groupsColumnExists: "
+                "failed to query groups schema"
+            );
+
             return false;
         }
 
 
-        while (pragma->executeStep())
+        try
         {
-            if (pragma
-                ->getColumn(1)
-                .getText()
-                ==
-                std::string(columnName))
+            while (pragma->executeStep())
             {
-                return true;
+                const std::string currentColumn =
+                    pragma
+                    ->getColumn(1)
+                    .getText();
+
+
+                if (currentColumn ==
+                    std::string(columnName))
+                {
+                    return true;
+                }
             }
+        }
+        catch (const std::exception& e)
+        {
+            MW_show_log(
+                "GroupsRepo::groupsColumnExists: "
+                "failed while reading groups schema: "
+                +
+                QString::fromUtf8(
+                    e.what()
+                )
+            );
+
+            return false;
         }
 
 

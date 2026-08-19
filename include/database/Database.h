@@ -1,17 +1,18 @@
 #pragma once
 
+#include "include/global/Utils.hpp"
 #include <3rdparty/SQLiteCpp/include/SQLiteCpp.h>
+#include <3rdparty/SQLiteCpp/include/Statement.h>
+
+#include <algorithm>
 #include <atomic>
-#include <string>
 #include <iostream>
-#include <vector>
-#include <utility>
-#include <type_traits>
 #include <memory>
 #include <mutex>
-#include <algorithm>
-
-#include "include/global/Utils.hpp"
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace Configs 
 {
