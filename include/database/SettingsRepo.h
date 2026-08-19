@@ -36,6 +36,16 @@ namespace Configs {
         [[nodiscard]]
         bool saveAllSettings() const;
 
+        // Save one setting without rewriting the complete settings table.
+        //
+        // Used for small runtime-triggered persistent changes such as
+        // remember_id.
+        [[nodiscard]]
+        bool saveSingleSetting(
+            const QString& key,
+            const QString& value
+        ) const;
+
     public:
         bool noSave = false;
 
@@ -250,7 +260,10 @@ namespace Configs {
         QStringList dial_inet6_bind_address_history = {};
 
         // Methods
-        void UpdateStartedId(int id);
+        [[nodiscard]]
+        bool UpdateStartedId(
+            int id
+        );
 
         [[nodiscard]] QString GetUserAgent(bool isDefault = false) const;
         

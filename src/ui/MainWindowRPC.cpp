@@ -2667,12 +2667,35 @@ void MainWindow::profile_start(int _id) {
             // Persist running ID
             // -----------------------------------------------------
 
-            Configs::dataManager
+            // -----------------------------------------------------
+            // Publish runtime Profile ID and persist remember_id.
+            //
+            // IMPORTANT:
+            // A failure here does NOT mean that the Profile failed
+            // to start. The runtime state has already changed.
+            //
+            // It only means that Gryph could not persist the
+            // remembered Profile ID for the next application start.
+            // -----------------------------------------------------
+
+            const bool remembered =
+                Configs::dataManager
                 ->settingsRepo
                 ->UpdateStartedId(
                     ent->Id()
                 );
 
+
+            if (!remembered)
+            {
+                MW_show_log(
+                    tr(
+                        "The profile was started successfully, "
+                        "but Gryph could not save it as the "
+                        "remembered profile."
+                    )
+                );
+            }
 
             // =========================================================
             // Create a new runtime session
@@ -3105,11 +3128,31 @@ void MainWindow::profile_stop(
             {
                 if (manual)
                 {
-                    Configs::dataManager
+                    // ---------------------------------------------------------
+                    // Profile was manually stopped.
+                    //
+                    // Runtime started_id becomes -1919 immediately.
+                    // remember_id is cleared persistently only if SQLite accepts
+                    // the write.
+                    // ---------------------------------------------------------
+
+                    const bool rememberStateCleared =
+                        Configs::dataManager
                         ->settingsRepo
                         ->UpdateStartedId(
                             -1919
                         );
+
+
+                    if (!rememberStateCleared)
+                    {
+                        MW_show_log(
+                            tr(
+                                "The profile was stopped, but Gryph "
+                                "could not clear the remembered profile."
+                            )
+                        );
+                    }
                 }
 
                 // ---------------------------------------------

@@ -1117,23 +1117,159 @@ namespace Configs
         );
     }
 
+    bool SettingsRepo::saveSingleSetting(
+        const QString& key,
+        const QString& value) const
+    {
+        // =========================================================
+        // Validation
+        // =========================================================
+
+        if (key.isEmpty())
+        {
+            MW_show_log(
+                "SettingsRepo::saveSingleSetting: "
+                "empty setting key"
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // noSave is an intentional mode.
+        //
+        // Keep the same semantic contract as saveAllSettings():
+        // skipping the physical DB write is not considered an error.
+        // =========================================================
+
+        if (noSave)
+        {
+            return true;
+        }
+
+
+        // =========================================================
+        // Write exactly ONE setting.
+        //
+        // UPSERT is preferable to INSERT OR REPLACE because REPLACE
+        // internally has DELETE + INSERT semantics.
+        // =========================================================
+
+        const bool persisted =
+            db.exec(
+                R"(
+            INSERT INTO settings
+            (
+                key,
+                value
+            )
+            VALUES
+            (
+                ?,
+                ?
+            )
+
+            ON CONFLICT(key)
+            DO UPDATE SET
+                value = excluded.value
+            )",
+
+                key.toStdString(),
+                value.toStdString()
+            );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "SettingsRepo::saveSingleSetting: "
+                "failed to persist setting '"
+                +
+                key
+                +
+                "'"
+            );
+
+            return false;
+        }
+
+
+        return true;
+    }
 
     // =========================================================
     // Runtime state
     // =========================================================
 
-    void SettingsRepo::UpdateStartedId(
+    bool SettingsRepo::UpdateStartedId(
         int id)
     {
+        // =========================================================
+        // Runtime state.
+        //
+        // This value describes what is actually happening RIGHT NOW
+        // and is intentionally not stored in SQLite.
+        //
+        // Therefore it must be changed regardless of whether the
+        // persistent remember_id write succeeds.
+        // =========================================================
+
         started_id =
             id;
 
+
+        // =========================================================
+        // Persist remember_id FIRST.
+        //
+        // Do not publish the new remember_id into SettingsRepo memory
+        // until SQLite has accepted it.
+        //
+        // This gives us:
+        //
+        //      success:
+        //          DB == memory
+        //
+        //      failure:
+        //          old remember_id remains both in DB and memory
+        //
+        // while started_id still correctly describes runtime state.
+        // =========================================================
+
+        const bool persisted =
+            saveSingleSetting(
+                QStringLiteral("remember_id"),
+                QString::number(id)
+            );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "SettingsRepo::UpdateStartedId: "
+                "started_id was updated to "
+                +
+                QString::number(id)
+                +
+                ", but remember_id could not be persisted"
+            );
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // SQLite accepted the new remembered Profile ID.
+        //
+        // Publish persistent state into memory only now.
+        // =========================================================
 
         remember_id =
             id;
 
 
-        Save();
+        return true;
     }
 
 
