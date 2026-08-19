@@ -965,7 +965,6 @@ namespace Configs
                 );
             }
 
-
             return false;
         }
 

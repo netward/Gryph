@@ -315,6 +315,10 @@ namespace Configs {
         const RouteProfile* routeProfile,
         int id) const
     {
+        // =========================================================
+        // Validation
+        // =========================================================
+
         if (!routeProfile ||
             id < 0)
         {
@@ -322,108 +326,82 @@ namespace Configs {
         }
 
 
-        auto checkQuery =
-            db.query(
-                "SELECT id "
-                "FROM route_profiles "
-                "WHERE id = ?",
-                id
-            );
+        // =========================================================
+        // Small helper:
+        //
+        // QList<QString>
+        //      ->
+        // compact JSON string
+        //
+        // The DB layer deliberately knows nothing about Qt.
+        // =========================================================
 
-
-        if (!checkQuery)
-        {
-            return false;
-        }
-
-
-        bool exists =
-            false;
-
-
-        try
-        {
-            exists =
-                checkQuery->executeStep();
-        }
-        catch (std::exception& e)
-        {
-            NotifyError(
-                "RoutesRepo::saveToDatabase "
-                "existence check",
-                e
-            );
-
-            return false;
-        }
-
-
-        // Release SELECT before writes.
-        checkQuery = {};
-
-
-        if (exists)
-        {
-            if (!db.exec(
-                R"(
-                UPDATE route_profiles
-                SET name = ?,
-                    default_outbound_id = ?,
-                    updated_at = strftime('%s', 'now')
-                WHERE id = ?
-                )",
-
-                routeProfile
-                ->name
-                .toStdString(),
-
-                routeProfile
-                ->defaultOutboundID,
-
-                id))
+        const auto serializeStringList =
+            [](
+                const QList<QString>& values
+                ) -> std::string
             {
-                return false;
-            }
+                const QJsonArray array =
+                    QListStr2QJsonArray(
+                        values
+                    );
 
 
-            if (!db.exec(
-                "DELETE FROM route_rules "
-                "WHERE route_profile_id = ?",
-                id))
-            {
-                return false;
-            }
-        }
-        else
-        {
-            if (!db.exec(
-                R"(
-                INSERT INTO route_profiles
-                (
-                    id,
-                    name,
-                    default_outbound_id
+                const QByteArray json =
+                    QJsonDocument(
+                        array
+                    )
+                    .toJson(
+                        QJsonDocument::Compact
+                    );
+
+
+                return QString::fromUtf8(
+                    json
                 )
-                VALUES (?, ?, ?)
-                )",
+                    .toStdString();
+            };
 
-                id,
 
+        // =========================================================
+        // Freeze RouteProfile into DB-only data.
+        //
+        // After this stage the Database code doesn't need to know
+        // anything about RouteProfile / RouteRule / QString.
+        // =========================================================
+
+        RouteProfileSaveRow row;
+
+
+        row.id =
+            id;
+
+
+        row.name =
+            routeProfile
+            ->name
+            .toStdString();
+
+
+        row.default_outbound_id =
+            routeProfile
+            ->defaultOutboundID;
+
+
+        row.rules.reserve(
+            static_cast<size_t>(
                 routeProfile
-                ->name
-                .toStdString(),
-
-                routeProfile
-                ->defaultOutboundID))
-            {
-                return false;
-            }
-        }
+                ->Rules
+                .size()
+                )
+        );
 
 
-        int ruleOrder =
-            0;
-
+        // =========================================================
+        // Serialize every rule before entering SQLite transaction.
+        //
+        // This keeps transaction duration short.
+        // =========================================================
 
         for (const auto& rule :
             routeProfile->Rules)
@@ -432,143 +410,258 @@ namespace Configs {
             {
                 continue;
             }
-            // Serialize QList<QString> fields to JSON
-            QJsonArray inboundArray = QListStr2QJsonArray(rule->inbound);
-            QJsonArray domainArray = QListStr2QJsonArray(rule->domain);
-            QJsonArray domainSuffixArray = QListStr2QJsonArray(rule->domain_suffix);
-            QJsonArray domainKeywordArray = QListStr2QJsonArray(rule->domain_keyword);
-            QJsonArray domainRegexArray = QListStr2QJsonArray(rule->domain_regex);
-            QJsonArray sourceIpCidrArray = QListStr2QJsonArray(rule->source_ip_cidr);
-            QJsonArray ipCidrArray = QListStr2QJsonArray(rule->ip_cidr);
-            QJsonArray sourcePortArray = QListStr2QJsonArray(rule->source_port);
-            QJsonArray sourcePortRangeArray = QListStr2QJsonArray(rule->source_port_range);
-            QJsonArray portArray = QListStr2QJsonArray(rule->port);
-            QJsonArray portRangeArray = QListStr2QJsonArray(rule->port_range);
-            QJsonArray processNameArray = QListStr2QJsonArray(rule->process_name);
-            QJsonArray processPathArray = QListStr2QJsonArray(rule->process_path);
-            QJsonArray processPathRegexArray = QListStr2QJsonArray(rule->process_path_regex);
-            QJsonArray ruleSetArray = QListStr2QJsonArray(rule->rule_set);
-            QJsonArray sniffersArray = QListStr2QJsonArray(rule->sniffers);
-            QJsonArray wifiSsidArray = QListStr2QJsonArray(rule->wifi_ssid);
-            QJsonArray wifiBssidArray = QListStr2QJsonArray(rule->wifi_bssid);
-            
-            QString inboundJson = QString::fromUtf8(QJsonDocument(inboundArray).toJson(QJsonDocument::Compact));
-            QString domainJson = QString::fromUtf8(QJsonDocument(domainArray).toJson(QJsonDocument::Compact));
-            QString domainSuffixJson = QString::fromUtf8(QJsonDocument(domainSuffixArray).toJson(QJsonDocument::Compact));
-            QString domainKeywordJson = QString::fromUtf8(QJsonDocument(domainKeywordArray).toJson(QJsonDocument::Compact));
-            QString domainRegexJson = QString::fromUtf8(QJsonDocument(domainRegexArray).toJson(QJsonDocument::Compact));
-            QString sourceIpCidrJson = QString::fromUtf8(QJsonDocument(sourceIpCidrArray).toJson(QJsonDocument::Compact));
-            QString ipCidrJson = QString::fromUtf8(QJsonDocument(ipCidrArray).toJson(QJsonDocument::Compact));
-            QString sourcePortJson = QString::fromUtf8(QJsonDocument(sourcePortArray).toJson(QJsonDocument::Compact));
-            QString sourcePortRangeJson = QString::fromUtf8(QJsonDocument(sourcePortRangeArray).toJson(QJsonDocument::Compact));
-            QString portJson = QString::fromUtf8(QJsonDocument(portArray).toJson(QJsonDocument::Compact));
-            QString portRangeJson = QString::fromUtf8(QJsonDocument(portRangeArray).toJson(QJsonDocument::Compact));
-            QString processNameJson = QString::fromUtf8(QJsonDocument(processNameArray).toJson(QJsonDocument::Compact));
-            QString processPathJson = QString::fromUtf8(QJsonDocument(processPathArray).toJson(QJsonDocument::Compact));
-            QString processPathRegexJson = QString::fromUtf8(QJsonDocument(processPathRegexArray).toJson(QJsonDocument::Compact));
-            QString ruleSetJson = QString::fromUtf8(QJsonDocument(ruleSetArray).toJson(QJsonDocument::Compact));
-            QString sniffersJson = QString::fromUtf8(QJsonDocument(sniffersArray).toJson(QJsonDocument::Compact));
-            QString wifiSsidJson = QString::fromUtf8(QJsonDocument(wifiSsidArray).toJson(QJsonDocument::Compact));
-            QString wifiBssidJson = QString::fromUtf8(QJsonDocument(wifiBssidArray).toJson(QJsonDocument::Compact));
-            
-            const bool inserted =
-                db.exec(
-                    R"(
-                    INSERT INTO route_rules
-                    (
-                        route_profile_id,
-                        rule_order,
-                        name,
-                        type,
-                        ip_version,
-                        network,
-                        protocol,
-                        inbound_json,
-                        domain_json,
-                        domain_suffix_json,
-                        domain_keyword_json,
-                        domain_regex_json,
-                        source_ip_cidr_json,
-                        source_ip_is_private,
-                        ip_cidr_json,
-                        ip_is_private,
-                        source_port_json,
-                        source_port_range_json,
-                        port_json,
-                        port_range_json,
-                        process_name_json,
-                        process_path_json,
-                        process_path_regex_json,
-                        rule_set_json,
-                        invert,
-                        outbound_id,
-                        action,
-                        reject_method,
-                        no_drop,
-                        override_address,
-                        override_port,
-                        sniffers_json,
-                        sniff_override_dest,
-                        strategy,
-                        wifi_ssid_json,
-                        wifi_bssid_json
-                    )
-                    VALUES
-                    (
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?
-                    )
-                    )",
 
-                    id,
-                    ruleOrder++,
-                    rule->name.toStdString(),
-                    rule->type,
-                    rule->ip_version.toStdString(),
-                    rule->network.toStdString(),
-                    rule->protocol.toStdString(),
-                    inboundJson.toStdString(),
-                    domainJson.toStdString(),
-                    domainSuffixJson.toStdString(),
-                    domainKeywordJson.toStdString(),
-                    domainRegexJson.toStdString(),
-                    sourceIpCidrJson.toStdString(),
-                    rule->source_ip_is_private ? 1 : 0,
-                    ipCidrJson.toStdString(),
-                    rule->ip_is_private ? 1 : 0,
-                    sourcePortJson.toStdString(),
-                    sourcePortRangeJson.toStdString(),
-                    portJson.toStdString(),
-                    portRangeJson.toStdString(),
-                    processNameJson.toStdString(),
-                    processPathJson.toStdString(),
-                    processPathRegexJson.toStdString(),
-                    ruleSetJson.toStdString(),
-                    rule->invert ? 1 : 0,
-                    rule->outboundID,
-                    rule->action.toStdString(),
-                    rule->rejectMethod.toStdString(),
-                    rule->no_drop ? 1 : 0,
-                    rule->override_address.toStdString(),
-                    rule->override_port.toStdString(),
-                    sniffersJson.toStdString(),
-                    rule->sniffOverrideDest ? 1 : 0,
-                    rule->strategy.toStdString(),
-                    wifiSsidJson.toStdString(),
-                    wifiBssidJson.toStdString()
-                    );
-    
-    
-                if (!inserted)
-                {
-                    return false;
-                }
+
+            RouteRuleInsertRow dbRule;
+
+
+            // -----------------------------------------------------
+            // Basic fields
+            // -----------------------------------------------------
+
+            dbRule.name =
+                rule
+                ->name
+                .toStdString();
+
+
+            dbRule.type =
+                rule->type;
+
+
+            dbRule.ip_version =
+                rule
+                ->ip_version
+                .toStdString();
+
+
+            dbRule.network =
+                rule
+                ->network
+                .toStdString();
+
+
+            dbRule.protocol =
+                rule
+                ->protocol
+                .toStdString();
+
+
+            // -----------------------------------------------------
+            // Match lists
+            // -----------------------------------------------------
+
+            dbRule.inbound_json =
+                serializeStringList(
+                    rule->inbound
+                );
+
+
+            dbRule.domain_json =
+                serializeStringList(
+                    rule->domain
+                );
+
+
+            dbRule.domain_suffix_json =
+                serializeStringList(
+                    rule->domain_suffix
+                );
+
+
+            dbRule.domain_keyword_json =
+                serializeStringList(
+                    rule->domain_keyword
+                );
+
+
+            dbRule.domain_regex_json =
+                serializeStringList(
+                    rule->domain_regex
+                );
+
+
+            dbRule.source_ip_cidr_json =
+                serializeStringList(
+                    rule->source_ip_cidr
+                );
+
+
+            dbRule.source_ip_is_private =
+                rule->source_ip_is_private;
+
+
+            dbRule.ip_cidr_json =
+                serializeStringList(
+                    rule->ip_cidr
+                );
+
+
+            dbRule.ip_is_private =
+                rule->ip_is_private;
+
+
+            dbRule.source_port_json =
+                serializeStringList(
+                    rule->source_port
+                );
+
+
+            dbRule.source_port_range_json =
+                serializeStringList(
+                    rule->source_port_range
+                );
+
+
+            dbRule.port_json =
+                serializeStringList(
+                    rule->port
+                );
+
+
+            dbRule.port_range_json =
+                serializeStringList(
+                    rule->port_range
+                );
+
+
+            dbRule.process_name_json =
+                serializeStringList(
+                    rule->process_name
+                );
+
+
+            dbRule.process_path_json =
+                serializeStringList(
+                    rule->process_path
+                );
+
+
+            dbRule.process_path_regex_json =
+                serializeStringList(
+                    rule->process_path_regex
+                );
+
+
+            dbRule.rule_set_json =
+                serializeStringList(
+                    rule->rule_set
+                );
+
+
+            // -----------------------------------------------------
+            // Behavior
+            // -----------------------------------------------------
+
+            dbRule.invert =
+                rule->invert;
+
+
+            dbRule.outbound_id =
+                rule->outboundID;
+
+
+            dbRule.action =
+                rule
+                ->action
+                .toStdString();
+
+
+            dbRule.reject_method =
+                rule
+                ->rejectMethod
+                .toStdString();
+
+
+            dbRule.no_drop =
+                rule->no_drop;
+
+
+            // -----------------------------------------------------
+            // Route options
+            // -----------------------------------------------------
+
+            dbRule.override_address =
+                rule
+                ->override_address
+                .toStdString();
+
+
+            dbRule.override_port =
+                rule
+                ->override_port
+                .toStdString();
+
+
+            // -----------------------------------------------------
+            // Sniff
+            // -----------------------------------------------------
+
+            dbRule.sniffers_json =
+                serializeStringList(
+                    rule->sniffers
+                );
+
+
+            dbRule.sniff_override_dest =
+                rule->sniffOverrideDest;
+
+
+            // -----------------------------------------------------
+            // Resolve
+            // -----------------------------------------------------
+
+            dbRule.strategy =
+                rule
+                ->strategy
+                .toStdString();
+
+
+            // -----------------------------------------------------
+            // Wi-Fi
+            // -----------------------------------------------------
+
+            dbRule.wifi_ssid_json =
+                serializeStringList(
+                    rule->wifi_ssid
+                );
+
+
+            dbRule.wifi_bssid_json =
+                serializeStringList(
+                    rule->wifi_bssid
+                );
+
+
+            // -----------------------------------------------------
+            // Publish immutable DB row.
+            // -----------------------------------------------------
+
+            row.rules.push_back(
+                std::move(
+                    dbRule
+                )
+            );
         }
-    
-    
-        return true;
+
+
+        // =========================================================
+        // ONE atomic DB operation.
+        //
+        // Database guarantees:
+        //
+        // route_profiles UPSERT
+        //       +
+        // old route_rules DELETE
+        //       +
+        // every new rule INSERT
+        //
+        // either all commit or all rollback.
+        // =========================================================
+
+        return db.saveRouteProfileAtomic(
+            row
+        );
     }
 
     QJsonObject RoutesRepo::ruleJsonFromRow(SQLite::Statement& stmt, int baseCol) const {

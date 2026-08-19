@@ -70,6 +70,76 @@ namespace Configs
         int traffic_sort_by = 0;
         int test_items_to_show = 0;
     };
+
+    struct RouteRuleInsertRow
+    {
+        std::string name;
+
+        int type = 0;
+
+        std::string ip_version;
+        std::string network;
+        std::string protocol;
+
+        std::string inbound_json;
+        std::string domain_json;
+        std::string domain_suffix_json;
+        std::string domain_keyword_json;
+        std::string domain_regex_json;
+
+        std::string source_ip_cidr_json;
+        bool source_ip_is_private = false;
+
+        std::string ip_cidr_json;
+        bool ip_is_private = false;
+
+        std::string source_port_json;
+        std::string source_port_range_json;
+
+        std::string port_json;
+        std::string port_range_json;
+
+        std::string process_name_json;
+        std::string process_path_json;
+        std::string process_path_regex_json;
+
+        std::string rule_set_json;
+
+        bool invert = false;
+
+        int outbound_id = -2;
+
+        std::string action;
+        std::string reject_method;
+
+        bool no_drop = false;
+
+        std::string override_address;
+        std::string override_port;
+
+        std::string sniffers_json;
+
+        bool sniff_override_dest = false;
+
+        std::string strategy;
+
+        std::string wifi_ssid_json;
+        std::string wifi_bssid_json;
+    };
+
+
+    struct RouteProfileSaveRow
+    {
+        int id = -1;
+
+        std::string name;
+
+        int default_outbound_id = -1;
+
+        std::vector<RouteRuleInsertRow>
+            rules;
+    };
+
     struct BackupParts 
     {
         bool profiles = false;
@@ -493,6 +563,11 @@ namespace Configs
         [[nodiscard]]
         bool insertGroupAtomic(
             const GroupInsertRow& row
+        );
+
+        [[nodiscard]]
+        bool saveRouteProfileAtomic(
+            const RouteProfileSaveRow& row
         );
 
         [[nodiscard]]
