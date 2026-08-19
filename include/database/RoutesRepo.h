@@ -34,6 +34,14 @@ namespace Configs {
         // Helper to deserialize RouteProfile from JSON
         std::shared_ptr<RouteProfile> routeProfileFromJson(const QJsonObject& json) const;
         
+        // Freeze RouteProfile + RouteRules into database-only data.
+        [[nodiscard]]
+        bool buildSaveRow(
+            const RouteProfile* routeProfile,
+            int id,
+            RouteProfileSaveRow& output
+        ) const;
+
         // Save route profile to database (internal helper)
         [[nodiscard]]
         bool saveToDatabase(

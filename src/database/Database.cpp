@@ -450,23 +450,517 @@ namespace Configs {
         }
     }
 
-    bool Database::saveRouteProfileAtomic(
+    void Database::writeRouteProfile0(
         const RouteProfileSaveRow& row)
     {
         // =========================================================
-        // Validation
+        // PRECONDITIONS
+        //
+        // Caller:
+        //
+        //   1. owns db_mutex;
+        //   2. owns active SQLite transaction.
+        //
+        // This method MUST NOT:
+        //
+        //   - catch SQLite exceptions;
+        //   - commit;
+        //   - rollback;
+        //   - start another transaction.
+        //
+        // Exceptions intentionally propagate to transaction owner.
         // =========================================================
 
+
+        if (row.id < 0)
+        {
+            throw std::invalid_argument(
+                "Database::writeRouteProfile0: "
+                "invalid RouteProfile ID"
+            );
+        }
+
+
+        // =========================================================
+        // UPSERT route profile
+        // =========================================================
+
+        SQLite::Statement profileStmt(
+            db,
+
+            R"(
+        INSERT INTO route_profiles
+        (
+            id,
+            name,
+            default_outbound_id
+        )
+        VALUES
+        (
+            ?,
+            ?,
+            ?
+        )
+
+        ON CONFLICT(id)
+        DO UPDATE SET
+
+            name =
+                excluded.name,
+
+            default_outbound_id =
+                excluded.default_outbound_id,
+
+            updated_at =
+                strftime('%s', 'now')
+        )"
+        );
+
+
+        profileStmt.bind(
+            1,
+            row.id
+        );
+
+
+        profileStmt.bind(
+            2,
+            row.name
+        );
+
+
+        profileStmt.bind(
+            3,
+            row.default_outbound_id
+        );
+
+
+        profileStmt.exec();
+
+
+        // =========================================================
+        // Delete old rules.
+        //
+        // This is safe because the DELETE belongs to the caller's
+        // transaction. If a later INSERT fails, DELETE is rolled
+        // back together with everything else.
+        // =========================================================
+
+        SQLite::Statement deleteRulesStmt(
+            db,
+
+            "DELETE FROM route_rules "
+            "WHERE route_profile_id = ?"
+        );
+
+
+        deleteRulesStmt.bind(
+            1,
+            row.id
+        );
+
+
+        deleteRulesStmt.exec();
+
+
+        // =========================================================
+        // Prepared RouteRule INSERT
+        // =========================================================
+
+        SQLite::Statement ruleStmt(
+            db,
+
+            R"(
+        INSERT INTO route_rules
+        (
+            route_profile_id,
+            rule_order,
+
+            name,
+            type,
+
+            ip_version,
+            network,
+            protocol,
+
+            inbound_json,
+            domain_json,
+            domain_suffix_json,
+            domain_keyword_json,
+            domain_regex_json,
+
+            source_ip_cidr_json,
+            source_ip_is_private,
+
+            ip_cidr_json,
+            ip_is_private,
+
+            source_port_json,
+            source_port_range_json,
+
+            port_json,
+            port_range_json,
+
+            process_name_json,
+            process_path_json,
+            process_path_regex_json,
+
+            rule_set_json,
+
+            invert,
+
+            outbound_id,
+
+            action,
+            reject_method,
+
+            no_drop,
+
+            override_address,
+            override_port,
+
+            sniffers_json,
+
+            sniff_override_dest,
+
+            strategy,
+
+            wifi_ssid_json,
+            wifi_bssid_json
+        )
+
+        VALUES
+        (
+            ?, ?,
+
+            ?, ?,
+
+            ?, ?, ?,
+
+            ?, ?, ?, ?, ?,
+
+            ?, ?,
+
+            ?, ?,
+
+            ?, ?,
+
+            ?, ?,
+
+            ?, ?, ?,
+
+            ?,
+
+            ?,
+
+            ?,
+
+            ?, ?,
+
+            ?,
+
+            ?, ?,
+
+            ?,
+
+            ?,
+
+            ?,
+
+            ?, ?
+        )
+        )"
+        );
+
+
+        int ruleOrder =
+            0;
+
+
+        for (const auto& rule :
+            row.rules)
+        {
+            int index =
+                1;
+
+
+            // =====================================================
+            // Route profile identity
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                row.id
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                ruleOrder++
+            );
+
+
+            // =====================================================
+            // Basic
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.name
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.type
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.ip_version
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.network
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.protocol
+            );
+
+
+            // =====================================================
+            // Match lists
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.inbound_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.domain_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.domain_suffix_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.domain_keyword_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.domain_regex_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.source_ip_cidr_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.source_ip_is_private
+                ? 1
+                : 0
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.ip_cidr_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.ip_is_private
+                ? 1
+                : 0
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.source_port_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.source_port_range_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.port_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.port_range_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.process_name_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.process_path_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.process_path_regex_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.rule_set_json
+            );
+
+
+            // =====================================================
+            // Behaviour
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.invert
+                ? 1
+                : 0
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.outbound_id
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.action
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.reject_method
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.no_drop
+                ? 1
+                : 0
+            );
+
+
+            // =====================================================
+            // Route options
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.override_address
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.override_port
+            );
+
+
+            // =====================================================
+            // Sniff
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.sniffers_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.sniff_override_dest
+                ? 1
+                : 0
+            );
+
+
+            // =====================================================
+            // Resolve
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.strategy
+            );
+
+
+            // =====================================================
+            // Wi-Fi
+            // =====================================================
+
+            ruleStmt.bind(
+                index++,
+                rule.wifi_ssid_json
+            );
+
+
+            ruleStmt.bind(
+                index++,
+                rule.wifi_bssid_json
+            );
+
+
+            // =====================================================
+            // Execute rule
+            // =====================================================
+
+            ruleStmt.exec();
+
+
+            ruleStmt.reset();
+        }
+    }
+
+    bool Database::saveRouteProfileAtomic(
+        const RouteProfileSaveRow& row)
+    {
         if (row.id < 0)
         {
             return false;
         }
 
-
-        // =========================================================
-        // Serialize the complete operation on the single SQLite
-        // connection.
-        // =========================================================
 
         std::lock_guard<
             std::recursive_mutex
@@ -477,527 +971,24 @@ namespace Configs {
 
         try
         {
-            // =====================================================
-            // ONE transaction for:
-            //
-            // 1. INSERT / UPDATE route_profiles
-            // 2. DELETE old route_rules
-            // 3. INSERT all new route_rules
-            //
-            // If ANY statement fails, SQLite::Transaction rolls
-            // everything back.
-            // =====================================================
-
             SQLite::Transaction transaction(
                 db,
                 SQLite::TransactionBehavior::IMMEDIATE
             );
 
 
-            // =====================================================
-            // UPSERT RouteProfile
-            //
-            // This replaces the old:
-            //
-            // SELECT id ...
-            // if exists -> UPDATE
-            // else       -> INSERT
-            //
-            // with a single SQL operation.
-            // =====================================================
-
-            SQLite::Statement profileStmt(
-                db,
-
-                R"(
-            INSERT INTO route_profiles
-            (
-                id,
-                name,
-                default_outbound_id
-            )
-            VALUES
-            (
-                ?,
-                ?,
-                ?
-            )
-
-            ON CONFLICT(id)
-            DO UPDATE SET
-
-                name =
-                    excluded.name,
-
-                default_outbound_id =
-                    excluded.default_outbound_id,
-
-                updated_at =
-                    strftime('%s', 'now')
-            )"
+            // Perform complete profile write inside this transaction.
+            writeRouteProfile0(
+                row
             );
 
-
-            profileStmt.bind(
-                1,
-                row.id
-            );
-
-
-            profileStmt.bind(
-                2,
-                row.name
-            );
-
-
-            profileStmt.bind(
-                3,
-                row.default_outbound_id
-            );
-
-
-            profileStmt.exec();
-
-
-            // =====================================================
-            // Remove old rules.
-            //
-            // IMPORTANT:
-            // This DELETE is inside the SAME transaction as all
-            // subsequent INSERTs.
-            //
-            // Therefore, if inserting rule N fails, this DELETE is
-            // rolled back too and the old rules remain intact.
-            // =====================================================
-
-            SQLite::Statement deleteRulesStmt(
-                db,
-
-                "DELETE FROM route_rules "
-                "WHERE route_profile_id = ?"
-            );
-
-
-            deleteRulesStmt.bind(
-                1,
-                row.id
-            );
-
-
-            deleteRulesStmt.exec();
-
-
-            // =====================================================
-            // Prepared INSERT for all RouteRules
-            //
-            // Prepare SQL only once. Reuse it for every rule.
-            // =====================================================
-
-            SQLite::Statement ruleStmt(
-                db,
-
-                R"(
-            INSERT INTO route_rules
-            (
-                route_profile_id,
-                rule_order,
-
-                name,
-                type,
-
-                ip_version,
-                network,
-                protocol,
-
-                inbound_json,
-                domain_json,
-                domain_suffix_json,
-                domain_keyword_json,
-                domain_regex_json,
-
-                source_ip_cidr_json,
-                source_ip_is_private,
-
-                ip_cidr_json,
-                ip_is_private,
-
-                source_port_json,
-                source_port_range_json,
-
-                port_json,
-                port_range_json,
-
-                process_name_json,
-                process_path_json,
-                process_path_regex_json,
-
-                rule_set_json,
-
-                invert,
-
-                outbound_id,
-
-                action,
-                reject_method,
-
-                no_drop,
-
-                override_address,
-                override_port,
-
-                sniffers_json,
-
-                sniff_override_dest,
-
-                strategy,
-
-                wifi_ssid_json,
-                wifi_bssid_json
-            )
-
-            VALUES
-            (
-                ?, ?,
-
-                ?, ?,
-
-                ?, ?, ?,
-
-                ?, ?, ?, ?, ?,
-
-                ?, ?,
-
-                ?, ?,
-
-                ?, ?,
-
-                ?, ?,
-
-                ?, ?, ?,
-
-                ?,
-
-                ?,
-
-                ?,
-
-                ?, ?,
-
-                ?,
-
-                ?, ?,
-
-                ?,
-
-                ?,
-
-                ?,
-
-                ?, ?
-            )
-            )"
-            );
-
-
-            int ruleOrder =
-                0;
-
-
-            for (const auto& rule :
-                row.rules)
-            {
-                int index =
-                    1;
-
-
-                // -------------------------------------------------
-                // Identity / order
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    row.id
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    ruleOrder++
-                );
-
-
-                // -------------------------------------------------
-                // Basic data
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.name
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.type
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.ip_version
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.network
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.protocol
-                );
-
-
-                // -------------------------------------------------
-                // Match lists
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.inbound_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.domain_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.domain_suffix_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.domain_keyword_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.domain_regex_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.source_ip_cidr_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.source_ip_is_private
-                    ? 1
-                    : 0
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.ip_cidr_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.ip_is_private
-                    ? 1
-                    : 0
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.source_port_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.source_port_range_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.port_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.port_range_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.process_name_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.process_path_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.process_path_regex_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.rule_set_json
-                );
-
-
-                // -------------------------------------------------
-                // Behavior
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.invert
-                    ? 1
-                    : 0
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.outbound_id
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.action
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.reject_method
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.no_drop
-                    ? 1
-                    : 0
-                );
-
-
-                // -------------------------------------------------
-                // Route options
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.override_address
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.override_port
-                );
-
-
-                // -------------------------------------------------
-                // Sniff
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.sniffers_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.sniff_override_dest
-                    ? 1
-                    : 0
-                );
-
-
-                // -------------------------------------------------
-                // Resolve
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.strategy
-                );
-
-
-                // -------------------------------------------------
-                // Wi-Fi
-                // -------------------------------------------------
-
-                ruleStmt.bind(
-                    index++,
-                    rule.wifi_ssid_json
-                );
-
-
-                ruleStmt.bind(
-                    index++,
-                    rule.wifi_bssid_json
-                );
-
-
-                // -------------------------------------------------
-                // Execute this rule
-                // -------------------------------------------------
-
-                ruleStmt.exec();
-
-
-                // Reset prepared statement so it can be executed
-                // again for the next RouteRule.
-                ruleStmt.reset();
-            }
-
-
-            // =====================================================
-            // Nothing failed.
-            //
-            // route_profile + ALL rules become visible atomically.
-            // =====================================================
 
             transaction.commit();
 
 
-            // =====================================================
-            // WAL accounting only AFTER successful COMMIT.
-            //
-            // 1 profile upsert
-            // 1 delete old rules
-            // N rule inserts
-            // =====================================================
-
+            // 1 UPSERT profile
+            // 1 DELETE old rules
+            // N INSERT rules
             maybeCheckpoint(
                 static_cast<int>(
                     2
@@ -1011,22 +1002,220 @@ namespace Configs {
         }
         catch (std::exception& e)
         {
-            // =====================================================
-            // No commit() was performed.
-            //
-            // SQLite::Transaction destructor performs ROLLBACK.
-            //
-            // This restores:
-            //
-            //   route_profiles
-            //   +
-            //   old route_rules
-            //
-            // to their state before this function started.
-            // =====================================================
+            // SQLite::Transaction automatically rolls back because
+            // commit() was not reached.
 
             NotifyError(
                 "Database::saveRouteProfileAtomic",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
+    bool Database::replaceRouteProfilesAtomic(
+        const std::vector<RouteProfileSaveRow>& rows)
+    {
+        // =========================================================
+        // Strict validation BEFORE entering SQLite transaction.
+        // =========================================================
+
+        std::set<int>
+            suppliedIds;
+
+
+        for (const auto& row :
+            rows)
+        {
+            if (row.id < 0)
+            {
+                MW_show_log(
+                    "Database::replaceRouteProfilesAtomic: "
+                    "invalid RouteProfile ID"
+                );
+
+                return false;
+            }
+
+
+            const auto [
+                it,
+                inserted
+            ] =
+                suppliedIds.insert(
+                    row.id
+                );
+
+
+            if (!inserted)
+            {
+                MW_show_log(
+                    "Database::replaceRouteProfilesAtomic: "
+                    "duplicate RouteProfile ID "
+                    +
+                    Int2String(
+                        row.id
+                    )
+                );
+
+                return false;
+            }
+        }
+
+
+        // =========================================================
+        // Serialize ALL database access for the complete operation.
+        // =========================================================
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        try
+        {
+            // =====================================================
+            // ONE transaction for the ENTIRE replacement.
+            // =====================================================
+
+            SQLite::Transaction transaction(
+                db,
+                SQLite::TransactionBehavior::IMMEDIATE
+            );
+
+
+            int committedWrites =
+                0;
+
+
+            // =====================================================
+            // UPSERT every supplied RouteProfile and replace all of
+            // its rules.
+            //
+            // writeRouteProfile0() does NOT create nested
+            // transactions.
+            // =====================================================
+
+            for (const auto& row :
+                rows)
+            {
+                writeRouteProfile0(
+                    row
+                );
+
+
+                committedWrites +=
+                    static_cast<int>(
+                        2
+                        +
+                        row.rules.size()
+                        );
+            }
+
+
+            // =====================================================
+            // Delete all profiles not present in the supplied list.
+            //
+            // route_rules disappear automatically because:
+            //
+            // FOREIGN KEY(route_profile_id)
+            //     REFERENCES route_profiles(id)
+            //     ON DELETE CASCADE
+            //
+            // IMPORTANT:
+            //
+            // IDs here are integers already validated by our own
+            // application. No user-controlled SQL text is used.
+            // =====================================================
+
+            if (suppliedIds.empty())
+            {
+                db.exec(
+                    "DELETE FROM route_profiles"
+                );
+            }
+            else
+            {
+                std::string sql =
+                    "DELETE FROM route_profiles "
+                    "WHERE id NOT IN (";
+
+
+                bool first =
+                    true;
+
+
+                for (const int id :
+                suppliedIds)
+                {
+                    if (!first)
+                    {
+                        sql += ",";
+                    }
+
+
+                    sql +=
+                        std::to_string(
+                            id
+                        );
+
+
+                    first =
+                        false;
+                }
+
+
+                sql += ")";
+
+
+                db.exec(
+                    sql
+                );
+            }
+
+
+            ++committedWrites;
+
+
+            // =====================================================
+            // ONLY NOW does the new complete routing set become
+            // visible.
+            // =====================================================
+
+            transaction.commit();
+
+
+            if (committedWrites > 0)
+            {
+                maybeCheckpoint(
+                    committedWrites
+                );
+            }
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            // =====================================================
+            // ANY failure above means no commit().
+            //
+            // SQLite::Transaction rolls EVERYTHING back:
+            //
+            // profile 1
+            // profile 2
+            // ...
+            // rules
+            // obsolete-profile deletes
+            //
+            // =====================================================
+
+            NotifyError(
+                "Database::replaceRouteProfilesAtomic",
                 e
             );
 

@@ -268,8 +268,35 @@ void DialogManageRoutes::accept() {
     Configs::dataManager->settingsRepo->fake_dns = ui->enable_fakeip->isChecked();
     Configs::dataManager->settingsRepo->enable_dns_routing = ui->enable_dns_routing->isChecked();
 
-    Configs::dataManager->routesRepo->UpdateRouteProfiles(chainList);
-    Configs::dataManager->settingsRepo->current_route_id = currentRoute->id;
+    const bool routesSaved =
+        Configs::dataManager
+        ->routesRepo
+        ->UpdateRouteProfiles(
+            chainList
+        );
+
+
+    if (!routesSaved)
+    {
+        MessageBoxWarning(
+            tr("Failed to save routing profiles"),
+            tr(
+                "The routing profiles could not be saved. "
+                "The previous routing configuration was preserved."
+            )
+        );
+
+
+        // Do NOT continue applying settings which depend on the new
+        // routing-profile state.
+        return;
+    }
+
+
+    Configs::dataManager
+        ->settingsRepo
+        ->current_route_id =
+        currentRoute->id;
 
     Configs::dataManager->settingsRepo->enable_dns_server = ui->dnshijack_enable->isChecked();
     Configs::dataManager->settingsRepo->dns_server_listen_port = ui->dnshijack_listenport->text().toInt();

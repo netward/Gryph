@@ -300,6 +300,19 @@ namespace Configs
                                          const std::vector<int>& pairs);
         void execBatchInsertProfilesChunk(const std::vector<ProfileInsertRow>& rows);
         void execBatchReplaceProfilesChunk(const std::vector<ProfileInsertRow>& rows);
+        // Writes one routing profile and all its rules.
+        //
+        // IMPORTANT:
+        // - assumes db_mutex is already locked;
+        // - assumes caller owns the SQLite transaction;
+        // - does NOT catch SQLite exceptions;
+        // - does NOT COMMIT;
+        // - does NOT call maybeCheckpoint().
+        //
+        // Any SQLite exception must propagate to the transaction owner.
+        void writeRouteProfile0(
+            const RouteProfileSaveRow& row
+        );
     public:
         
         Database(const std::string& path)
@@ -568,6 +581,11 @@ namespace Configs
         [[nodiscard]]
         bool saveRouteProfileAtomic(
             const RouteProfileSaveRow& row
+        );
+
+        [[nodiscard]]
+        bool replaceRouteProfilesAtomic(
+            const std::vector<RouteProfileSaveRow>& rows
         );
 
         [[nodiscard]]

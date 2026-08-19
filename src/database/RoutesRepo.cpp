@@ -311,9 +311,10 @@ namespace Configs {
         return routeProfile;
     }
 
-    bool RoutesRepo::saveToDatabase(
+    bool RoutesRepo::buildSaveRow(
         const RouteProfile* routeProfile,
-        int id) const
+        int id,
+        RouteProfileSaveRow& output) const
     {
         // =========================================================
         // Validation
@@ -659,6 +660,32 @@ namespace Configs {
         // either all commit or all rollback.
         // =========================================================
 
+        output =
+            std::move(
+                row
+            );
+
+
+        return true;
+    }
+
+    bool RoutesRepo::saveToDatabase(
+        const RouteProfile* routeProfile,
+        int id) const
+    {
+        RouteProfileSaveRow
+            row;
+
+
+        if (!buildSaveRow(
+            routeProfile,
+            id,
+            row))
+        {
+            return false;
+        }
+
+
         return db.saveRouteProfileAtomic(
             row
         );
@@ -789,6 +816,16 @@ namespace Configs {
         }
 
 
+        // =========================================================
+        // Serialize ALL RoutesRepo mutations.
+        // =========================================================
+
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
         if (routeProfile->id >= 0)
         {
             return false;
@@ -809,30 +846,35 @@ namespace Configs {
             newId;
 
 
-        // Persist FIRST.
+        // =========================================================
+        // DB first.
+        // =========================================================
+
         if (!saveToDatabase(
             routeProfile.get(),
             newId))
         {
-            routeProfile->id =
-                -1;
+            // Return object to unpublished state.
+            if (routeProfile->id ==
+                newId)
+            {
+                routeProfile->id =
+                    -1;
+            }
+
 
             return false;
         }
 
 
-        {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
+        // =========================================================
+        // Publish only after COMMIT.
+        // =========================================================
 
-
-            identityMap[newId] =
-                std::weak_ptr<RouteProfile>(
-                    routeProfile
-                );
-        }
+        identityMap[newId] =
+            std::weak_ptr<RouteProfile>(
+                routeProfile
+            );
 
 
         return true;
@@ -924,72 +966,81 @@ namespace Configs {
         >& routeProfiles)
     {
         // =========================================================
-        // PHASE 1
+        // Serialize the complete repository mutation.
         //
-        // Read currently persisted IDs.
+        // IMPORTANT:
         //
-        // Do this BEFORE taking RoutesRepo::mutex.
+        // Other RoutesRepo mutation methods should use the same
+        // lock order:
+        //
+        //      RoutesRepo::mutex
+        //              ↓
+        //      Database::db_mutex
+        //
         // =========================================================
 
-        QSet<int>
-            existingIds;
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
 
 
+        // =========================================================
+        // PHASE 1
+        //
+        // Strict input validation.
+        // =========================================================
+
+        QSet<const RouteProfile*>
+            uniqueObjects;
+
+
+        uniqueObjects.reserve(
+            routeProfiles.size()
+        );
+
+
+        for (const auto& routeProfile :
+            routeProfiles)
         {
-            auto query =
-                db.query(
-                    "SELECT id "
-                    "FROM route_profiles"
-                );
-
-
-            if (!query)
+            if (!routeProfile)
             {
                 MW_show_log(
                     "RoutesRepo::UpdateRouteProfiles: "
-                    "failed to read existing route profile IDs"
+                    "null RouteProfile in input"
                 );
 
                 return false;
             }
 
 
-            try
-            {
-                while (query->executeStep())
-                {
-                    existingIds.insert(
-                        query
-                        ->getColumn(0)
-                        .getInt()
-                    );
-                }
-            }
-            catch (const std::exception& e)
+            if (uniqueObjects.contains(
+                routeProfile.get()))
             {
                 MW_show_log(
                     "RoutesRepo::UpdateRouteProfiles: "
-                    "failed while reading existing IDs: "
-                    +
-                    QString::fromUtf8(
-                        e.what()
-                    )
+                    "duplicate RouteProfile object"
                 );
 
                 return false;
             }
+
+
+            uniqueObjects.insert(
+                routeProfile.get()
+            );
         }
 
 
         // =========================================================
-        // PHASE 2
+        // Keep track of IDs assigned during THIS operation.
         //
-        // Validate input.
+        // They are rolled back in memory when the DB transaction
+        // fails.
+        //
+        // The entity_ids counter itself is intentionally NOT
+        // decremented. Gaps in IDs are safe; reusing IDs isn't.
         // =========================================================
-
-        QSet<int>
-            newIds;
-
 
         struct AssignedNewId
         {
@@ -1010,56 +1061,51 @@ namespace Configs {
         );
 
 
-        // =========================================================
-        // PHASE 3
-        //
-        // Serialize RoutesRepo changes.
-        // =========================================================
-
-        std::lock_guard<std::mutex>
-            locker(
-                mutex
-            );
-
-
-        // =========================================================
-        // Persist every supplied RouteProfile.
-        // =========================================================
-
-        for (const auto& routeProfile :
-            routeProfiles)
-        {
-            if (!routeProfile)
+        const auto rollbackAssignedIds =
+            [&newlyAssigned]()
             {
-                MW_show_log(
-                    "RoutesRepo::UpdateRouteProfiles: "
-                    "null RouteProfile in input"
-                );
-
-                // Undo IDs which we assigned during this call.
                 for (auto it =
                     newlyAssigned.rbegin();
                     it !=
                     newlyAssigned.rend();
                     ++it)
                 {
-                    if (it->profile &&
-                        it->profile->id ==
+                    if (!it->profile)
+                    {
+                        continue;
+                    }
+
+
+                    // Roll back only the exact identity assigned by
+                    // this UpdateRouteProfiles() invocation.
+                    if (it->profile->id ==
                         it->id)
                     {
                         it->profile->id =
                             -1;
                     }
                 }
-
-                return false;
-            }
+            };
 
 
-            // =====================================================
-            // Allocate ID for a new profile.
-            // =====================================================
+        // =========================================================
+        // PHASE 2
+        //
+        // Assign IDs to new profiles and check uniqueness.
+        // =========================================================
 
+        QSet<int>
+            suppliedIds;
+
+
+        suppliedIds.reserve(
+            routeProfiles.size()
+        );
+
+
+        for (const auto& routeProfile :
+            routeProfiles)
+        {
             if (routeProfile->id < 0)
             {
                 const int newId =
@@ -1074,20 +1120,7 @@ namespace Configs {
                     );
 
 
-                    for (auto it =
-                        newlyAssigned.rbegin();
-                        it !=
-                        newlyAssigned.rend();
-                        ++it)
-                    {
-                        if (it->profile &&
-                            it->profile->id ==
-                            it->id)
-                        {
-                            it->profile->id =
-                                -1;
-                        }
-                    }
+                    rollbackAssignedIds();
 
 
                     return false;
@@ -1111,176 +1144,171 @@ namespace Configs {
                 routeProfile->id;
 
 
-            // =====================================================
-            // Duplicate IDs in input are invalid.
-            // =====================================================
+            if (id < 0)
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "invalid RouteProfile ID"
+                );
 
-            if (newIds.contains(
+
+                rollbackAssignedIds();
+
+
+                return false;
+            }
+
+
+            if (suppliedIds.contains(
                 id))
             {
                 MW_show_log(
                     "RoutesRepo::UpdateRouteProfiles: "
                     "duplicate RouteProfile ID "
                     +
-                    Int2String(id)
+                    Int2String(
+                        id
+                    )
                 );
 
 
-                for (auto it =
-                    newlyAssigned.rbegin();
-                    it !=
-                    newlyAssigned.rend();
-                    ++it)
-                {
-                    if (it->profile &&
-                        it->profile->id ==
-                        it->id)
-                    {
-                        it->profile->id =
-                            -1;
-                    }
-                }
+                rollbackAssignedIds();
 
 
                 return false;
             }
 
 
-            newIds.insert(
+            suppliedIds.insert(
                 id
             );
-
-
-            // =====================================================
-            // Persist FIRST.
-            //
-            // This assumes saveToDatabase() has already been changed
-            // from void -> bool as described in the RoutesRepo
-            // migration.
-            // =====================================================
-
-            if (!saveToDatabase(
-                routeProfile.get(),
-                id))
-            {
-                MW_show_log(
-                    "RoutesRepo::UpdateRouteProfiles: "
-                    "failed to persist RouteProfile "
-                    +
-                    Int2String(id)
-                );
-
-
-                // Roll back only IDs assigned in memory.
-                //
-                // NOTE:
-                // This does NOT yet make the complete multi-profile
-                // DB operation atomic. That will require one SQLite
-                // transaction around the complete update.
-                for (auto it =
-                    newlyAssigned.rbegin();
-                    it !=
-                    newlyAssigned.rend();
-                    ++it)
-                {
-                    if (it->profile &&
-                        it->profile->id ==
-                        it->id)
-                    {
-                        it->profile->id =
-                            -1;
-                    }
-                }
-
-
-                return false;
-            }
         }
 
 
         // =========================================================
-        // Determine obsolete profiles.
+        // PHASE 3
+        //
+        // Freeze ALL RouteProfiles into DB-only values.
+        //
+        // Do this BEFORE opening the SQLite transaction.
+        //
+        // Therefore JSON conversion and std::string allocations
+        // don't keep the SQLite write transaction open.
         // =========================================================
 
-        std::vector<int>
-            toDelete;
+        std::vector<RouteProfileSaveRow>
+            rows;
 
 
-        toDelete.reserve(
+        rows.reserve(
             static_cast<size_t>(
-                existingIds.size()
+                routeProfiles.size()
                 )
         );
 
 
-        for (const int id :
-        existingIds)
+        for (const auto& routeProfile :
+            routeProfiles)
         {
-            if (!newIds.contains(
-                id))
-            {
-                toDelete.push_back(
-                    id
-                );
-            }
-        }
+            RouteProfileSaveRow
+                row;
 
 
-        // =========================================================
-        // Delete obsolete persistent rows BEFORE changing cache.
-        // =========================================================
-
-        if (!toDelete.empty())
-        {
-            if (!db.execDeleteByIdIn(
-                "route_profiles",
-                "id",
-                toDelete))
+            if (!buildSaveRow(
+                routeProfile.get(),
+                routeProfile->id,
+                row))
             {
                 MW_show_log(
                     "RoutesRepo::UpdateRouteProfiles: "
-                    "failed to delete obsolete route profiles"
+                    "failed to serialize RouteProfile "
+                    +
+                    Int2String(
+                        routeProfile->id
+                    )
                 );
+
+
+                rollbackAssignedIds();
 
 
                 return false;
             }
+
+
+            rows.push_back(
+                std::move(
+                    row
+                )
+            );
         }
 
 
         // =========================================================
         // PHASE 4
         //
-        // DB operations succeeded.
+        // ONE SQLite transaction for ALL RouteProfiles.
         //
-        // Publish identity map changes.
+        // Database::replaceRouteProfilesAtomic performs:
+        //
+        //      BEGIN IMMEDIATE
+        //
+        //      profile 1 + rules
+        //      profile 2 + rules
+        //      ...
+        //
+        //      DELETE obsolete profiles
+        //
+        //      COMMIT
+        //
+        // Any error => complete ROLLBACK.
         // =========================================================
+
+        const bool persisted =
+            db.replaceRouteProfilesAtomic(
+                rows
+            );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "RoutesRepo::UpdateRouteProfiles: "
+                "atomic database replacement failed"
+            );
+
+
+            rollbackAssignedIds();
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // PHASE 5
+        //
+        // SQLite COMMIT succeeded.
+        //
+        // Replace repository identity map only NOW.
+        //
+        // Because UpdateRouteProfiles means "replace the complete
+        // routing profile set", clearing the map is simpler and safer
+        // than trying to calculate obsolete cache entries separately.
+        // =========================================================
+
+        identityMap.clear();
+
 
         for (const auto& routeProfile :
             routeProfiles)
         {
-            if (!routeProfile ||
-                routeProfile->id < 0)
-            {
-                continue;
-            }
-
-
             identityMap[
                 routeProfile->id
             ] =
                 std::weak_ptr<RouteProfile>(
                     routeProfile
                 );
-        }
-
-
-        for (const int id :
-        toDelete)
-        {
-            identityMap.erase(
-                id
-            );
         }
 
 
@@ -1459,16 +1487,31 @@ namespace Configs {
     bool RoutesRepo::Save(
         const std::shared_ptr<RouteProfile>& routeProfile)
     {
-        if (!routeProfile ||
-            routeProfile->id < 0)
+        if (!routeProfile)
         {
             return false;
         }
 
 
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
         const int id =
             routeProfile->id;
 
+
+        if (id < 0)
+        {
+            return false;
+        }
+
+
+        // =========================================================
+        // Persist first while repository mutation is serialized.
+        // =========================================================
 
         if (!saveToDatabase(
             routeProfile.get(),
@@ -1478,18 +1521,14 @@ namespace Configs {
         }
 
 
-        {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
+        // =========================================================
+        // SQLite COMMIT succeeded.
+        // =========================================================
 
-
-            identityMap[id] =
-                std::weak_ptr<RouteProfile>(
-                    routeProfile
-                );
-        }
+        identityMap[id] =
+            std::weak_ptr<RouteProfile>(
+                routeProfile
+            );
 
 
         return true;
