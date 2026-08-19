@@ -12,7 +12,8 @@
 #include "include/global/Configs.hpp"
 #include "include/ui/MainWindow.h"
 
-namespace Configs {
+namespace Configs 
+{
     GroupsRepo::GroupsRepo(
         Database& database)
         :
@@ -679,106 +680,311 @@ namespace Configs {
     bool GroupsRepo::AddGroup(
         std::shared_ptr<Group>& group)
     {
-        if (!group) {
+        // =========================================================
+        // Validation
+        // =========================================================
+
+        if (!group)
+        {
+            MW_show_log(
+                "GroupsRepo::AddGroup: "
+                "null Group"
+            );
+
             return false;
         }
 
 
-        // -------------------------------------------------
-        // Check current Group state
-        // -------------------------------------------------
+        // =========================================================
+        // AddGroup() is only for a new unpublished Group.
+        // =========================================================
 
         {
-            const auto snapshot =
+            const GroupSnapshot current =
                 group->Snapshot();
 
-            if (snapshot.id >= 0) {
+
+            if (current.id >= 0)
+            {
+                MW_show_log(
+                    "GroupsRepo::AddGroup: "
+                    "Group is already published"
+                );
+
                 return false;
             }
         }
 
 
-        // -------------------------------------------------
-        // Allocate ID.
+        // =========================================================
+        // Reserve unique ID.
         //
-        // Database serializes this internally.
-        // -------------------------------------------------
+        // NewGroupID() uses SQLite UPDATE ... RETURNING and therefore
+        // provides a unique ID even when several threads create
+        // groups concurrently.
+        //
+        // A failed AddGroup() may leave a gap in the ID sequence.
+        // That is intentional and harmless. IDs are identities,
+        // not contiguous array indices.
+        // =========================================================
 
         const int newId =
             NewGroupID();
 
 
-        if (newId <= 0) {
+        if (newId <= 0)
+        {
+            MW_show_log(
+                "GroupsRepo::AddGroup: "
+                "failed to allocate Group ID"
+            );
+
             return false;
         }
 
 
-        // -------------------------------------------------
-        // Assign ID under Group::mutex
-        // -------------------------------------------------
+        // =========================================================
+        // Assign identity to the unpublished object.
+        //
+        // TryAssignId() is also the concurrency guard if somebody
+        // accidentally calls AddGroup() for the same Group object
+        // from two threads.
+        // =========================================================
 
         if (!group->TryAssignId(
             newId))
         {
+            MW_show_log(
+                "GroupsRepo::AddGroup: "
+                "failed to assign Group ID"
+            );
+
             return false;
         }
 
-        // -------------------------------------------------
-        // Immutable snapshot
-        // -------------------------------------------------
+
+        // =========================================================
+        // Freeze immutable state for persistence.
+        // =========================================================
 
         const GroupSnapshot snapshot =
             group->Snapshot();
 
 
-        // -------------------------------------------------
-        // GroupsRepo state + DB
-        // -------------------------------------------------
+        if (snapshot.id != newId)
+        {
+            MW_show_log(
+                "GroupsRepo::AddGroup: "
+                "Group identity changed unexpectedly"
+            );
+
+
+            const bool rolledBack =
+                group->RollbackAssignedId(
+                    newId
+                );
+
+
+            if (!rolledBack)
+            {
+                MW_show_log(
+                    "GroupsRepo::AddGroup: "
+                    "CRITICAL: failed to rollback Group ID"
+                );
+            }
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Serialize snapshot into a DB-only row.
+        // =========================================================
+
+        const QJsonArray columnWidthArray =
+            QListInt2QJsonArray(
+                snapshot.column_width
+            );
+
+
+        const QJsonArray profilesArray =
+            QListInt2QJsonArray(
+                snapshot.profiles
+            );
+
+
+        const QString columnWidthJson =
+            QString::fromUtf8(
+                QJsonDocument(
+                    columnWidthArray
+                ).toJson(
+                    QJsonDocument::Compact
+                )
+            );
+
+
+        const QString profilesJson =
+            QString::fromUtf8(
+                QJsonDocument(
+                    profilesArray
+                ).toJson(
+                    QJsonDocument::Compact
+                )
+            );
+
+
+        GroupInsertRow row;
+
+
+        row.id =
+            newId;
+
+
+        row.archive =
+            snapshot.archive;
+
+
+        row.skip_auto_update =
+            snapshot.skip_auto_update;
+
+
+        row.auto_clear_unavailable =
+            snapshot.auto_clear_unavailable;
+
+
+        row.name =
+            snapshot
+            .name
+            .toStdString();
+
+
+        row.url =
+            snapshot
+            .url
+            .toStdString();
+
+
+        row.info =
+            snapshot
+            .info
+            .toStdString();
+
+
+        row.sub_last_update =
+            static_cast<long long>(
+                snapshot.sub_last_update
+                );
+
+
+        row.front_proxy_id =
+            snapshot.front_proxy_id;
+
+
+        row.landing_proxy_id =
+            snapshot.landing_proxy_id;
+
+
+        row.column_width_json =
+            columnWidthJson
+            .toStdString();
+
+
+        row.profiles_json =
+            profilesJson
+            .toStdString();
+
+
+        row.scroll_last_profile =
+            snapshot.scroll_last_profile;
+
+
+        row.test_sort_by =
+            static_cast<int>(
+                snapshot.test_sort_by
+                );
+
+
+        row.traffic_sort_by =
+            static_cast<int>(
+                snapshot.traffic_sort_by
+                );
+
+
+        row.test_items_to_show =
+            static_cast<int>(
+                snapshot.test_items_to_show
+                );
+
+
+        // =========================================================
+        // ATOMIC DATABASE PHASE
+        //
+        // This creates:
+        //
+        //      groups row
+        //          +
+        //      groups_order row
+        //
+        // in ONE SQLite transaction.
+        //
+        // Nothing has been published into memMap yet.
+        // =========================================================
+
+        const bool persisted =
+            db.insertGroupAtomic(
+                row
+            );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "GroupsRepo::AddGroup: "
+                "database transaction failed; "
+                "rolling back Group identity"
+            );
+
+
+            // =====================================================
+            // Return caller's object to exactly the state expected
+            // from an unpublished Group.
+            // =====================================================
+
+            const bool rolledBack =
+                group->RollbackAssignedId(
+                    newId
+                );
+
+
+            if (!rolledBack)
+            {
+                MW_show_log(
+                    "GroupsRepo::AddGroup: "
+                    "CRITICAL: failed to rollback Group identity"
+                );
+            }
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // DATABASE COMMIT SUCCEEDED.
+        //
+        // Only NOW publish into repository memory.
+        // =========================================================
 
         {
             std::lock_guard<std::mutex>
-                locker(mutex);
+                locker(
+                    mutex
+                );
 
 
             memMap[newId] =
                 group;
-
-
-            saveToDatabase(
-                snapshot
-            );
-
-
-            int maxOrder = -1;
-
-
-            {
-                auto maxOrderQuery =
-                    db.query(
-                        "SELECT MAX(display_order) "
-                        "FROM groups_order"
-                    );
-
-
-                if (maxOrderQuery &&
-                    maxOrderQuery->executeStep())
-                {
-                    maxOrder =
-                        maxOrderQuery
-                        ->getColumn(0)
-                        .getInt();
-                }
-            }
-
-
-            db.exec(
-                "INSERT INTO groups_order "
-                "(group_id, display_order) "
-                "VALUES (?, ?)",
-
-                newId,
-                maxOrder + 1
-            );
         }
 
 

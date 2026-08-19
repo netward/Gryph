@@ -122,6 +122,34 @@ namespace Configs
         return true;
     }
 
+    bool Group::RollbackAssignedId(
+        int expectedId)
+    {
+        if (expectedId < 0)
+        {
+            return false;
+        }
+
+
+        QMutexLocker locker(
+            &mutex
+        );
+
+
+        // Rollback is allowed only for the exact ID assigned
+        // by the failed AddGroup() operation.
+        if (id != expectedId)
+        {
+            return false;
+        }
+
+
+        id = -1;
+
+
+        return true;
+    }
+
 
     // =========================================================
     // General settings

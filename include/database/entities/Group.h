@@ -306,6 +306,15 @@ namespace Configs
             int newId
         );
 
+        // Used only by GroupsRepo when creation of a new Group
+        // fails after TryAssignId().
+        //
+        // The ID is rolled back only when it still equals
+        // expectedId, so we never overwrite a different identity.
+        bool RollbackAssignedId(
+            int expectedId
+        );
+
 
     private:
 

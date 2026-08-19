@@ -43,6 +43,33 @@ namespace Configs
     // routes   -> route_profiles, route_rules tables
     // settings -> settings table
     // icons    -> icons/ folder (handled by the UI layer, not the database)
+
+    struct GroupInsertRow
+    {
+        int id = -1;
+
+        bool archive = false;
+        bool skip_auto_update = false;
+        bool auto_clear_unavailable = false;
+
+        std::string name;
+        std::string url;
+        std::string info;
+
+        long long sub_last_update = 0;
+
+        int front_proxy_id = -1;
+        int landing_proxy_id = -1;
+
+        std::string column_width_json;
+        std::string profiles_json;
+
+        int scroll_last_profile = -1;
+
+        int test_sort_by = 0;
+        int traffic_sort_by = 0;
+        int test_items_to_show = 0;
+    };
     struct BackupParts 
     {
         bool profiles = false;
@@ -463,6 +490,10 @@ namespace Configs
             const std::vector<int>& pairs
         );
 
+        [[nodiscard]]
+        bool insertGroupAtomic(
+            const GroupInsertRow& row
+        );
 
         [[nodiscard]]
         bool execBatchReplaceProfiles(

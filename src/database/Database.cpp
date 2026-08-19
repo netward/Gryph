@@ -204,6 +204,252 @@ namespace Configs {
         stmt.exec();
     }
 
+    bool Database::insertGroupAtomic(
+        const GroupInsertRow& row)
+    {
+        // =========================================================
+        // Validation
+        // =========================================================
+
+        if (row.id < 0)
+        {
+            return false;
+        }
+
+
+        // =========================================================
+        // One SQLite connection -> serialize the whole transaction.
+        // =========================================================
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        try
+        {
+            // =====================================================
+            // ONE transaction:
+            //
+            //      groups
+            //          +
+            //      groups_order
+            //
+            // Either both rows appear or neither appears.
+            // =====================================================
+
+            SQLite::Transaction transaction(
+                db,
+                SQLite::TransactionBehavior::IMMEDIATE
+            );
+
+
+            // =====================================================
+            // Insert Group
+            // =====================================================
+
+            SQLite::Statement groupStmt(
+                db,
+
+                R"(
+            INSERT INTO groups
+            (
+                id,
+                archive,
+                skip_auto_update,
+                auto_clear_unavailable,
+                name,
+                url,
+                info,
+                sub_last_update,
+                front_proxy_id,
+                landing_proxy_id,
+                column_width_json,
+                profiles_json,
+                scroll_last_profile,
+                test_sort_by,
+                traffic_sort_by,
+                test_items_to_show
+            )
+            VALUES
+            (
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            )"
+            );
+
+
+            int index =
+                1;
+
+
+            groupStmt.bind(
+                index++,
+                row.id
+            );
+
+            groupStmt.bind(
+                index++,
+                row.archive
+                ? 1
+                : 0
+            );
+
+            groupStmt.bind(
+                index++,
+                row.skip_auto_update
+                ? 1
+                : 0
+            );
+
+            groupStmt.bind(
+                index++,
+                row.auto_clear_unavailable
+                ? 1
+                : 0
+            );
+
+            groupStmt.bind(
+                index++,
+                row.name
+            );
+
+            groupStmt.bind(
+                index++,
+                row.url
+            );
+
+            groupStmt.bind(
+                index++,
+                row.info
+            );
+
+            groupStmt.bind(
+                index++,
+                static_cast<int64_t>(
+                    row.sub_last_update
+                    )
+            );
+
+            groupStmt.bind(
+                index++,
+                row.front_proxy_id
+            );
+
+            groupStmt.bind(
+                index++,
+                row.landing_proxy_id
+            );
+
+            groupStmt.bind(
+                index++,
+                row.column_width_json
+            );
+
+            groupStmt.bind(
+                index++,
+                row.profiles_json
+            );
+
+            groupStmt.bind(
+                index++,
+                row.scroll_last_profile
+            );
+
+            groupStmt.bind(
+                index++,
+                row.test_sort_by
+            );
+
+            groupStmt.bind(
+                index++,
+                row.traffic_sort_by
+            );
+
+            groupStmt.bind(
+                index++,
+                row.test_items_to_show
+            );
+
+
+            groupStmt.exec();
+
+
+            // =====================================================
+            // Insert tab order.
+            //
+            // Do not do:
+            //
+            //      SELECT MAX(...)
+            //      INSERT ...
+            //
+            // as two repository operations.
+            //
+            // Calculate and insert the order in one SQL statement.
+            // =====================================================
+
+            SQLite::Statement orderStmt(
+                db,
+
+                R"(
+            INSERT INTO groups_order
+            (
+                group_id,
+                display_order
+            )
+            SELECT
+                ?,
+                COALESCE(
+                    MAX(display_order),
+                    -1
+                ) + 1
+            FROM groups_order
+            )"
+            );
+
+
+            orderStmt.bind(
+                1,
+                row.id
+            );
+
+
+            orderStmt.exec();
+
+
+            // =====================================================
+            // Commit both rows together.
+            // =====================================================
+
+            transaction.commit();
+
+
+            // Count only successfully committed writes.
+            maybeCheckpoint(
+                2
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            // SQLite::Transaction rolls back automatically when its
+            // destructor runs without commit().
+
+            NotifyError(
+                "Database::insertGroupAtomic",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
     void Database::execBatchInsertProfilesChunk(
         const std::vector<ProfileInsertRow>& rows)
     {
