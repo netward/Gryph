@@ -203,9 +203,7 @@ namespace Configs
         void execBatchInsertProfilesChunk(const std::vector<ProfileInsertRow>& rows);
         void execBatchReplaceProfilesChunk(const std::vector<ProfileInsertRow>& rows);
     public:
-        void execBatchUpdateProfileTraffic(
-            const std::vector<ProfileTrafficRow>& rows);
-
+        
         Database(const std::string& path)
             : db(path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE) {
             db.exec("PRAGMA foreign_keys = ON");
@@ -389,7 +387,6 @@ namespace Configs
         }
 
     public:
-
         template<typename... Args>
         [[nodiscard]]
         bool exec(
@@ -440,79 +437,41 @@ namespace Configs
             }
         }
 
-
-        void execDeleteByIdIn(
+        [[nodiscard]]
+        bool execDeleteByIdIn(
             const std::string& table,
             const std::string& idColumn,
-            const std::vector<int>& ids)
-        {
-            try
-            {
-                execDeleteByIdIn0(
-                    table,
-                    idColumn,
-                    ids
-                );
-            }
-            catch (std::exception& e)
-            {
-                NotifyError(
-                    "execDeleteByIdIn for " + table,
-                    e
-                );
-            }
-        }
-
-
-        void execBatchSettingsReplace(
+            const std::vector<int>& ids
+        );
+        
+        [[nodiscard]]
+        bool execBatchSettingsReplace(
             const std::vector<
             std::pair<
             std::string,
             std::string
             >
-            >& keyValues)
-        {
-            try
-            {
-                execBatchSettingsReplace0(
-                    keyValues
-                );
-            }
-            catch (std::exception& e)
-            {
-                NotifyError(
-                    "execBatchSettingsReplace",
-                    e
-                );
-            }
-        }
+            >& keyValues
+        );
 
-
-        void execBatchInsertIntPairs(
+        [[nodiscard]]
+        bool execBatchInsertIntPairs(
             const std::string& table,
             const std::string& colA,
             const std::string& colB,
-            const std::vector<int>& pairs)
-        {
-            try
-            {
-                execBatchInsertIntPairs0(
-                    table,
-                    colA,
-                    colB,
-                    pairs
-                );
-            }
-            catch (std::exception& e)
-            {
-                NotifyError(
-                    "execBatchInsertIntPairs for "
-                    + table,
-                    e
-                );
-            }
-        }
+            const std::vector<int>& pairs
+        );
 
+
+        [[nodiscard]]
+        bool execBatchReplaceProfiles(
+            const std::vector<ProfileInsertRow>& rows
+        );
+
+        [[nodiscard]]
+        bool execBatchUpdateProfileTraffic(
+            const std::vector<ProfileTrafficRow>& rows
+        );
 
         [[nodiscard]]
         bool execBatchInsertProfiles(
@@ -523,27 +482,6 @@ namespace Configs
         bool deleteProfilesAtomic(
             const std::vector<int>& ids
         );
-
-        void execBatchReplaceProfiles(
-            const std::vector<
-            ProfileInsertRow
-            >& rows)
-        {
-            try
-            {
-                execBatchReplaceProfiles0(
-                    rows
-                );
-            }
-            catch (std::exception& e)
-            {
-                NotifyError(
-                    "execBatchReplaceProfiles",
-                    e
-                );
-            }
-        }
-
 
         void backupTo(
             const std::string& destPath

@@ -65,7 +65,8 @@ namespace Configs {
         std::map<int, std::shared_ptr<Profile>> loadProfilesByIdsChunk(const QList<int>& ids) const;
         
         // Create tables if they don't exist
-        void createTables() const;
+        [[nodiscard]]
+        bool createTables() const;
 
         // Get next available profile ID (single)
         int NewProfileID() const;
@@ -148,15 +149,15 @@ namespace Configs {
         // Update only the traffic field of the profile in the database (no existence check, just UPDATE).
         bool SaveTraffic(const std::shared_ptr<Profile>& profile);
 
-        void SaveTrafficBatch(
-            const std::vector<ProfileTrafficRow>& rows);
+        [[nodiscard]]
+        bool SaveTrafficBatch(
+            const std::vector<ProfileTrafficRow>& rows
+        );
 
-        // Batch-save existing profiles.
-        //
-        // Creates immutable ProfileInsertRow snapshots and
-        // persists them as one serialized batch operation.
-        // Does not create a worker thread.
-        void SaveBatch(
-            const QList<std::shared_ptr<Profile>>& profiles);
+
+        [[nodiscard]]
+        bool SaveBatch(
+            const QList<std::shared_ptr<Profile>>& profiles
+        );
     };
 }

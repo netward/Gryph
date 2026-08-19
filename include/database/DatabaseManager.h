@@ -16,7 +16,11 @@ namespace Configs {
     private:
         Database db;
         
-        static void createEntityIdsTable(Database& db);
+        [[nodiscard]]
+        static bool createEntityIdsTable(
+            Database& db
+        );
+
         void initializeRepos();
     public:
         std::unique_ptr<ProfilesRepo> profilesRepo;

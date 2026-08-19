@@ -35,61 +35,173 @@ namespace Configs {
         }
     }
 
-    void Database::execDeleteByIdInChunk(const std::string& table, const std::string& idColumn, const std::vector<int>& ids) {
-        if (ids.empty()) return;
-        std::string sql = "DELETE FROM " + table + " WHERE " + idColumn + " IN (";
-        for (size_t i = 0; i < ids.size(); ++i) {
-            if (i > 0) sql += ",";
-            sql += std::to_string(ids[i]);
+    void Database::execDeleteByIdInChunk(
+        const std::string& table,
+        const std::string& idColumn,
+        const std::vector<int>& ids)
+    {
+        if (ids.empty())
+        {
+            return;
         }
+
+
+        std::string sql =
+            "DELETE FROM "
+            + table
+            + " WHERE "
+            + idColumn
+            + " IN (";
+
+
+        for (size_t i = 0;
+            i < ids.size();
+            ++i)
+        {
+            if (i > 0)
+            {
+                sql += ",";
+            }
+
+            sql +=
+                std::to_string(
+                    ids[i]
+                );
+        }
+
+
         sql += ")";
-        try {
-            db.exec(sql);
-            maybeCheckpoint(ids.size());
-        } catch (std::exception& e) {
-            std::cerr << "DB Error: " << e.what() << std::endl;
-        }
+
+
+        // Do NOT catch here.
+        // Owner transaction must see the exception.
+        db.exec(
+            sql
+        );
     }
 
-    void Database::execBatchSettingsReplaceChunk(const std::vector<std::pair<std::string, std::string>>& keyValues) {
-        if (keyValues.empty()) return;
-        std::string sql = "INSERT OR REPLACE INTO settings (key, value) VALUES ";
-        for (size_t i = 0; i < keyValues.size(); ++i) {
-            if (i > 0) sql += ",";
+    void Database::execBatchSettingsReplaceChunk(
+        const std::vector<
+        std::pair<
+        std::string,
+        std::string
+        >
+        >& keyValues)
+    {
+        if (keyValues.empty())
+        {
+            return;
+        }
+
+
+        std::string sql =
+            "INSERT OR REPLACE INTO settings "
+            "(key, value) VALUES ";
+
+
+        for (size_t i = 0;
+            i < keyValues.size();
+            ++i)
+        {
+            if (i > 0)
+            {
+                sql += ",";
+            }
+
             sql += "(?,?)";
         }
-        try {
-            SQLite::Statement stmt(db, sql);
-            for (size_t i = 0; i < keyValues.size(); ++i) {
-                stmt.bind(static_cast<int>(2 * i + 1), keyValues[i].first);
-                stmt.bind(static_cast<int>(2 * i + 2), keyValues[i].second);
-            }
-            stmt.exec();
-            maybeCheckpoint(1);
-        } catch (std::exception& e) {
-            std::cerr << "DB Error: " << e.what() << std::endl;
+
+
+        SQLite::Statement stmt(
+            db,
+            sql
+        );
+
+
+        for (size_t i = 0;
+            i < keyValues.size();
+            ++i)
+        {
+            stmt.bind(
+                static_cast<int>(
+                    2 * i + 1
+                    ),
+                keyValues[i].first
+            );
+
+            stmt.bind(
+                static_cast<int>(
+                    2 * i + 2
+                    ),
+                keyValues[i].second
+            );
         }
+
+
+        // Do NOT catch here.
+        stmt.exec();
     }
 
-    void Database::execBatchInsertIntPairsChunk(const std::string& table, const std::string& colA, const std::string& colB,
-                                                 const std::vector<int>& pairs) {
-        if (pairs.size() < 2 || pairs.size() % 2 != 0) return;
-        std::string sql = "INSERT INTO " + table + " (" + colA + "," + colB + ") VALUES ";
-        const size_t n = pairs.size() / 2;
-        for (size_t i = 0; i < n; ++i) {
-            if (i > 0) sql += ",";
+    void Database::execBatchInsertIntPairsChunk(
+        const std::string& table,
+        const std::string& colA,
+        const std::string& colB,
+        const std::vector<int>& pairs)
+    {
+        if (pairs.size() < 2 ||
+            pairs.size() % 2 != 0)
+        {
+            return;
+        }
+
+
+        std::string sql =
+            "INSERT INTO "
+            + table
+            + " ("
+            + colA
+            + ","
+            + colB
+            + ") VALUES ";
+
+
+        const size_t count =
+            pairs.size() / 2;
+
+
+        for (size_t i = 0;
+            i < count;
+            ++i)
+        {
+            if (i > 0)
+            {
+                sql += ",";
+            }
+
             sql += "(?,?)";
         }
-        try {
-            SQLite::Statement stmt(db, sql);
-            for (size_t i = 0; i < pairs.size(); ++i) {
-                stmt.bind(static_cast<int>(i + 1), pairs[i]);
-            }
-            stmt.exec();
-            maybeCheckpoint(pairs.size() / 2);
-        } catch (std::exception& e) {
-            std::cerr << "DB Error: " << e.what() << std::endl;
+
+
+        SQLite::Statement stmt(
+            db,
+            sql
+        );
+
+
+        for (size_t i = 0;
+            i < pairs.size();
+            ++i)
+        {
+            stmt.bind(
+                static_cast<int>(
+                    i + 1
+                    ),
+                pairs[i]
+            );
         }
+
+
+        stmt.exec();
     }
 
     void Database::execBatchInsertProfilesChunk(
@@ -313,6 +425,347 @@ namespace Configs {
         }
     }
 
+    bool Database::execDeleteByIdIn(
+        const std::string& table,
+        const std::string& idColumn,
+        const std::vector<int>& ids)
+    {
+        if (ids.empty())
+        {
+            return true;
+        }
+
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        bool transactionStarted =
+            false;
+
+
+        try
+        {
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+            transactionStarted =
+                true;
+
+
+            execDeleteByIdIn0(
+                table,
+                idColumn,
+                ids
+            );
+
+
+            db.exec(
+                "COMMIT"
+            );
+
+            transactionStarted =
+                false;
+
+
+            maybeCheckpoint(
+                static_cast<int>(
+                    ids.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            if (transactionStarted)
+            {
+                try
+                {
+                    db.exec(
+                        "ROLLBACK"
+                    );
+                }
+                catch (...)
+                {
+                }
+            }
+
+
+            NotifyError(
+                "execDeleteByIdIn for "
+                + table,
+                e
+            );
+
+
+            return false;
+        }
+    }
+
+    bool Database::execBatchSettingsReplace(
+        const std::vector<
+        std::pair<
+        std::string,
+        std::string
+        >
+        >& keyValues)
+    {
+        if (keyValues.empty())
+        {
+            return true;
+        }
+
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        bool transactionStarted =
+            false;
+
+
+        try
+        {
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+            transactionStarted =
+                true;
+
+
+            execBatchSettingsReplace0(
+                keyValues
+            );
+
+
+            db.exec(
+                "COMMIT"
+            );
+
+            transactionStarted =
+                false;
+
+
+            maybeCheckpoint(
+                static_cast<int>(
+                    keyValues.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            if (transactionStarted)
+            {
+                try
+                {
+                    db.exec(
+                        "ROLLBACK"
+                    );
+                }
+                catch (...)
+                {
+                }
+            }
+
+
+            NotifyError(
+                "execBatchSettingsReplace",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
+    bool Database::execBatchInsertIntPairs(
+        const std::string& table,
+        const std::string& colA,
+        const std::string& colB,
+        const std::vector<int>& pairs)
+    {
+        if (pairs.empty())
+        {
+            return true;
+        }
+
+
+        if (pairs.size() < 2 ||
+            pairs.size() % 2 != 0)
+        {
+            MW_show_log(
+                "Database::execBatchInsertIntPairs: "
+                "invalid pair vector"
+            );
+
+            return false;
+        }
+
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        bool transactionStarted =
+            false;
+
+
+        try
+        {
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+            transactionStarted =
+                true;
+
+
+            execBatchInsertIntPairs0(
+                table,
+                colA,
+                colB,
+                pairs
+            );
+
+
+            db.exec(
+                "COMMIT"
+            );
+
+            transactionStarted =
+                false;
+
+
+            maybeCheckpoint(
+                static_cast<int>(
+                    pairs.size() / 2
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            if (transactionStarted)
+            {
+                try
+                {
+                    db.exec(
+                        "ROLLBACK"
+                    );
+                }
+                catch (...)
+                {
+                }
+            }
+
+
+            NotifyError(
+                "execBatchInsertIntPairs for "
+                + table,
+                e
+            );
+
+
+            return false;
+        }
+    }
+
+    bool Database::execBatchReplaceProfiles(
+        const std::vector<ProfileInsertRow>& rows)
+    {
+        if (rows.empty())
+        {
+            return true;
+        }
+
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        bool transactionStarted =
+            false;
+
+
+        try
+        {
+            db.exec(
+                "BEGIN IMMEDIATE"
+            );
+
+            transactionStarted =
+                true;
+
+
+            execBatchReplaceProfiles0(
+                rows
+            );
+
+
+            db.exec(
+                "COMMIT"
+            );
+
+            transactionStarted =
+                false;
+
+
+            maybeCheckpoint(
+                static_cast<int>(
+                    rows.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            if (transactionStarted)
+            {
+                try
+                {
+                    db.exec(
+                        "ROLLBACK"
+                    );
+                }
+                catch (...)
+                {
+                }
+            }
+
+
+            NotifyError(
+                "execBatchReplaceProfiles",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
     bool Database::deleteProfilesAtomic(
         const std::vector<int>& ids)
     {
@@ -434,36 +887,130 @@ namespace Configs {
         }
     }
 
-    void Database::execBatchReplaceProfilesChunk(const std::vector<ProfileInsertRow>& rows) {
-        if (rows.empty()) return;
-        const size_t n = rows.size();
-        std::string sql = "INSERT OR REPLACE INTO profiles (id, type, name, gid, latency, dl_speed, ul_speed, test_country, ip_out, outbound_json, traffic_dl, traffic_up) VALUES ";
-        for (size_t i = 0; i < n; ++i) {
-            if (i > 0) sql += ",";
-            sql += "(?,?,?,?,?,?,?,?,?,?,?,?)";
+    void Database::execBatchReplaceProfilesChunk(
+        const std::vector<ProfileInsertRow>& rows)
+    {
+        if (rows.empty())
+        {
+            return;
         }
-        try {
-            SQLite::Statement stmt(db, sql);
-            int idx = 1;
-            for (const auto& r : rows) {
-                stmt.bind(idx++, r.id);
-                stmt.bind(idx++, r.type);
-                stmt.bind(idx++, r.name);
-                stmt.bind(idx++, r.gid);
-                stmt.bind(idx++, r.latency);
-                stmt.bind(idx++, r.dl_speed);
-                stmt.bind(idx++, r.ul_speed);
-                stmt.bind(idx++, r.test_country);
-                stmt.bind(idx++, r.ip_out);
-                stmt.bind(idx++, r.outbound_json);
-                stmt.bind(idx++, static_cast<int64_t>(r.traffic_dl));
-                stmt.bind(idx++, static_cast<int64_t>(r.traffic_up));
+
+
+        const size_t count =
+            rows.size();
+
+
+        std::string sql =
+            "INSERT OR REPLACE INTO profiles "
+            "("
+            "id, "
+            "type, "
+            "name, "
+            "gid, "
+            "latency, "
+            "dl_speed, "
+            "ul_speed, "
+            "test_country, "
+            "ip_out, "
+            "outbound_json, "
+            "traffic_dl, "
+            "traffic_up"
+            ") VALUES ";
+
+
+        for (size_t i = 0;
+            i < count;
+            ++i)
+        {
+            if (i > 0)
+            {
+                sql += ",";
             }
-            stmt.exec();
-            maybeCheckpoint(static_cast<int>(rows.size()));
-        } catch (std::exception& e) {
-            std::cerr << "DB Error: " << e.what() << std::endl;
+
+            sql +=
+                "(?,?,?,?,?,?,?,?,?,?,?,?)";
         }
+
+
+        SQLite::Statement stmt(
+            db,
+            sql
+        );
+
+
+        int index = 1;
+
+
+        for (const auto& row :
+            rows)
+        {
+            stmt.bind(
+                index++,
+                row.id
+            );
+
+            stmt.bind(
+                index++,
+                row.type
+            );
+
+            stmt.bind(
+                index++,
+                row.name
+            );
+
+            stmt.bind(
+                index++,
+                row.gid
+            );
+
+            stmt.bind(
+                index++,
+                row.latency
+            );
+
+            stmt.bind(
+                index++,
+                row.dl_speed
+            );
+
+            stmt.bind(
+                index++,
+                row.ul_speed
+            );
+
+            stmt.bind(
+                index++,
+                row.test_country
+            );
+
+            stmt.bind(
+                index++,
+                row.ip_out
+            );
+
+            stmt.bind(
+                index++,
+                row.outbound_json
+            );
+
+            stmt.bind(
+                index++,
+                static_cast<int64_t>(
+                    row.traffic_dl
+                    )
+            );
+
+            stmt.bind(
+                index++,
+                static_cast<int64_t>(
+                    row.traffic_up
+                    )
+            );
+        }
+
+
+        stmt.exec();
     }
 
     void Database::backupTo(const std::string& destPath) {
@@ -750,16 +1297,23 @@ namespace Configs {
         checkpointWal();
     }
 
-    void Database::execBatchUpdateProfileTraffic(
+    bool Database::execBatchUpdateProfileTraffic(
         const std::vector<ProfileTrafficRow>& rows)
     {
-        if (rows.empty()) {
-            return;
+        if (rows.empty())
+        {
+            return true;
         }
 
-        try {
-            std::lock_guard<std::recursive_mutex>
-                dbLocker(db_mutex);
+
+        try
+        {
+            std::lock_guard<
+                std::recursive_mutex
+            > dbLocker(
+                db_mutex
+            );
+
 
             SQLite::Transaction transaction(
                 db,
@@ -770,17 +1324,21 @@ namespace Configs {
             SQLite::Statement stmt(
                 db,
                 "UPDATE profiles "
-                "SET traffic_dl = ?, traffic_up = ? "
+                "SET traffic_dl = ?, "
+                "traffic_up = ? "
                 "WHERE id = ?"
             );
 
 
-            int updatedRows = 0;
+            int updatedRows =
+                0;
 
 
-            for (const auto& row : rows) {
-
-                if (row.id < 0) {
+            for (const auto& row :
+                rows)
+            {
+                if (row.id < 0)
+                {
                     continue;
                 }
 
@@ -816,19 +1374,25 @@ namespace Configs {
             transaction.commit();
 
 
-            if (updatedRows > 0) {
-
+            if (updatedRows > 0)
+            {
                 maybeCheckpoint(
                     updatedRows
                 );
             }
-        }
-        catch (std::exception& e) {
 
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
             NotifyError(
                 "execBatchUpdateProfileTraffic",
                 e
             );
+
+
+            return false;
         }
     }
 }

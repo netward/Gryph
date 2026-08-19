@@ -3,9 +3,11 @@
 #include "Database.h"
 #include "include/database/entities/RouteProfile.h"
 #include <3rdparty/SQLiteCpp/include/SQLiteCpp.h>
+
 #include <memory>
 #include <mutex>
 #include <map>
+
 #include <QString>
 #include <QJsonObject>
 #include <QJsonDocument>
@@ -33,7 +35,11 @@ namespace Configs {
         std::shared_ptr<RouteProfile> routeProfileFromJson(const QJsonObject& json) const;
         
         // Save route profile to database (internal helper)
-        void saveToDatabase(const RouteProfile* routeProfile, int id) const;
+        [[nodiscard]]
+        bool saveToDatabase(
+            const RouteProfile* routeProfile,
+            int id
+        ) const;
         
         // Load route profile from database (including rules)
         std::shared_ptr<RouteProfile> loadFromDatabase(int id) const;
@@ -48,7 +54,8 @@ namespace Configs {
         void loadRulesForProfileIdsChunk(const QList<int>& profileIds, std::map<int, std::shared_ptr<RouteProfile>>& byId) const;
         
         // Create tables if they don't exist
-        void createTables() const;
+        [[nodiscard]]
+        bool createTables() const;
 
         [[nodiscard]] bool routeRulesColumnExists(const char* columnName) const;
 
@@ -68,10 +75,18 @@ namespace Configs {
         std::shared_ptr<RouteProfile> GetRouteProfile(int id) const;
         
         // Delete route profile from database
-        void DeleteRouteProfile(int id);
+        [[nodiscard]]
+        bool DeleteRouteProfile(
+            int id
+        );
         
         // Update route profiles (replaces all)
-        void UpdateRouteProfiles(const QList<std::shared_ptr<RouteProfile>>& routeProfiles);
+        [[nodiscard]]
+        bool UpdateRouteProfiles(
+            const QList<
+            std::shared_ptr<RouteProfile>
+            >& routeProfiles
+        );
         
         // Get all route profile IDs in order
         QList<int> GetAllRouteProfileIds() const;

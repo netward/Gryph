@@ -821,20 +821,20 @@ void MainWindow::urltest_current_group(
     );
 }
 
-void MainWindow::stopTests() {
+void MainWindow::stopTests()
+{
     stopSpeedtest.store(true);
     bool ok;
     defaultClient->StopTests(&ok);
-
     if (!ok) {
         MW_show_log(tr("Failed to stop tests"));
     }
 }
 
-void MainWindow::url_test_current() {
+void MainWindow::url_test_current()
+{
     last_test_time = QDateTime::currentSecsSinceEpoch();
     ui->label_running->setText(tr("Testing"));
-
     runOnNewThread([=, this] {
         libcore::TestReq req;
         req.test_current = true;
@@ -857,8 +857,8 @@ void MainWindow::url_test_current() {
             else if (latency > 0) {
                 ui->label_running->setText(tr("Test Result") + ": " + QString("%1 ms").arg(latency));
             }
-            });
         });
+    });
 }
 
 void MainWindow::iptest_current_group(
@@ -867,7 +867,6 @@ void MainWindow::iptest_current_group(
     if (profileIDs.isEmpty()) {
         return;
     }
-
 
     if (speedtestRunning.exchange(
         true,
@@ -886,7 +885,6 @@ void MainWindow::iptest_current_group(
         return;
     }
 
-
     runOnNewThread(
         [this, profileIDs]()
         {
@@ -894,25 +892,20 @@ void MainWindow::iptest_current_group(
                 speedtestRunning
             );
 
-
             stopSpeedtest.store(
                 false,
                 std::memory_order_release
             );
-
 
             dataViewHtmlGenerator_
                 .seedLatencyTest(
                     DataViewHtmlGenerator::
                     LatencyTestPanelState::
                     Kind::Ip,
-
                     profileIDs.size()
                 );
 
-
             UpdateDataView(true);
-
 
             auto ipTestFunc =
                 [this](
@@ -928,7 +921,6 @@ void MainWindow::iptest_current_group(
                         Configs::BuildTestConfig(
                             profileSlice
                         );
-
 
                     if (!buildObject ||
                         !buildObject
@@ -946,24 +938,19 @@ void MainWindow::iptest_current_group(
                                 buildObject->error
                             );
                         }
-
                         return;
                     }
-
 
                     auto completion =
                         std::make_shared<
                         QSemaphore
                         >(0);
 
-
                     int taskCount = 0;
-
 
                     // ---------------------------------
                     // Standalone configs
                     // ---------------------------------
-
                     for (const auto entID :
                         buildObject
                         ->fullConfigs
@@ -975,9 +962,7 @@ void MainWindow::iptest_current_group(
                                 entID
                             ];
 
-
                         ++taskCount;
-
 
                         parallelCoreCallPool->start(
                             [
@@ -1005,21 +990,17 @@ void MainWindow::iptest_current_group(
                         );
                     }
 
-
                     // ---------------------------------
                     // Shared config
                     // ---------------------------------
-
                     if (!buildObject
                         ->outboundTags
                         .empty())
                     {
                         ++taskCount;
 
-
                         auto taskBuildObject =
                             buildObject;
-
 
                         parallelCoreCallPool->start(
                             [
@@ -1033,7 +1014,6 @@ void MainWindow::iptest_current_group(
                                         *completion
                                     );
 
-
                                 const QString xrayConf =
                                     taskBuildObject
                                     ->isXrayNeeded
@@ -1045,7 +1025,6 @@ void MainWindow::iptest_current_group(
                                     )
                                     :
                                     "";
-
 
                                 runIPTest(
                                     QJsonObject2QString(
@@ -1068,11 +1047,9 @@ void MainWindow::iptest_current_group(
                         );
                     }
 
-
                     // ---------------------------------
                     // Proper completion barrier
                     // ---------------------------------
-
                     if (taskCount > 0) {
 
                         completion->acquire(
@@ -1080,11 +1057,9 @@ void MainWindow::iptest_current_group(
                         );
                     }
 
-
                     MW_show_log(
                         "IP test for batch done."
                     );
-
 
                     runOnUiThread(
                         [this, ids]()
@@ -1094,13 +1069,11 @@ void MainWindow::iptest_current_group(
                             );
                         }
                     );
-                };
-
+            };
 
             // =========================================
             // Process batches
             // =========================================
-
             for (int i = 0;
                 i < profileIDs.size();
                 i += 100)
@@ -1111,13 +1084,11 @@ void MainWindow::iptest_current_group(
                     break;
                 }
 
-
                 const auto profileIDsSlice =
                     profileIDs.mid(
                         i,
                         100
                     );
-
 
                 const auto profiles =
                     Configs::dataManager
@@ -1126,30 +1097,25 @@ void MainWindow::iptest_current_group(
                         profileIDsSlice
                     );
 
-
                 ipTestFunc(
                     profiles,
                     profileIDsSlice
                 );
             }
 
-
             dataViewHtmlGenerator_
                 .clearTestSections();
 
-
             UpdateDataView(true);
-
 
             MW_show_log(
                 tr("IP test finished!")
             );
-
-
             // runningGuard resets speedtestRunning.
         }
     );
 }
+
 void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool testCurrent)
 {
     if (profileIDs.isEmpty() && !testCurrent) {
@@ -1168,7 +1134,6 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
                 "the program."
             )
         );
-
         return;
     }
 

@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <stdexcept>
 
 #include <QDebug>
 #include <QJsonArray>
@@ -28,10 +29,18 @@ namespace Configs
         db(database)
     {
         initMaps();
-        createTables();
+
+
+        if (!createTables())
+        {
+            throw std::runtime_error(
+                "Failed to create SettingsRepo tables"
+            );
+        }
+
+
         loadAllSettings();
     }
-
 
     // =========================================================
     // Setting maps
@@ -715,19 +724,18 @@ namespace Configs
     // Database initialization
     // =========================================================
 
-    void SettingsRepo::createTables() const
+    bool SettingsRepo::createTables() const
     {
-        db.exec(
+        return db.exec(
             R"(
-            CREATE TABLE IF NOT EXISTS settings
-            (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            )"
+        CREATE TABLE IF NOT EXISTS settings
+        (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        )"
         );
     }
-
 
     // =========================================================
     // Load
@@ -925,11 +933,13 @@ namespace Configs
     // Save
     // =========================================================
 
-    void SettingsRepo::saveAllSettings() const
+    bool SettingsRepo::saveAllSettings() const
     {
         if (noSave)
         {
-            return;
+            // noSave is an intentional "do not write" mode,
+            // not a database failure.
+            return true;
         }
 
 
@@ -1102,7 +1112,7 @@ namespace Configs
         );
 
 
-        db.execBatchSettingsReplace(
+        return db.execBatchSettingsReplace(
             keyValues
         );
     }
@@ -1192,14 +1202,25 @@ namespace Configs
     // =========================================================
     // Public save
     // =========================================================
-
     bool SettingsRepo::Save()
     {
-        saveAllSettings();
+        const bool persisted =
+            saveAllSettings();
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "SettingsRepo::Save: "
+                "failed to persist settings"
+            );
+
+            return false;
+        }
+
 
         return true;
     }
-
 
     // =========================================================
     // Extra cores

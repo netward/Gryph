@@ -1,44 +1,63 @@
 #include "include/database/ProfilesRepo.h"
+#include "include/ui/MainWindowAPI.h"
+#include "include/database/GroupsRepo.h"
+
+#include <map>
+#include <stdexcept>
+
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
-#include <map>
-
-#include "include/database/GroupsRepo.h"
-#include "include/ui/MainWindowAPI.h"
-
 
 namespace Configs {
-    ProfilesRepo::ProfilesRepo(Database& database) : db(database) {
-        createTables();
+    ProfilesRepo::ProfilesRepo(
+        Database& database)
+        :
+        db(database)
+    {
+        if (!createTables())
+        {
+            throw std::runtime_error(
+                "Failed to create ProfilesRepo tables"
+            );
+        }
     }
 
-    void ProfilesRepo::createTables() const {
-        // Note: This table has a foreign key to groups(id).
-        // Ensure GroupsRepo::createTables() is called before this method
-        // to avoid foreign key constraint errors.
-        // Create profiles table
-        db.exec(R"(
-            CREATE TABLE IF NOT EXISTS profiles (
-                id INTEGER PRIMARY KEY,
-                type TEXT NOT NULL,
-                name TEXT,
-                gid INTEGER NOT NULL DEFAULT 0,
-                latency INTEGER NOT NULL DEFAULT 0,
-                dl_speed TEXT,
-                ul_speed TEXT,
-                test_country TEXT,
-                ip_out TEXT,
-                outbound_json TEXT NOT NULL,
-                traffic_dl INTEGER NOT NULL DEFAULT 0,
-                traffic_up INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                FOREIGN KEY(gid) REFERENCES groups(id) ON DELETE CASCADE
-            )
-        )");
+    bool ProfilesRepo::createTables() const
+    {
+        if (!db.exec(
+            R"(
+        CREATE TABLE IF NOT EXISTS profiles
+        (
+            id INTEGER PRIMARY KEY,
+            type TEXT NOT NULL,
+            name TEXT,
+            gid INTEGER NOT NULL DEFAULT 0,
+            latency INTEGER NOT NULL DEFAULT 0,
+            dl_speed TEXT,
+            ul_speed TEXT,
+            test_country TEXT,
+            ip_out TEXT,
+            outbound_json TEXT NOT NULL,
+            traffic_dl INTEGER NOT NULL DEFAULT 0,
+            traffic_up INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+            FOREIGN KEY(gid)
+                REFERENCES groups(id)
+                ON DELETE CASCADE
+        )
+        )"))
+        {
+            return false;
+        }
 
-        db.exec("CREATE INDEX IF NOT EXISTS idx_profiles_name ON profiles(name)");
+
+        return db.exec(
+            "CREATE INDEX IF NOT EXISTS "
+            "idx_profiles_name "
+            "ON profiles(name)"
+        );
     }
 
     QJsonObject ProfilesRepo::profileToJson(
@@ -2065,12 +2084,25 @@ namespace Configs {
                 return false;
             }
             group->RemoveProfileBatch(ids);
-            dataManager->groupsRepo->Save(group);
+            if (!dataManager
+                ->groupsRepo
+                ->Save(group))
+            {
+                MW_show_log(
+                    "ProfilesRepo::BatchDeleteProfiles: "
+                    "failed to persist Group "
+                    +
+                    Int2String(groupID)
+                );
+
+                return false;
+            }
         }
 
         // =========================================================
         // Delete persistent Profiles
         // =========================================================
+
         {
             std::lock_guard<std::mutex>
                 locker(
@@ -2080,18 +2112,34 @@ namespace Configs {
 
             if (!ids.isEmpty())
             {
-                // -------------------------------------------------
-                // Invalidate any GetProfile/GetProfileBatch
-                // operation which started before this deletion.
-                //
-                // Increment while repository mutex is held.
-                // -------------------------------------------------
                 ++deletionEpoch_;
 
 
-                // -------------------------------------------------
-                // Remove cached objects first.
-                // -------------------------------------------------
+                const std::vector<int> idVec(
+                    ids.begin(),
+                    ids.end()
+                );
+
+
+                // Persist FIRST.
+                const bool deleted =
+                    db.deleteProfilesAtomic(
+                        idVec
+                    );
+
+
+                if (!deleted)
+                {
+                    MW_show_log(
+                        "ProfilesRepo::BatchDeleteProfiles: "
+                        "failed to delete Profiles from SQLite"
+                    );
+
+                    return false;
+                }
+
+
+                // Only now remove cached objects.
                 for (const int id :
                 ids)
                 {
@@ -2099,29 +2147,10 @@ namespace Configs {
                         id
                     );
                 }
-
-
-                // -------------------------------------------------
-                // Keep the repository mutex during DELETE.
-                //
-                // Deletion is relatively rare.
-                //
-                // This is intentional: it guarantees that readers
-                // cannot enter their publication phase between
-                // epoch invalidation and persistent deletion.
-                // -------------------------------------------------
-                const std::vector<int> idVec(
-                    ids.begin(),
-                    ids.end()
-                );
-
-                db.execDeleteByIdIn(
-                    "profiles",
-                    "id",
-                    idVec
-                );
             }
         }
+
+
         return true;
     }
 
@@ -2310,31 +2339,24 @@ namespace Configs {
         return true;
     }
 
-    void ProfilesRepo::SaveBatch(
+    bool ProfilesRepo::SaveBatch(
         const QList<std::shared_ptr<Profile>>& profiles)
     {
-        if (profiles.isEmpty()) {
-            return;
+        if (profiles.isEmpty())
+        {
+            return true;
         }
 
 
-        // -------------------------------------------------
-        // SaveBatch is synchronous now.
-        //
-        // No new QThread is created.
-        //
-        // The repository mutex is acquired BEFORE creating
-        // ProfileInsertRow snapshots so that SaveTrafficBatch()
-        // cannot persist a newer traffic value between
-        // snapshot creation and the batch write.
-        // -------------------------------------------------
-
         std::lock_guard<std::mutex>
-            locker(mutex);
+            locker(
+                mutex
+            );
 
 
         std::vector<ProfileInsertRow>
             rows;
+
 
         rows.reserve(
             static_cast<size_t>(
@@ -2343,15 +2365,13 @@ namespace Configs {
         );
 
 
-        // Keep the exact ID associated with each snapshot.
-        //
-        // Do not read profile->id again after the DB operation.
         std::vector<
             std::pair<
             int,
             std::weak_ptr<Profile>
             >
         > identityUpdates;
+
 
         identityUpdates.reserve(
             static_cast<size_t>(
@@ -2360,13 +2380,11 @@ namespace Configs {
         );
 
 
-        // -------------------------------------------------
-        // Build immutable persistence snapshots
-        // -------------------------------------------------
-
-        for (const auto& profile : profiles) {
-
-            if (!profile) {
+        for (const auto& profile :
+            profiles)
+        {
+            if (!profile)
+            {
                 continue;
             }
 
@@ -2374,23 +2392,24 @@ namespace Configs {
             const auto config =
                 profile->ConfigSnapshot();
 
-            const int id =
-                config.id;
 
-            const int gid =
-                config.gid;
+            if (config.id < 0)
+            {
+                continue;
+            }
+
 
             rows.push_back(
                 profileToInsertRow(
                     profile.get(),
-                    id,
-                    gid
+                    config.id,
+                    config.gid
                 )
             );
 
 
             identityUpdates.emplace_back(
-                id,
+                config.id,
                 std::weak_ptr<Profile>(
                     profile
                 )
@@ -2398,44 +2417,63 @@ namespace Configs {
         }
 
 
-        if (rows.empty()) {
-            return;
+        if (rows.empty())
+        {
+            return true;
         }
 
 
-        // -------------------------------------------------
-        // Persist immutable rows
-        // -------------------------------------------------
+        // =====================================================
+        // Persist FIRST.
+        // =====================================================
 
-        db.execBatchReplaceProfiles(
-            rows
-        );
+        if (!db.execBatchReplaceProfiles(
+            rows))
+        {
+            MW_show_log(
+                "ProfilesRepo::SaveBatch: "
+                "database batch failed"
+            );
+
+            return false;
+        }
 
 
-        // -------------------------------------------------
-        // Refresh identity map
-        // -------------------------------------------------
+        // =====================================================
+        // Publish only AFTER database success.
+        // =====================================================
 
         for (const auto& [
             id,
             weakProfile
-        ] : identityUpdates)
+        ] :
+            identityUpdates)
         {
             identityMap[id] =
                 weakProfile;
         }
+
+
+        return true;
     }
 
-    void ProfilesRepo::SaveTrafficBatch(
+    bool ProfilesRepo::SaveTrafficBatch(
         const std::vector<ProfileTrafficRow>& rows)
     {
-        if (rows.empty()) {
-            return;
+        if (rows.empty())
+        {
+            return true;
         }
 
-        // Serialize operations inside ProfilesRepo.
-        std::lock_guard<std::mutex> locker(mutex);
 
-        db.execBatchUpdateProfileTraffic(rows);
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        return db.execBatchUpdateProfileTraffic(
+            rows
+        );
     }
 }

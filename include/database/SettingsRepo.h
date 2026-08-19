@@ -27,9 +27,14 @@ namespace Configs {
         QMap<QString, QStringList*> stringListMap;
 
         void initMaps();
-        void createTables() const;
+        
+        [[nodiscard]]
+        bool createTables() const;
+
         void loadAllSettings();
-        void saveAllSettings() const;
+
+        [[nodiscard]]
+        bool saveAllSettings() const;
 
     public:
         bool noSave = false;

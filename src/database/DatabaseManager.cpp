@@ -4,46 +4,91 @@
 
 #include "include/global/Configs.hpp"
 
+#include <stdexcept>
+
 namespace Configs {
-    DatabaseManager::DatabaseManager(const std::string& dbPath)
-        : db(dbPath) {
-        // Create entity IDs table first (before repos are initialized)
-        createEntityIdsTable(db);
-        
-        // Initialize repos after entity_ids table is created
+    DatabaseManager::DatabaseManager(
+        const std::string& dbPath)
+        :
+        db(dbPath)
+    {
+        if (!createEntityIdsTable(
+            db))
+        {
+            throw std::runtime_error(
+                "Failed to initialize entity_ids table"
+            );
+        }
+
+
         initializeRepos();
     }
 
-    void DatabaseManager::createEntityIdsTable(Database& db) {
-        // Create table to track last used ID for each entity type
-        // Single row with separate columns for each entity type
-        db.exec(R"(
-            CREATE TABLE IF NOT EXISTS entity_ids (
-                profile_last_id INTEGER NOT NULL DEFAULT 0,
-                group_last_id INTEGER NOT NULL DEFAULT 0,
-                route_profile_last_id INTEGER NOT NULL DEFAULT 0
-            )
-        )");
-        
-        // Initialize entity IDs if table is empty (insert a single row with all zeros)
-        auto checkQuery = db.query("SELECT COUNT(*) FROM entity_ids");
-        int count = 0;
-        if (checkQuery && checkQuery->executeStep()) {
-            count = checkQuery->getColumn(0).getInt();
+    bool DatabaseManager::createEntityIdsTable(
+        Database& db)
+    {
+        if (!db.exec(
+            R"(
+        CREATE TABLE IF NOT EXISTS entity_ids
+        (
+            profile_last_id INTEGER NOT NULL DEFAULT 0,
+            group_last_id INTEGER NOT NULL DEFAULT 0,
+            route_profile_last_id INTEGER NOT NULL DEFAULT 0
+        )
+        )"))
+        {
+            return false;
         }
-        
-        if (count == 0) {
-            db.exec(R"(
-                INSERT INTO entity_ids (profile_last_id, group_last_id, route_profile_last_id)
-                VALUES (0, 0, 0)
-            )");
-        }
+
+
+        // Initialize the single counter row only when the table is empty.
+        //
+        // Avoid SELECT + separate conditional logic.
+        return db.exec(
+            R"(
+        INSERT INTO entity_ids
+        (
+            profile_last_id,
+            group_last_id,
+            route_profile_last_id
+        )
+        SELECT
+            0,
+            0,
+            0
+        WHERE NOT EXISTS
+        (
+            SELECT 1
+            FROM entity_ids
+        )
+        )"
+        );
     }
     
-    void DatabaseManager::initializeRepos() {
-        profilesRepo = std::make_unique<ProfilesRepo>(db);
-        groupsRepo = std::make_unique<GroupsRepo>(db);
-        routesRepo = std::make_unique<RoutesRepo>(db);
-        settingsRepo = std::make_unique<SettingsRepo>(db);
+    void DatabaseManager::initializeRepos()
+    {
+        // Groups first because profiles reference groups(id).
+        groupsRepo =
+            std::make_unique<GroupsRepo>(
+                db
+            );
+
+
+        profilesRepo =
+            std::make_unique<ProfilesRepo>(
+                db
+            );
+
+
+        routesRepo =
+            std::make_unique<RoutesRepo>(
+                db
+            );
+
+
+        settingsRepo =
+            std::make_unique<SettingsRepo>(
+                db
+            );
     }
 }

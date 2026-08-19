@@ -15,7 +15,8 @@ namespace Configs {
         createTables();
     }
 
-    void GroupsRepo::createTables() const {
+    bool GroupsRepo::createTables() const
+    {
         // Create groups table
         db.exec(R"(
             CREATE TABLE IF NOT EXISTS groups (
@@ -697,11 +698,46 @@ namespace Configs {
         return GetGroup(currentGroupId);
     }
 
-    void GroupsRepo::DeleteGroup(int id) {
-        QMutexLocker locker(&mutex);
-        memMap.erase(id);
-        db.exec("DELETE FROM groups_order WHERE group_id = ?", id);
-        db.exec("DELETE FROM groups WHERE id = ?", id);
+    bool GroupsRepo::DeleteGroup(
+        int id)
+    {
+        if (id < 0)
+        {
+            return false;
+        }
+
+
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        if (!db.exec(
+            "DELETE FROM groups_order "
+            "WHERE group_id = ?",
+            id))
+        {
+            return false;
+        }
+
+
+        if (!db.exec(
+            "DELETE FROM groups "
+            "WHERE id = ?",
+            id))
+        {
+            return false;
+        }
+
+
+        // Publish deletion only after DB accepted it.
+        memMap.erase(
+            id
+        );
+
+
+        return true;
     }
 
     QList<int> GroupsRepo::GetAllGroupIds() const {
@@ -738,17 +774,53 @@ namespace Configs {
         return order;
     }
 
-    void GroupsRepo::SetGroupsTabOrder(const QList<int>& order) {
-        db.exec("DELETE FROM groups_order");
-        if (!order.isEmpty()) {
-            std::vector<int> pairs;
-            pairs.reserve(order.size() * 2);
-            for (int i = 0; i < order.size(); ++i) {
-                pairs.push_back(order[i]);
-                pairs.push_back(i);
-            }
-            db.execBatchInsertIntPairs("groups_order", "group_id", "display_order", pairs);
+    bool GroupsRepo::SetGroupsTabOrder(
+        const QList<int>& order)
+    {
+        if (!db.exec(
+            "DELETE FROM groups_order"))
+        {
+            return false;
         }
+
+
+        if (order.isEmpty())
+        {
+            return true;
+        }
+
+
+        std::vector<int>
+            pairs;
+
+
+        pairs.reserve(
+            static_cast<size_t>(
+                order.size() * 2
+                )
+        );
+
+
+        for (int i = 0;
+            i < order.size();
+            ++i)
+        {
+            pairs.push_back(
+                order[i]
+            );
+
+            pairs.push_back(
+                i
+            );
+        }
+
+
+        return db.execBatchInsertIntPairs(
+            "groups_order",
+            "group_id",
+            "display_order",
+            pairs
+        );
     }
 
     bool GroupsRepo::Save(
@@ -760,12 +832,11 @@ namespace Configs {
         }
 
 
-        // =====================================================
-        // Snapshot BEFORE taking repository mutex.
+        // =========================================================
+        // Freeze Group state before repository lock.
         //
-        // Group::Snapshot() locks Group::mutex internally.
-        // We do not want nested Group -> Repo locking.
-        // =====================================================
+        // Group::Snapshot() takes the Group's own mutex.
+        // =========================================================
 
         const GroupSnapshot snapshot =
             group->Snapshot();
@@ -777,13 +848,15 @@ namespace Configs {
         }
 
 
-        // =====================================================
-        // Persist snapshot
-        // =====================================================
+        // =========================================================
+        // Persist first.
+        // =========================================================
 
         {
             std::lock_guard<std::mutex>
-                locker(mutex);
+                locker(
+                    mutex
+                );
 
 
             if (!saveToDatabase(
@@ -793,7 +866,9 @@ namespace Configs {
             }
 
 
-            // Update identity map only after DB write succeeds.
+            // =====================================================
+            // Publish only after SQLite write succeeded.
+            // =====================================================
 
             memMap[snapshot.id] =
                 group;

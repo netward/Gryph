@@ -1,74 +1,186 @@
 #include "include/database/RoutesRepo.h"
 #include "include/global/Configs.hpp"
+
+#include <stdexcept>
+
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QMutexLocker>
 #include <QSet>
 
 namespace Configs {
-    RoutesRepo::RoutesRepo(Database& database) : db(database) {
-        createTables();
+    RoutesRepo::RoutesRepo(
+        Database& database)
+        :
+        db(database)
+    {
+        if (!createTables())
+        {
+            throw std::runtime_error(
+                "Failed to initialize RoutesRepo database schema"
+            );
+        }
     }
 
-    void RoutesRepo::createTables() const {
-        // Create route_profiles table
-        db.exec(R"(
-            CREATE TABLE IF NOT EXISTS route_profiles (
+
+    bool RoutesRepo::createTables() const
+    {
+        // =========================================================
+        // route_profiles
+        // =========================================================
+
+        if (!db.exec(
+            R"(
+            CREATE TABLE IF NOT EXISTS route_profiles
+            (
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL DEFAULT '',
                 default_outbound_id INTEGER NOT NULL DEFAULT -1,
-                created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-                updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+
+                created_at INTEGER NOT NULL
+                    DEFAULT (strftime('%s', 'now')),
+
+                updated_at INTEGER NOT NULL
+                    DEFAULT (strftime('%s', 'now'))
             )
-        )");
-        
-        // Create route_rules table
-        db.exec(R"(
-            CREATE TABLE IF NOT EXISTS route_rules (
+            )"))
+        {
+            MW_show_log(
+                "RoutesRepo::createTables: "
+                "failed to create route_profiles table"
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // route_rules
+        // =========================================================
+
+        if (!db.exec(
+            R"(
+            CREATE TABLE IF NOT EXISTS route_rules
+            (
                 route_profile_id INTEGER NOT NULL,
                 rule_order INTEGER NOT NULL,
+
                 name TEXT NOT NULL DEFAULT '',
                 type INTEGER NOT NULL DEFAULT 0,
+
                 ip_version TEXT,
                 network TEXT,
                 protocol TEXT,
+
                 inbound_json TEXT,
                 domain_json TEXT,
                 domain_suffix_json TEXT,
                 domain_keyword_json TEXT,
                 domain_regex_json TEXT,
+
                 source_ip_cidr_json TEXT,
                 source_ip_is_private INTEGER NOT NULL DEFAULT 0,
+
                 ip_cidr_json TEXT,
                 ip_is_private INTEGER NOT NULL DEFAULT 0,
+
                 source_port_json TEXT,
                 source_port_range_json TEXT,
+
                 port_json TEXT,
                 port_range_json TEXT,
+
                 process_name_json TEXT,
                 process_path_json TEXT,
                 process_path_regex_json TEXT,
+
                 rule_set_json TEXT,
+
                 invert INTEGER NOT NULL DEFAULT 0,
+
                 outbound_id INTEGER NOT NULL DEFAULT -2,
+
                 action TEXT NOT NULL DEFAULT 'route',
                 reject_method TEXT,
+
                 no_drop INTEGER NOT NULL DEFAULT 0,
+
                 override_address TEXT,
                 override_port TEXT,
+
                 sniffers_json TEXT,
+
                 sniff_override_dest INTEGER NOT NULL DEFAULT 0,
+
                 strategy TEXT,
+
                 wifi_ssid_json TEXT,
                 wifi_bssid_json TEXT,
-                PRIMARY KEY (route_profile_id, rule_order),
-                FOREIGN KEY(route_profile_id) REFERENCES route_profiles(id) ON DELETE CASCADE
+
+                PRIMARY KEY
+                (
+                    route_profile_id,
+                    rule_order
+                ),
+
+                FOREIGN KEY(route_profile_id)
+                    REFERENCES route_profiles(id)
+                    ON DELETE CASCADE
             )
-        )");
-        if (!routeRulesColumnExists("wifi_ssid_json"))
-            db.exec("ALTER TABLE route_rules ADD COLUMN wifi_ssid_json TEXT");
-        if (!routeRulesColumnExists("wifi_bssid_json"))
-            db.exec("ALTER TABLE route_rules ADD COLUMN wifi_bssid_json TEXT");
+            )"))
+        {
+            MW_show_log(
+                "RoutesRepo::createTables: "
+                "failed to create route_rules table"
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Migration: wifi_ssid_json
+        // =========================================================
+
+        if (!routeRulesColumnExists(
+            "wifi_ssid_json"))
+        {
+            if (!db.exec(
+                "ALTER TABLE route_rules "
+                "ADD COLUMN wifi_ssid_json TEXT"))
+            {
+                MW_show_log(
+                    "RoutesRepo::createTables: "
+                    "failed to add wifi_ssid_json"
+                );
+
+                return false;
+            }
+        }
+
+
+        // =========================================================
+        // Migration: wifi_bssid_json
+        // =========================================================
+
+        if (!routeRulesColumnExists(
+            "wifi_bssid_json"))
+        {
+            if (!db.exec(
+                "ALTER TABLE route_rules "
+                "ADD COLUMN wifi_bssid_json TEXT"))
+            {
+                MW_show_log(
+                    "RoutesRepo::createTables: "
+                    "failed to add wifi_bssid_json"
+                );
+
+                return false;
+            }
+        }
+
+
+        return true;
     }
 
     bool RoutesRepo::routeRulesColumnExists(const char* columnName) const {
@@ -199,40 +311,127 @@ namespace Configs {
         return routeProfile;
     }
 
-    void RoutesRepo::saveToDatabase(const RouteProfile* routeProfile, int id) const {
-        // Check if route profile exists
-        auto checkQuery = db.query("SELECT id FROM route_profiles WHERE id = ?", id);
-        bool exists = checkQuery && checkQuery->executeStep();
-        
-        if (exists) {
-            // Update route profile
-            db.exec(R"(
-                UPDATE route_profiles 
-                SET name = ?, default_outbound_id = ?, updated_at = strftime('%s', 'now')
-                WHERE id = ?
-            )",
-                routeProfile->name.toStdString(),
-                routeProfile->defaultOutboundID,
+    bool RoutesRepo::saveToDatabase(
+        const RouteProfile* routeProfile,
+        int id) const
+    {
+        if (!routeProfile ||
+            id < 0)
+        {
+            return false;
+        }
+
+
+        auto checkQuery =
+            db.query(
+                "SELECT id "
+                "FROM route_profiles "
+                "WHERE id = ?",
                 id
             );
-            
-            // Delete existing rules
-            db.exec("DELETE FROM route_rules WHERE route_profile_id = ?", id);
-        } else {
-            // Insert route profile
-            db.exec(R"(
-                INSERT INTO route_profiles (id, name, default_outbound_id)
-                VALUES (?, ?, ?)
-            )",
-                id,
-                routeProfile->name.toStdString(),
-                routeProfile->defaultOutboundID
-            );
+
+
+        if (!checkQuery)
+        {
+            return false;
         }
-        
-        // Insert rules
-        int ruleOrder = 0;
-        for (const auto& rule : routeProfile->Rules) {
+
+
+        bool exists =
+            false;
+
+
+        try
+        {
+            exists =
+                checkQuery->executeStep();
+        }
+        catch (std::exception& e)
+        {
+            NotifyError(
+                "RoutesRepo::saveToDatabase "
+                "existence check",
+                e
+            );
+
+            return false;
+        }
+
+
+        // Release SELECT before writes.
+        checkQuery = {};
+
+
+        if (exists)
+        {
+            if (!db.exec(
+                R"(
+                UPDATE route_profiles
+                SET name = ?,
+                    default_outbound_id = ?,
+                    updated_at = strftime('%s', 'now')
+                WHERE id = ?
+                )",
+
+                routeProfile
+                ->name
+                .toStdString(),
+
+                routeProfile
+                ->defaultOutboundID,
+
+                id))
+            {
+                return false;
+            }
+
+
+            if (!db.exec(
+                "DELETE FROM route_rules "
+                "WHERE route_profile_id = ?",
+                id))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (!db.exec(
+                R"(
+                INSERT INTO route_profiles
+                (
+                    id,
+                    name,
+                    default_outbound_id
+                )
+                VALUES (?, ?, ?)
+                )",
+
+                id,
+
+                routeProfile
+                ->name
+                .toStdString(),
+
+                routeProfile
+                ->defaultOutboundID))
+            {
+                return false;
+            }
+        }
+
+
+        int ruleOrder =
+            0;
+
+
+        for (const auto& rule :
+            routeProfile->Rules)
+        {
+            if (!rule)
+            {
+                continue;
+            }
             // Serialize QList<QString> fields to JSON
             QJsonArray inboundArray = QListStr2QJsonArray(rule->inbound);
             QJsonArray domainArray = QListStr2QJsonArray(rule->domain);
@@ -272,56 +471,104 @@ namespace Configs {
             QString wifiSsidJson = QString::fromUtf8(QJsonDocument(wifiSsidArray).toJson(QJsonDocument::Compact));
             QString wifiBssidJson = QString::fromUtf8(QJsonDocument(wifiBssidArray).toJson(QJsonDocument::Compact));
             
-            db.exec(R"(
-                INSERT INTO route_rules 
-                (route_profile_id, rule_order, name, type, ip_version, network, protocol,
-                 inbound_json, domain_json, domain_suffix_json, domain_keyword_json, domain_regex_json,
-                 source_ip_cidr_json, source_ip_is_private, ip_cidr_json, ip_is_private,
-                 source_port_json, source_port_range_json, port_json, port_range_json,
-                 process_name_json, process_path_json, process_path_regex_json, rule_set_json,
-                 invert, outbound_id, action, reject_method, no_drop,
-                 override_address, override_port, sniffers_json, sniff_override_dest, strategy,
-                 wifi_ssid_json, wifi_bssid_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            )",
-                id,
-                ruleOrder++,
-                rule->name.toStdString(),
-                rule->type,
-                rule->ip_version.toStdString(),
-                rule->network.toStdString(),
-                rule->protocol.toStdString(),
-                inboundJson.toStdString(),
-                domainJson.toStdString(),
-                domainSuffixJson.toStdString(),
-                domainKeywordJson.toStdString(),
-                domainRegexJson.toStdString(),
-                sourceIpCidrJson.toStdString(),
-                rule->source_ip_is_private ? 1 : 0,
-                ipCidrJson.toStdString(),
-                rule->ip_is_private ? 1 : 0,
-                sourcePortJson.toStdString(),
-                sourcePortRangeJson.toStdString(),
-                portJson.toStdString(),
-                portRangeJson.toStdString(),
-                processNameJson.toStdString(),
-                processPathJson.toStdString(),
-                processPathRegexJson.toStdString(),
-                ruleSetJson.toStdString(),
-                rule->invert ? 1 : 0,
-                rule->outboundID,
-                rule->action.toStdString(),
-                rule->rejectMethod.toStdString(),
-                rule->no_drop ? 1 : 0,
-                rule->override_address.toStdString(),
-                rule->override_port.toStdString(),
-                sniffersJson.toStdString(),
-                rule->sniffOverrideDest ? 1 : 0,
-                rule->strategy.toStdString(),
-                wifiSsidJson.toStdString(),
-                wifiBssidJson.toStdString()
-            );
+            const bool inserted =
+                db.exec(
+                    R"(
+                    INSERT INTO route_rules
+                    (
+                        route_profile_id,
+                        rule_order,
+                        name,
+                        type,
+                        ip_version,
+                        network,
+                        protocol,
+                        inbound_json,
+                        domain_json,
+                        domain_suffix_json,
+                        domain_keyword_json,
+                        domain_regex_json,
+                        source_ip_cidr_json,
+                        source_ip_is_private,
+                        ip_cidr_json,
+                        ip_is_private,
+                        source_port_json,
+                        source_port_range_json,
+                        port_json,
+                        port_range_json,
+                        process_name_json,
+                        process_path_json,
+                        process_path_regex_json,
+                        rule_set_json,
+                        invert,
+                        outbound_id,
+                        action,
+                        reject_method,
+                        no_drop,
+                        override_address,
+                        override_port,
+                        sniffers_json,
+                        sniff_override_dest,
+                        strategy,
+                        wifi_ssid_json,
+                        wifi_bssid_json
+                    )
+                    VALUES
+                    (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?
+                    )
+                    )",
+
+                    id,
+                    ruleOrder++,
+                    rule->name.toStdString(),
+                    rule->type,
+                    rule->ip_version.toStdString(),
+                    rule->network.toStdString(),
+                    rule->protocol.toStdString(),
+                    inboundJson.toStdString(),
+                    domainJson.toStdString(),
+                    domainSuffixJson.toStdString(),
+                    domainKeywordJson.toStdString(),
+                    domainRegexJson.toStdString(),
+                    sourceIpCidrJson.toStdString(),
+                    rule->source_ip_is_private ? 1 : 0,
+                    ipCidrJson.toStdString(),
+                    rule->ip_is_private ? 1 : 0,
+                    sourcePortJson.toStdString(),
+                    sourcePortRangeJson.toStdString(),
+                    portJson.toStdString(),
+                    portRangeJson.toStdString(),
+                    processNameJson.toStdString(),
+                    processPathJson.toStdString(),
+                    processPathRegexJson.toStdString(),
+                    ruleSetJson.toStdString(),
+                    rule->invert ? 1 : 0,
+                    rule->outboundID,
+                    rule->action.toStdString(),
+                    rule->rejectMethod.toStdString(),
+                    rule->no_drop ? 1 : 0,
+                    rule->override_address.toStdString(),
+                    rule->override_port.toStdString(),
+                    sniffersJson.toStdString(),
+                    rule->sniffOverrideDest ? 1 : 0,
+                    rule->strategy.toStdString(),
+                    wifiSsidJson.toStdString(),
+                    wifiBssidJson.toStdString()
+                    );
+    
+    
+                if (!inserted)
+                {
+                    return false;
+                }
         }
+    
+    
+        return true;
     }
 
     QJsonObject RoutesRepo::ruleJsonFromRow(SQLite::Statement& stmt, int baseCol) const {
@@ -440,13 +687,61 @@ namespace Configs {
         return std::make_shared<RouteProfile>();
     }
 
-    bool RoutesRepo::AddRouteProfile(std::shared_ptr<RouteProfile>& routeProfile) {
-        if (routeProfile->id >= 0) return false;
-        int newId = NewRouteProfileID();
-        routeProfile->id = newId;
-        QMutexLocker locker(&mutex);
-        identityMap[newId] = std::weak_ptr<RouteProfile>(routeProfile);
-        saveToDatabase(routeProfile.get(), routeProfile->id);
+    bool RoutesRepo::AddRouteProfile(
+        std::shared_ptr<RouteProfile>& routeProfile)
+    {
+        if (!routeProfile)
+        {
+            return false;
+        }
+
+
+        if (routeProfile->id >= 0)
+        {
+            return false;
+        }
+
+
+        const int newId =
+            NewRouteProfileID();
+
+
+        if (newId <= 0)
+        {
+            return false;
+        }
+
+
+        routeProfile->id =
+            newId;
+
+
+        // Persist FIRST.
+        if (!saveToDatabase(
+            routeProfile.get(),
+            newId))
+        {
+            routeProfile->id =
+                -1;
+
+            return false;
+        }
+
+
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            identityMap[newId] =
+                std::weak_ptr<RouteProfile>(
+                    routeProfile
+                );
+        }
+
+
         return true;
     }
 
@@ -462,22 +757,91 @@ namespace Configs {
         return routeProfile;
     }
 
-    void RoutesRepo::DeleteRouteProfile(int id) {
-        QMutexLocker locker(&mutex);
-        identityMap.erase(id);
-        db.exec("DELETE FROM route_profiles WHERE id = ?", id);
+    bool RoutesRepo::DeleteRouteProfile(
+        int id)
+    {
+        // =========================================================
+        // Validation
+        // =========================================================
+
+        if (id < 0)
+        {
+            MW_show_log(
+                "RoutesRepo::DeleteRouteProfile: "
+                "invalid route profile ID"
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Serialize repository mutation.
+        // =========================================================
+
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        // =========================================================
+        // Persist FIRST.
+        //
+        // route_rules are removed automatically because
+        // route_rules.route_profile_id has ON DELETE CASCADE.
+        // =========================================================
+
+        const bool deleted =
+            db.exec(
+                "DELETE FROM route_profiles "
+                "WHERE id = ?",
+                id
+            );
+
+
+        if (!deleted)
+        {
+            MW_show_log(
+                "RoutesRepo::DeleteRouteProfile: "
+                "failed to delete route profile "
+                +
+                Int2String(id)
+            );
+
+            return false;
+        }
+
+
+        // =========================================================
+        // Update memory only after SQLite accepted the DELETE.
+        // =========================================================
+
+        identityMap.erase(
+            id
+        );
+
+
+        return true;
     }
 
-    void RoutesRepo::UpdateRouteProfiles(
+    bool RoutesRepo::UpdateRouteProfiles(
         const QList<
         std::shared_ptr<RouteProfile>
         >& routeProfiles)
     {
-        QSet<int> existingIds;
+        // =========================================================
+        // PHASE 1
+        //
+        // Read currently persisted IDs.
+        //
+        // Do this BEFORE taking RoutesRepo::mutex.
+        // =========================================================
 
-        // -------------------------------------------------
-        // Read DB first, then RELEASE db_mutex
-        // -------------------------------------------------
+        QSet<int>
+            existingIds;
+
+
         {
             auto query =
                 db.query(
@@ -485,10 +849,21 @@ namespace Configs {
                     "FROM route_profiles"
                 );
 
-            if (query) {
 
-                while (
-                    query->executeStep())
+            if (!query)
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "failed to read existing route profile IDs"
+                );
+
+                return false;
+            }
+
+
+            try
+            {
+                while (query->executeStep())
                 {
                     existingIds.insert(
                         query
@@ -497,52 +872,296 @@ namespace Configs {
                     );
                 }
             }
+            catch (const std::exception& e)
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "failed while reading existing IDs: "
+                    +
+                    QString::fromUtf8(
+                        e.what()
+                    )
+                );
+
+                return false;
+            }
         }
 
-        // -------------------------------------------------
-        // Only now acquire repository mutex
-        // -------------------------------------------------
 
-        QMutexLocker locker(
-            &mutex
+        // =========================================================
+        // PHASE 2
+        //
+        // Validate input.
+        // =========================================================
+
+        QSet<int>
+            newIds;
+
+
+        struct AssignedNewId
+        {
+            std::shared_ptr<RouteProfile>
+                profile;
+
+            int id =
+                -1;
+        };
+
+
+        QList<AssignedNewId>
+            newlyAssigned;
+
+
+        newlyAssigned.reserve(
+            routeProfiles.size()
         );
 
-        QSet<int> newIds;
+
+        // =========================================================
+        // PHASE 3
+        //
+        // Serialize RoutesRepo changes.
+        // =========================================================
+
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        // =========================================================
+        // Persist every supplied RouteProfile.
+        // =========================================================
 
         for (const auto& routeProfile :
             routeProfiles)
         {
-            if (!routeProfile) {
-                continue;
+            if (!routeProfile)
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "null RouteProfile in input"
+                );
+
+                // Undo IDs which we assigned during this call.
+                for (auto it =
+                    newlyAssigned.rbegin();
+                    it !=
+                    newlyAssigned.rend();
+                    ++it)
+                {
+                    if (it->profile &&
+                        it->profile->id ==
+                        it->id)
+                    {
+                        it->profile->id =
+                            -1;
+                    }
+                }
+
+                return false;
             }
 
-            if (routeProfile->id < 0) {
+
+            // =====================================================
+            // Allocate ID for a new profile.
+            // =====================================================
+
+            if (routeProfile->id < 0)
+            {
+                const int newId =
+                    NewRouteProfileID();
+
+
+                if (newId <= 0)
+                {
+                    MW_show_log(
+                        "RoutesRepo::UpdateRouteProfiles: "
+                        "failed to allocate RouteProfile ID"
+                    );
+
+
+                    for (auto it =
+                        newlyAssigned.rbegin();
+                        it !=
+                        newlyAssigned.rend();
+                        ++it)
+                    {
+                        if (it->profile &&
+                            it->profile->id ==
+                            it->id)
+                        {
+                            it->profile->id =
+                                -1;
+                        }
+                    }
+
+
+                    return false;
+                }
+
 
                 routeProfile->id =
-                    NewRouteProfileID();
+                    newId;
+
+
+                newlyAssigned.append(
+                    {
+                        routeProfile,
+                        newId
+                    }
+                );
             }
 
+
+            const int id =
+                routeProfile->id;
+
+
+            // =====================================================
+            // Duplicate IDs in input are invalid.
+            // =====================================================
+
+            if (newIds.contains(
+                id))
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "duplicate RouteProfile ID "
+                    +
+                    Int2String(id)
+                );
+
+
+                for (auto it =
+                    newlyAssigned.rbegin();
+                    it !=
+                    newlyAssigned.rend();
+                    ++it)
+                {
+                    if (it->profile &&
+                        it->profile->id ==
+                        it->id)
+                    {
+                        it->profile->id =
+                            -1;
+                    }
+                }
+
+
+                return false;
+            }
+
+
             newIds.insert(
-                routeProfile->id
+                id
             );
 
-            saveToDatabase(
+
+            // =====================================================
+            // Persist FIRST.
+            //
+            // This assumes saveToDatabase() has already been changed
+            // from void -> bool as described in the RoutesRepo
+            // migration.
+            // =====================================================
+
+            if (!saveToDatabase(
                 routeProfile.get(),
-                routeProfile->id
-            );
+                id))
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "failed to persist RouteProfile "
+                    +
+                    Int2String(id)
+                );
+
+
+                // Roll back only IDs assigned in memory.
+                //
+                // NOTE:
+                // This does NOT yet make the complete multi-profile
+                // DB operation atomic. That will require one SQLite
+                // transaction around the complete update.
+                for (auto it =
+                    newlyAssigned.rbegin();
+                    it !=
+                    newlyAssigned.rend();
+                    ++it)
+                {
+                    if (it->profile &&
+                        it->profile->id ==
+                        it->id)
+                    {
+                        it->profile->id =
+                            -1;
+                    }
+                }
+
+
+                return false;
+            }
         }
 
-        std::vector<int> toDelete;
 
-        for (int id : existingIds) {
+        // =========================================================
+        // Determine obsolete profiles.
+        // =========================================================
 
-            if (!newIds.contains(id)) {
+        std::vector<int>
+            toDelete;
 
+
+        toDelete.reserve(
+            static_cast<size_t>(
+                existingIds.size()
+                )
+        );
+
+
+        for (const int id :
+        existingIds)
+        {
+            if (!newIds.contains(
+                id))
+            {
                 toDelete.push_back(
                     id
                 );
             }
         }
+
+
+        // =========================================================
+        // Delete obsolete persistent rows BEFORE changing cache.
+        // =========================================================
+
+        if (!toDelete.empty())
+        {
+            if (!db.execDeleteByIdIn(
+                "route_profiles",
+                "id",
+                toDelete))
+            {
+                MW_show_log(
+                    "RoutesRepo::UpdateRouteProfiles: "
+                    "failed to delete obsolete route profiles"
+                );
+
+
+                return false;
+            }
+        }
+
+
+        // =========================================================
+        // PHASE 4
+        //
+        // DB operations succeeded.
+        //
+        // Publish identity map changes.
+        // =========================================================
 
         for (const auto& routeProfile :
             routeProfiles)
@@ -553,6 +1172,7 @@ namespace Configs {
                 continue;
             }
 
+
             identityMap[
                 routeProfile->id
             ] =
@@ -561,19 +1181,17 @@ namespace Configs {
                 );
         }
 
-        for (int id : toDelete) {
 
-            identityMap.erase(id);
-        }
-
-        if (!toDelete.empty()) {
-
-            db.execDeleteByIdIn(
-                "route_profiles",
-                "id",
-                toDelete
+        for (const int id :
+        toDelete)
+        {
+            identityMap.erase(
+                id
             );
         }
+
+
+        return true;
     }
 
     QList<int> RoutesRepo::GetAllRouteProfileIds() const {
@@ -745,19 +1363,42 @@ namespace Configs {
         return 0;
     }
 
-    bool RoutesRepo::Save(const std::shared_ptr<RouteProfile>& routeProfile) {
-        if (!routeProfile) {
+    bool RoutesRepo::Save(
+        const std::shared_ptr<RouteProfile>& routeProfile)
+    {
+        if (!routeProfile ||
+            routeProfile->id < 0)
+        {
             return false;
         }
-        
-        if (routeProfile->id < 0) {
-            return false; // Route profile doesn't have an ID, use AddRouteProfile instead
+
+
+        const int id =
+            routeProfile->id;
+
+
+        if (!saveToDatabase(
+            routeProfile.get(),
+            id))
+        {
+            return false;
         }
-        
-        QMutexLocker locker(&mutex);
-        saveToDatabase(routeProfile.get(), routeProfile->id);
-        identityMap[routeProfile->id] = std::weak_ptr<RouteProfile>(routeProfile);
-        
+
+
+        {
+            std::lock_guard<std::mutex>
+                locker(
+                    mutex
+                );
+
+
+            identityMap[id] =
+                std::weak_ptr<RouteProfile>(
+                    routeProfile
+                );
+        }
+
+
         return true;
     }
 }
