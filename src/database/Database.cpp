@@ -1,6 +1,8 @@
 #include "include/database/Database.h"
 #include <3rdparty/SQLiteCpp/include/Backup.h>
+
 #include <set>
+#include <stdexcept>
 
 namespace Configs {
     void Database::maybeCheckpoint(
@@ -1899,6 +1901,238 @@ namespace Configs {
 
             NotifyError(
                 "deleteProfilesAtomic",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
+    bool Database::deleteProfilesWithGroupUpdatesAtomic(
+        const std::vector<GroupProfilesUpdateRow>& groupUpdates,
+        const std::vector<int>& profileIds)
+    {
+        // =========================================================
+        // Nothing to delete.
+        // =========================================================
+
+        if (profileIds.empty())
+        {
+            return true;
+        }
+
+
+        // =========================================================
+        // Validate input BEFORE opening transaction.
+        // =========================================================
+
+        std::set<int>
+            uniqueGroupIds;
+
+
+        for (const auto& update :
+            groupUpdates)
+        {
+            if (update.id < 0)
+            {
+                MW_show_log(
+                    "Database::deleteProfilesWithGroupUpdatesAtomic: "
+                    "invalid Group ID"
+                );
+
+                return false;
+            }
+
+
+            const auto [
+                iterator,
+                inserted
+            ] =
+                uniqueGroupIds.insert(
+                    update.id
+                );
+
+
+            if (!inserted)
+            {
+                MW_show_log(
+                    "Database::deleteProfilesWithGroupUpdatesAtomic: "
+                    "duplicate Group ID "
+                    +
+                    Int2String(
+                        update.id
+                    )
+                );
+
+                return false;
+            }
+        }
+
+
+        // =========================================================
+        // The complete cross-table operation owns the SQLite
+        // connection until COMMIT / ROLLBACK.
+        // =========================================================
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        try
+        {
+            SQLite::Transaction transaction(
+                db,
+                SQLite::TransactionBehavior::IMMEDIATE
+            );
+
+
+            // =====================================================
+            // PHASE 1
+            //
+            // Update every affected Group.
+            //
+            // Only profiles_json is changed.
+            //
+            // Do NOT replace the complete Group row here because the
+            // snapshot used by BatchDeleteProfiles may not contain
+            // the latest unrelated settings.
+            // =====================================================
+
+            if (!groupUpdates.empty())
+            {
+                SQLite::Statement groupStmt(
+                    db,
+
+                    R"(
+                UPDATE groups
+                SET profiles_json = ?,
+                    updated_at = strftime('%s', 'now')
+                WHERE id = ?
+                )"
+                );
+
+
+                for (const auto& update :
+                    groupUpdates)
+                {
+                    groupStmt.bind(
+                        1,
+                        update.profiles_json
+                    );
+
+
+                    groupStmt.bind(
+                        2,
+                        update.id
+                    );
+
+
+                    const int affectedRows =
+                        groupStmt.exec();
+
+
+                    if (affectedRows != 1)
+                    {
+                        throw std::runtime_error(
+                            "Database::deleteProfilesWithGroupUpdatesAtomic: "
+                            "Group row not found: "
+                            +
+                            std::to_string(
+                                update.id
+                            )
+                        );
+                    }
+
+
+                    groupStmt.reset();
+                }
+            }
+
+
+            // =====================================================
+            // PHASE 2
+            //
+            // Delete all requested Profiles.
+            //
+            // execDeleteByIdInChunk() intentionally does NOT catch
+            // SQLite exceptions, therefore any failure propagates
+            // into this transaction and causes complete rollback.
+            // =====================================================
+
+            constexpr std::size_t chunkSize =
+                500;
+
+
+            for (std::size_t offset = 0;
+                offset < profileIds.size();
+                offset += chunkSize)
+            {
+                const std::size_t end =
+                    std::min(
+                        offset + chunkSize,
+                        profileIds.size()
+                    );
+
+
+                std::vector<int>
+                    chunk(
+                        profileIds.begin()
+                        +
+                        static_cast<std::ptrdiff_t>(
+                            offset
+                            ),
+
+                        profileIds.begin()
+                        +
+                        static_cast<std::ptrdiff_t>(
+                            end
+                            )
+                    );
+
+
+                execDeleteByIdInChunk(
+                    "profiles",
+                    "id",
+                    chunk
+                );
+            }
+
+
+            // =====================================================
+            // Both:
+            //
+            //     groups.profiles_json
+            //     profiles rows
+            //
+            // become visible together.
+            // =====================================================
+
+            transaction.commit();
+
+
+            // Count only committed writes.
+            maybeCheckpoint(
+                static_cast<int>(
+                    groupUpdates.size()
+                    +
+                    profileIds.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            // SQLite::Transaction automatically rolls back because
+            // commit() was not reached.
+
+            NotifyError(
+                "Database::deleteProfilesWithGroupUpdatesAtomic",
                 e
             );
 

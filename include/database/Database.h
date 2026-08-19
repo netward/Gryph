@@ -71,6 +71,21 @@ namespace Configs
         int test_items_to_show = 0;
     };
 
+    // =============================================================
+    // Partial Group update used by atomic Profile deletion.
+    //
+    // We deliberately store ONLY profiles_json here.
+    //
+    // BatchDeleteProfiles must not overwrite unrelated Group fields
+    // from an old snapshot.
+    // =============================================================
+    struct GroupProfilesUpdateRow
+    {
+        int id = -1;
+
+        std::string profiles_json;
+    };
+
     struct RouteRuleInsertRow
     {
         std::string name;
@@ -606,6 +621,12 @@ namespace Configs
         [[nodiscard]]
         bool deleteProfilesAtomic(
             const std::vector<int>& ids
+        );
+
+        [[nodiscard]]
+        bool deleteProfilesWithGroupUpdatesAtomic(
+            const std::vector<GroupProfilesUpdateRow>& groupUpdates,
+            const std::vector<int>& profileIds
         );
 
         void backupTo(

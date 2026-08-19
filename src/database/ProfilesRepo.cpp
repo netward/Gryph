@@ -5,6 +5,7 @@
 #include <map>
 #include <stdexcept>
 
+#include <QSet>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -2063,91 +2064,305 @@ namespace Configs {
         return names;
     }
 
-    bool ProfilesRepo::BatchDeleteProfiles(QList<int>& ids, bool stopRunningProfile) {
-        QSet<int> groupIDs;
-        if (ids.contains(dataManager->settingsRepo->started_id)) {
-            if (stopRunningProfile) {
-                MainWindowApi::StopProfile(false, true, false);
-            }
-            else ids.removeAll(dataManager->settingsRepo->started_id);
+    bool ProfilesRepo::BatchDeleteProfiles(
+        QList<int>& ids,
+        bool stopRunningProfile)
+    {
+        // =========================================================
+        // Required global repositories
+        // =========================================================
+
+        if (!dataManager ||
+            !dataManager->settingsRepo ||
+            !dataManager->groupsRepo)
+        {
+            MW_show_log(
+                "ProfilesRepo::BatchDeleteProfiles: "
+                "database repositories are unavailable"
+            );
+
+            return false;
         }
-        auto profiles = GetProfileBatch(ids);
-        for (const auto& ent : profiles) {
-            groupIDs.insert(
-                ent->GroupId()
+
+
+        // =========================================================
+        // Running Profile protection
+        // =========================================================
+
+        const int startedId =
+            dataManager
+            ->settingsRepo
+            ->started_id;
+
+
+        if (ids.contains(
+            startedId))
+        {
+            if (stopRunningProfile)
+            {
+                MainWindowApi::StopProfile(
+                    false,
+                    true,
+                    false
+                );
+            }
+            else
+            {
+                ids.removeAll(
+                    startedId
+                );
+            }
+        }
+
+
+        // =========================================================
+        // Normalize requested IDs.
+        // =========================================================
+
+        QList<int>
+            deleteIds;
+
+
+        deleteIds.reserve(
+            ids.size()
+        );
+
+
+        QSet<int>
+            seenIds;
+
+
+        seenIds.reserve(
+            ids.size()
+        );
+
+
+        for (const int id :
+        ids)
+        {
+            if (id < 0)
+            {
+                continue;
+            }
+
+
+            if (seenIds.contains(
+                id))
+            {
+                continue;
+            }
+
+
+            seenIds.insert(
+                id
+            );
+
+
+            deleteIds.append(
+                id
             );
         }
-        for (auto groupID : groupIDs) {
-            auto group = dataManager->groupsRepo->GetGroup(groupID);
-            if (!group) {
-                MW_show_log("Could not find group with id " + Int2String(groupID));
-                return false;
+
+
+        if (deleteIds.isEmpty())
+        {
+            return true;
+        }
+
+
+        // =========================================================
+        // PHASE 1
+        //
+        // Resolve existing Profiles before taking the delete lock.
+        //
+        // GetProfileBatch() may perform SQLite reads.
+        // =========================================================
+
+        const auto profiles =
+            GetProfileBatch(
+                deleteIds
+            );
+
+
+        // =========================================================
+        // Resolve affected Groups.
+        //
+        // Do this BEFORE ProfilesRepo::mutex is held.
+        //
+        // That avoids taking GroupsRepo::mutex indirectly through
+        // GetGroup() while already inside deletion state.
+        // =========================================================
+
+        QList<std::shared_ptr<Group>>
+            affectedGroups;
+
+
+        QSet<int>
+            affectedGroupIds;
+
+
+        affectedGroups.reserve(
+            profiles.size()
+        );
+
+
+        affectedGroupIds.reserve(
+            profiles.size()
+        );
+
+
+        for (const auto& profile :
+            profiles)
+        {
+            if (!profile)
+            {
+                continue;
             }
-            group->RemoveProfileBatch(ids);
-            if (!dataManager
-                ->groupsRepo
-                ->Save(group))
+
+
+            const int groupId =
+                profile->GroupId();
+
+
+            if (groupId < 0)
             {
                 MW_show_log(
                     "ProfilesRepo::BatchDeleteProfiles: "
-                    "failed to persist Group "
-                    +
-                    Int2String(groupID)
+                    "Profile has invalid Group ID"
                 );
 
                 return false;
             }
+
+
+            if (affectedGroupIds.contains(
+                groupId))
+            {
+                continue;
+            }
+
+
+            auto group =
+                dataManager
+                ->groupsRepo
+                ->GetGroup(
+                    groupId
+                );
+
+
+            if (!group)
+            {
+                MW_show_log(
+                    "ProfilesRepo::BatchDeleteProfiles: "
+                    "could not find Group "
+                    +
+                    Int2String(
+                        groupId
+                    )
+                );
+
+
+                return false;
+            }
+
+
+            affectedGroupIds.insert(
+                groupId
+            );
+
+
+            affectedGroups.append(
+                std::move(
+                    group
+                )
+            );
         }
 
+
         // =========================================================
-        // Delete persistent Profiles
+        // PHASE 2
+        //
+        // Serialize Profile deletion.
+        //
+        // Holding ProfilesRepo::mutex prevents GetProfile() /
+        // GetProfileBatch() from publishing an identityMap entry
+        // while the cross-table delete is being committed.
+        //
+        // Lock order for this operation:
+        //
+        //     ProfilesRepo::mutex
+        //             ↓
+        //     GroupsRepo::mutex
+        //             ↓
+        //     Database::db_mutex
         // =========================================================
 
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        // =========================================================
+        // PHASE 3
+        //
+        // Atomically:
+        //
+        //     groups.profiles_json
+        //             +
+        //     DELETE profiles
+        //
+        // GroupsRepo updates its live Group objects only after
+        // SQLite COMMIT.
+        // =========================================================
+
+        const bool committed =
+            dataManager
+            ->groupsRepo
+            ->CommitProfileDeletion(
+                deleteIds,
+                affectedGroups
+            );
+
+
+        if (!committed)
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
+            MW_show_log(
+                "ProfilesRepo::BatchDeleteProfiles: "
+                "atomic delete failed"
+            );
 
 
-            if (!ids.isEmpty())
-            {
-                ++deletionEpoch_;
+            // Nothing was committed to SQLite and identityMap stays
+            // unchanged.
+            return false;
+        }
 
 
-                const std::vector<int> idVec(
-                    ids.begin(),
-                    ids.end()
-                );
+        // =========================================================
+        // SQLite deletion succeeded.
+        //
+        // Increment epoch BEFORE releasing ProfilesRepo::mutex.
+        //
+        // Any GetProfile()/GetProfileBatch() operation which read
+        // SQLite while this deletion was running will observe the
+        // changed epoch when it tries to publish its result and will
+        // retry instead of resurrecting a deleted Profile.
+        // =========================================================
+
+        ++deletionEpoch_;
 
 
-                // Persist FIRST.
-                const bool deleted =
-                    db.deleteProfilesAtomic(
-                        idVec
-                    );
+        // =========================================================
+        // Remove deleted objects from Profile identity map.
+        // =========================================================
 
-
-                if (!deleted)
-                {
-                    MW_show_log(
-                        "ProfilesRepo::BatchDeleteProfiles: "
-                        "failed to delete Profiles from SQLite"
-                    );
-
-                    return false;
-                }
-
-
-                // Only now remove cached objects.
-                for (const int id :
-                ids)
-                {
-                    identityMap.erase(
-                        id
-                    );
-                }
-            }
+        for (const int id :
+        deleteIds)
+        {
+            identityMap.erase(
+                id
+            );
         }
 
 

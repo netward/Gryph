@@ -166,6 +166,26 @@ namespace Configs
             const std::shared_ptr<Group>& group
         );
 
+        // =============================================================
+        // Cross-repository atomic Profile deletion.
+        //
+        // Persists:
+        //
+        //     affected groups.profiles_json
+        //         +
+        //     DELETE FROM profiles
+        //
+        // in one SQLite transaction.
+        //
+        // Group in-memory state is updated only after successful COMMIT.
+        // =============================================================
+
+        [[nodiscard]]
+        bool CommitProfileDeletion(
+            const QList<int>& profileIds,
+            const QList<std::shared_ptr<Group>>& affectedGroups
+        );
+
 
         // =====================================================
         // Subscription state

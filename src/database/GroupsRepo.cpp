@@ -4,6 +4,7 @@
 
 #include <stdexcept>
 
+#include <QSet>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QMutexLocker>
@@ -1187,6 +1188,343 @@ namespace Configs
 
             memMap[snapshot.id] =
                 group;
+        }
+
+
+        return true;
+    }
+
+    bool GroupsRepo::CommitProfileDeletion(
+        const QList<int>& profileIds,
+        const QList<std::shared_ptr<Group>>& affectedGroups)
+    {
+        // =========================================================
+        // Empty deletion is already complete.
+        // =========================================================
+
+        if (profileIds.isEmpty())
+        {
+            return true;
+        }
+
+
+        // =========================================================
+        // Normalize IDs.
+        //
+        // Database should never receive negative IDs or duplicates.
+        // =========================================================
+
+        QSet<int>
+            idsToDelete;
+
+
+        idsToDelete.reserve(
+            profileIds.size()
+        );
+
+
+        for (const int id :
+        profileIds)
+        {
+            if (id >= 0)
+            {
+                idsToDelete.insert(
+                    id
+                );
+            }
+        }
+
+
+        if (idsToDelete.isEmpty())
+        {
+            return true;
+        }
+
+
+        // =========================================================
+        // Serialize ALL Group persistence while this cross-table
+        // operation is being prepared and committed.
+        //
+        // GroupsRepo::Save() uses the same mutex, therefore it
+        // cannot write a stale profiles_json in the middle of this
+        // operation.
+        // =========================================================
+
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        // =========================================================
+        // Prepare DB-only Group updates.
+        // =========================================================
+
+        std::vector<GroupProfilesUpdateRow>
+            groupUpdates;
+
+
+        groupUpdates.reserve(
+            static_cast<std::size_t>(
+                affectedGroups.size()
+                )
+        );
+
+
+        QList<std::shared_ptr<Group>>
+            groupsToApply;
+
+
+        groupsToApply.reserve(
+            affectedGroups.size()
+        );
+
+
+        QSet<int>
+            processedGroupIds;
+
+
+        processedGroupIds.reserve(
+            affectedGroups.size()
+        );
+
+
+        for (const auto& group :
+            affectedGroups)
+        {
+            if (!group)
+            {
+                MW_show_log(
+                    "GroupsRepo::CommitProfileDeletion: "
+                    "null Group"
+                );
+
+                return false;
+            }
+
+
+            // =====================================================
+            // Freeze current Group state.
+            // =====================================================
+
+            const GroupSnapshot snapshot =
+                group->Snapshot();
+
+
+            if (snapshot.id < 0)
+            {
+                MW_show_log(
+                    "GroupsRepo::CommitProfileDeletion: "
+                    "invalid Group identity"
+                );
+
+                return false;
+            }
+
+
+            // Same Group may accidentally be supplied more than once.
+            if (processedGroupIds.contains(
+                snapshot.id))
+            {
+                continue;
+            }
+
+
+            processedGroupIds.insert(
+                snapshot.id
+            );
+
+
+            // =====================================================
+            // Calculate the list which must be persisted.
+            //
+            // IMPORTANT:
+            //
+            // Do NOT mutate Group memory yet.
+            //
+            // SQLite must COMMIT first.
+            // =====================================================
+
+            QList<int>
+                newProfiles;
+
+
+            newProfiles.reserve(
+                snapshot.profiles.size()
+            );
+
+
+            bool changed =
+                false;
+
+
+            for (const int profileId :
+            snapshot.profiles)
+            {
+                if (idsToDelete.contains(
+                    profileId))
+                {
+                    changed =
+                        true;
+
+                    continue;
+                }
+
+
+                newProfiles.append(
+                    profileId
+                );
+            }
+
+
+            // The group doesn't actually reference any of the
+            // deleted Profiles.
+            if (!changed)
+            {
+                continue;
+            }
+
+
+            // =====================================================
+            // Serialize only profiles_json.
+            // =====================================================
+
+            const QJsonArray profilesArray =
+                QListInt2QJsonArray(
+                    newProfiles
+                );
+
+
+            const QByteArray profilesJson =
+                QJsonDocument(
+                    profilesArray
+                )
+                .toJson(
+                    QJsonDocument::Compact
+                );
+
+
+            GroupProfilesUpdateRow row;
+
+
+            row.id =
+                snapshot.id;
+
+
+            row.profiles_json =
+                QString::fromUtf8(
+                    profilesJson
+                )
+                .toStdString();
+
+
+            groupUpdates.push_back(
+                std::move(
+                    row
+                )
+            );
+
+
+            groupsToApply.append(
+                group
+            );
+        }
+
+
+        // =========================================================
+        // Convert Profile IDs into the DB representation.
+        // =========================================================
+
+        std::vector<int>
+            dbProfileIds;
+
+
+        dbProfileIds.reserve(
+            static_cast<std::size_t>(
+                idsToDelete.size()
+                )
+        );
+
+
+        for (const int id :
+        idsToDelete)
+        {
+            dbProfileIds.push_back(
+                id
+            );
+        }
+
+
+        // =========================================================
+        // ATOMIC DATABASE PHASE
+        //
+        // ONE transaction:
+        //
+        //     UPDATE group 1 profiles_json
+        //     UPDATE group 2 profiles_json
+        //     ...
+        //     DELETE profiles
+        //
+        // Either everything commits or nothing does.
+        // =========================================================
+
+        const bool persisted =
+            db.deleteProfilesWithGroupUpdatesAtomic(
+                groupUpdates,
+                dbProfileIds
+            );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "GroupsRepo::CommitProfileDeletion: "
+                "atomic database transaction failed"
+            );
+
+
+            return false;
+        }
+
+
+        // =========================================================
+        // SQLite COMMIT succeeded.
+        //
+        // NOW update live Group objects.
+        //
+        // Use RemoveProfileBatch() rather than ReplaceProfiles().
+        //
+        // This is deliberate:
+        //
+        // If another thread changed an unrelated part of the current
+        // in-memory ordering while SQLite was working, we only remove
+        // the deleted IDs rather than overwriting the complete list
+        // with an older snapshot.
+        // =========================================================
+
+        for (const auto& group :
+            groupsToApply)
+        {
+            if (!group)
+            {
+                continue;
+            }
+
+
+            group->RemoveProfileBatch(
+                profileIds
+            );
+
+
+            const int groupId =
+                group->Id();
+
+
+            if (groupId >= 0)
+            {
+                memMap[groupId] =
+                    group;
+            }
         }
 
 
