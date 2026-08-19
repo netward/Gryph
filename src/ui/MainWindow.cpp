@@ -21,7 +21,7 @@
 #include "include/ui/profile/dialog_edit_profile.h"
 #include "include/ui/setting/dialog_basic_settings.h"
 #include "include/ui/group/DialogManageGroups.h"
-#include "include/ui/setting/dialog_manage_routes.h"
+#include "include/ui/setting/DialogManageRoutes.h"
 #include "include/ui/setting/dialog_vpn_settings.h"
 #include "include/ui/setting/dialog_hotkey.h"
 

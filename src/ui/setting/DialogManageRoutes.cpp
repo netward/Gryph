@@ -1,4 +1,4 @@
-#include "include/ui/setting/dialog_manage_routes.h"
+#include "include/ui/setting/DialogManageRoutes.h"
 
 #include <QClipboard>
 

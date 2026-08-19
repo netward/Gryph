@@ -5,6 +5,7 @@
 #include <functional>
 #include <utility>
 
+#include <QCoreApplication>
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
@@ -121,7 +122,6 @@ namespace
         return true;
     }
 
-
     // =========================================================
     // Synchronous boolean dispatch
     //
@@ -134,7 +134,6 @@ namespace
     // Worker thread:
     //     BlockingQueuedConnection.
     // =========================================================
-
     bool dispatchBoolToMainWindow(
         std::function<bool(MainWindow&)> callback,
         bool fallback = false)
@@ -145,22 +144,46 @@ namespace
         }
 
 
-        MainWindow* target =
-            nullptr;
+        QCoreApplication* application =
+            QCoreApplication::instance();
 
 
-        bool sameThread =
-            false;
-
-
+        if (!application ||
+            QCoreApplication::closingDown())
         {
-            QMutexLocker locker(
-                &g_mainWindowMutex
-            );
+            return fallback;
+        }
 
 
-            target =
-                g_mainWindow.data();
+        QThread* uiThread =
+            application->thread();
+
+
+        if (!uiThread)
+        {
+            return fallback;
+        }
+
+        // =========================================================
+        // Already on UI thread
+        // =========================================================
+        if (QThread::currentThread()
+            ==
+            uiThread)
+        {
+            MainWindow* target =
+                nullptr;
+
+
+            {
+                QMutexLocker locker(
+                    &g_mainWindowMutex
+                );
+
+
+                target =
+                    g_mainWindow.data();
+            }
 
 
             if (!target)
@@ -169,63 +192,68 @@ namespace
             }
 
 
-            sameThread =
-                target->thread()
-                ==
-                QThread::currentThread();
-        }
-
-
-        // =====================================================
-        // UI thread
-        // =====================================================
-
-        if (sameThread)
-        {
             return callback(
                 *target
             );
         }
 
-
-        // =====================================================
-        // Worker thread
-        //
-        // MainWindow is QObject context.
-        // =====================================================
-
+        // =========================================================
+        // Worker -> UI
+        // =========================================================
         bool result =
             fallback;
 
 
         const bool invoked =
             QMetaObject::invokeMethod(
-                target,
+                application,
 
                 [
-                    target,
                     callback =
-                    std::move(callback),
-                &result
+                        std::move(callback),
+
+                        fallback,
+
+                        &result
                 ]() mutable
                 {
+                    MainWindow* target =
+                        nullptr;
+
+
+                    {
+                        QMutexLocker locker(
+                            &g_mainWindowMutex
+                        );
+
+
+                        target =
+                            g_mainWindow.data();
+                    }
+
+
+                    if (!target)
+                    {
+                        result =
+                            fallback;
+
+                        return;
+                    }
+
+
                     result =
                         callback(
                             *target
                         );
                 },
 
-                Qt::BlockingQueuedConnection
-            );
+                        Qt::BlockingQueuedConnection
+                        );
 
 
-        if (!invoked)
-        {
-            return fallback;
-        }
-
-
-        return result;
+        return invoked
+            ? result
+            : fallback;
     }
 }
 

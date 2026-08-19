@@ -200,9 +200,9 @@ set(PROJECT_SOURCES
         include/ui/group/DialogManageGroups.h
         include/ui/group/DialogManageGroups.ui
 
-        src/ui/setting/dialog_manage_routes.cpp
-        include/ui/setting/dialog_manage_routes.h
-        include/ui/setting/dialog_manage_routes.ui
+        src/ui/setting/DialogManageRoutes.cpp
+        include/ui/setting/DialogManageRoutes.h
+        include/ui/setting/DialogManageRoutes.ui
 
         src/ui/setting/dialog_vpn_settings.cpp
         include/ui/setting/dialog_vpn_settings.h
