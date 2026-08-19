@@ -24,7 +24,7 @@
 #include <QThread>
 #include <3rdparty/WinCommander.hpp>
 
-
+#include "include/global/TaskExecutor.hpp"
 #include "include/global/Configs.hpp"
 #include "include/ui/MainWindowAPI.h"
 
@@ -395,5 +395,16 @@ int main(int argc, char* argv[]) {
 
     // 15. Главный цикл событий.
     //     exec() обрабатывает окна, таймеры, сокеты и события до вызова quit(). Возвращаемое значение становится кодом завершения процесса.
-    return QApplication::exec();
+    const int exitCode =
+        QApplication::exec();
+
+
+    // QApplication object `a` still exists here.
+    //
+    // Stop background pool BEFORE leaving main(),
+    // so workers cannot outlive QApplication / Configs.
+    Async::shutdown();
+
+
+    return exitCode;
 }

@@ -1064,33 +1064,6 @@ void Deeplink_FlushPending()
     }
 }
 
-void runOnNewThread(const std::function<void()> &callback, bool wait) {
-    auto *timer = new QTimer();
-    auto thread = new QThread();
-    timer->moveToThread(thread);
-    timer->setSingleShot(true);
-
-    thread->start();
-    QObject::connect(thread, &QThread::finished, thread, &QObject::deleteLater);
-
-    QEventLoop loop;
-    QObject::connect(timer, &QTimer::timeout, [=, &loop]() {
-        callback();
-        timer->deleteLater();
-        QMetaObject::invokeMethod(thread, "quit", Qt::QueuedConnection);
-
-        if (wait)
-        {
-            QMetaObject::invokeMethod(&loop, "quit", Qt::QueuedConnection);
-        }
-    });
-    QMetaObject::invokeMethod(timer, "start", Qt::QueuedConnection, Q_ARG(int, 0));
-
-    if (wait && QThread::currentThread() != thread) {
-        loop.exec();
-    }
-}
-
 void runOnThread(const std::function<void()> &callback, QObject *parent, bool wait) {
     auto *timer = new QTimer();
     auto thread = dynamic_cast<QThread *>(parent);

@@ -338,17 +338,6 @@ bool runOnUiThread(
 
 
 // -------------------------------------------------------------
-// Run callback in a temporary dedicated QThread.
-//
-// Existing implementation remains unchanged for now.
-// -------------------------------------------------------------
-void runOnNewThread(
-    const std::function<void()>& callback,
-    bool wait = false
-);
-
-
-// -------------------------------------------------------------
 // Run callback in the thread associated with `parent`.
 //
 // Existing implementation remains unchanged for now.

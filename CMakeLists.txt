@@ -62,6 +62,10 @@ set(PROJECT_SOURCES
         src/Main.cpp
         src/global/Configs.cpp
         src/global/Utils.cpp
+
+        include/global/TaskExecutor.hpp
+        src/global/TaskExecutor.cpp
+
         src/global/HTTPRequestHelper.cpp
         src/global/DeviceDetailsHelper.cpp
         src/global/CountryHelper.cpp

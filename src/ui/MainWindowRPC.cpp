@@ -1,6 +1,7 @@
 #include "include/ui/MainWindow.h"
 #include "ui_MainWindow.h"
 
+#include "include/global/TaskExecutor.hpp"
 #include "include/stats/traffic/TrafficLooper.hpp"
 #include "include/api/RPC.h"
 #include "include/ui/utils//MessageBoxTimer.h"
@@ -17,12 +18,11 @@
 #include <QMessageBox>
 #include <QJsonDocument>
 
-#include "include/configs/generate.h"
+#include "include/configs/Generate.h"
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
 
 #include "include/sys/Process.hpp"
-
 
 // rpc
 
@@ -122,10 +122,27 @@ void MainWindow::setup_rpc(QLocalSocket* socket) {
     defaultClient->Reconnect(socket);
 
     // Loopers run for the lifetime of the app, start only once
-    if (!rpc_started) {
+    if (!rpc_started)
+    {
         rpc_started = true;
-        runOnNewThread([=] { Stats::trafficLooper->Loop(); });
-        runOnNewThread([=] { Stats::connection_lister->Loop(); });
+
+
+        Async::runDedicated(
+            []
+            {
+                Stats::trafficLooper->Loop();
+            },
+            "TrafficLooper"
+        );
+
+
+        Async::runDedicated(
+            []
+            {
+                Stats::connection_lister->Loop();
+            },
+            "ConnectionLister"
+        );
     }
 }
 
@@ -149,7 +166,8 @@ void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bo
 
     auto done = new QMutex;
     done->lock();
-    runOnNewThread([=, this]
+    Async::run(
+        [=, this]
         {
             bool ok;
             while (true)
@@ -372,7 +390,7 @@ void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, boo
 
     auto done = new QMutex;
     done->lock();
-    runOnNewThread([=, this]
+    Async::run([=, this]
         {
             bool ok;
             while (true)
@@ -528,7 +546,7 @@ void MainWindow::urltest_current_group(
         return;
     }
 
-    runOnNewThread(
+    Async::run(
         [this, profileIDs]()
         {
             // Whatever exit path is taken below,
@@ -835,7 +853,7 @@ void MainWindow::url_test_current()
 {
     last_test_time = QDateTime::currentSecsSinceEpoch();
     ui->label_running->setText(tr("Testing"));
-    runOnNewThread([=, this] {
+    Async::run([=, this] {
         libcore::TestReq req;
         req.test_current = true;
         req.url = Configs::dataManager->settingsRepo->test_latency_url.toStdString();
@@ -885,7 +903,7 @@ void MainWindow::iptest_current_group(
         return;
     }
 
-    runOnNewThread(
+    Async::run(
         [this, profileIDs]()
         {
             AtomicFlagResetGuard runningGuard(
@@ -1139,7 +1157,7 @@ void MainWindow::speedtest_current_group(const QList<int>& profileIDs, bool test
 
     currentUnderTest.store(testCurrent);
 
-    runOnNewThread([this, profileIDs, testCurrent]() {
+    Async::run([this, profileIDs, testCurrent]() {
         AtomicFlagResetGuard runningGuard(
             speedtestRunning
         );
@@ -1746,7 +1764,7 @@ void MainWindow::runSpeedTest(
             false
         );
 
-    runOnNewThread(
+    Async::run(
         [
             this,
             rpcFinished,
@@ -2109,7 +2127,7 @@ void MainWindow::resolveRunningProfileCountryAsync(
     // NO MainWindow pointer.
     // =========================================================
 
-    runOnNewThread(
+    Async::run(
         [
             profile,
             sessionGeneration,
@@ -2839,7 +2857,7 @@ void MainWindow::profile_start(int _id) {
     connect(restartMsgbox, &QMessageBox::accepted, this, [=, this] { MW_dialog_message(MwMessage::RestartProgram, {}); });
     auto restartMsgboxTimer = new MessageBoxTimer(this, restartMsgbox, 10000);
 
-    runOnNewThread([=, this] {
+    Async::run([=, this] {
         // stop current running
         const auto runningSnapshot =
             runningProfileSnapshot();
@@ -3004,7 +3022,7 @@ void MainWindow::profile_stop(
     // =====================================================
     // Stop worker
     // =====================================================
-    runOnNewThread(
+    Async::run(
         [
             this,
             stoppingProfile,

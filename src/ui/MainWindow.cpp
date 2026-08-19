@@ -1,6 +1,7 @@
 #include "include/ui/MainWindow.h"
 #include "ui_MainWindow.h"
 #include "include/ui/MainWindowAPI.h"
+#include "include/global/TaskExecutor.hpp"
 
 #include <memory>
 #include <atomic>
@@ -253,7 +254,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     }
 
     // Получение сведений об устройстве.
-    runOnNewThread([=, this] {GetDeviceDetails(); });
+    Async::run(
+        []
+        {
+            GetDeviceDetails();
+        }
+    );
 
     // Подготовка параметров GryphCore.
     auto core_path = QApplication::applicationDirPath() + "/";
@@ -399,7 +405,22 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     ui->toolButton_routing->setMenu(ui->menuRouting_Menu);
     ui->menubar->setVisible(false);
     // Проверка обновлений выполняется в новом потоке, так как содержит сетевой запрос к GitHub.
-    connect(ui->toolButton_update, &QToolButton::clicked, this, [=, this] { runOnNewThread([=, this] { CheckUpdate(); }); });
+    connect(
+        ui->toolButton_update,
+        &QToolButton::clicked,
+        this,
+
+        [this]
+        {
+            Async::run(
+                [this]
+                {
+                    CheckUpdate();
+                }
+            );
+        }
+    );
+
     if (!QFile::exists(QApplication::applicationDirPath() + "/updater") && !QFile::exists(QApplication::applicationDirPath() + "/updater.exe"))
     {
         ui->toolButton_update->hide();
@@ -434,7 +455,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                 group->Id();
 
 
-            runOnNewThread(
+            Async::run(
                 [
                     this,
                     group,
@@ -442,20 +463,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                     action
                 ]()
                 {
-                    // -------------------------------------
-                    // First attempt
-                    // -------------------------------------
-
                     if (!group->SortProfiles(action))
                     {
-                        // The group profile list was
-                        // modified concurrently, e.g.
-                        // subscription update/add/remove.
-                        //
-                        // SortProfiles is now serialized,
-                        // so this is NOT another sort.
-                        //
-                        // Retry once using the new state.
                         if (!group->SortProfiles(action))
                         {
                             MW_show_log(
@@ -468,17 +477,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                     }
 
 
-                    // Persist exactly the group we sorted.
                     Configs::dataManager
                         ->groupsRepo
                         ->Save(group);
 
 
-                    // -------------------------------------
-                    // UI refresh
-                    // -------------------------------------
-
                     runOnUiThread(
+                        this,
+
                         [
                             this,
                             groupId
@@ -490,8 +496,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                                 ->CurrentGroup();
 
 
-                            // User switched to another
-                            // group while sorting.
                             if (!currentGroup ||
                                 currentGroup->Id() != groupId)
                             {
@@ -544,7 +548,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                 group->Id();
 
 
-            runOnNewThread(
+            Async::run(
                 [
                     this,
                     group,
@@ -2017,7 +2021,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             QMutexLocker locker(&mu_remoteRouteProfiles);
             remoteRouteProfiles = newRemoteRouteProfiles;
         };
-    runOnNewThread(getRemoteRouteProfiles);
+    Async::run(
+        getRemoteRouteProfiles
+    );
 
     // Сброс сохранённых ширин возвращает автоматический расчёт столбцов.
     connect(ui->actionRefresh_Column_Widths, &QAction::triggered, this, [=, this] {
@@ -2045,7 +2051,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->menuRouting_Menu, &QMenu::aboutToShow, this, [=, this]()
         {
             if (remoteRouteProfiles.isEmpty())
-                runOnNewThread(getRemoteRouteProfiles);
+            {
+                Async::run(
+                    getRemoteRouteProfiles
+                );
+            }
             ui->menuRouting_Menu->clear();
             ui->menuRouting_Menu->addAction(ui->menu_routing_settings);
 
@@ -3174,22 +3184,36 @@ bool MainWindow::get_elevated_permissions(int reason) {
     }
     auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please give the core root privileges"), QMessageBox::Yes | QMessageBox::No);
     if (n == QMessageBox::Yes) {
-        runOnNewThread([=, this]
+        Async::run(
+            [=, this]
             {
-                auto chownArgs = QString("root:root " + Configs::FindCoreRealPath());
-                auto ret = Linux_Run_Command("chown", chownArgs);
-                if (ret != 0) {
-                    MW_show_log(QString("Failed to run chown %1 code is %2").arg(chownArgs).arg(ret));
+                auto chownArgs =
+                    QString(
+                        "root:root "
+                        + Configs::FindCoreRealPath()
+                    );
+
+
+                const auto ret =
+                    Linux_Run_Command(
+                        "chown",
+                        chownArgs
+                    );
+
+
+                if (ret != 0)
+                {
+                    MW_show_log(
+                        QString(
+                            "Failed to run chown %1 "
+                            "code is %2"
+                        )
+                        .arg(chownArgs)
+                        .arg(ret)
+                    );
                 }
-                auto chmodArgs = QString("u+s " + Configs::FindCoreRealPath());
-                ret = Linux_Run_Command("chmod", chmodArgs);
-                if (ret == 0) {
-                    StopVPNProcess();
-                }
-                else {
-                    MW_show_log(QString("Failed to run chmod %1").arg(chmodArgs));
-                }
-            });
+            }
+        );
         return false;
     }
 #endif
@@ -5274,7 +5298,7 @@ void MainWindow::on_menu_remove_unavailable_triggered() {
 
 void MainWindow::on_menu_remove_invalid_triggered()
 {
-    runOnNewThread(
+    Async::run(
         [this]()
         {
             // -------------------------------------------------
@@ -7189,22 +7213,30 @@ bool isNewer(QString assetName) {
     return false;
 }
 
-void MainWindow::CheckUpdate() {
+void MainWindow::CheckUpdate()
+{
     QString search;
+
 #ifdef Q_OS_WIN
 #  ifdef Q_PROCESSOR_ARM_64
     search = "windows-arm64";
 #  else
 #    ifdef Q_OS_WIN64
-    if (WinVersion::IsBuildNumGreaterOrEqual(BuildNumber::Windows_10_1809))
+    if (WinVersion::IsBuildNumGreaterOrEqual(
+        BuildNumber::Windows_10_1809))
+    {
         search = "windows64";
+    }
     else
+    {
         search = "windowslegacy64";
+    }
 #    else
     search = "windows32";
 #    endif
 #  endif
 #endif
+
 #ifdef Q_OS_LINUX
 #  ifdef Q_PROCESSOR_X86_64
     search = "linux-amd64";
@@ -7212,6 +7244,7 @@ void MainWindow::CheckUpdate() {
     search = "linux-arm64";
 #  endif
 #endif
+
 #ifdef Q_OS_MACOS
 #  ifdef Q_PROCESSOR_X86_64
     search = "macos-amd64";
@@ -7219,95 +7252,444 @@ void MainWindow::CheckUpdate() {
     search = "macos-arm64";
 #  endif
 #endif
-    if (search.isEmpty()) {
-        runOnUiThread([=, this] {
-            MessageBoxWarning(QObject::tr("Update"), QObject::tr("Not official support platform"));
-            });
+
+
+    // =========================================================
+    // Unsupported platform
+    // =========================================================
+
+    if (search.isEmpty())
+    {
+        runOnUiThread(
+            this,
+
+            [this]()
+            {
+                MessageBoxWarning(
+                    QObject::tr("Update"),
+                    QObject::tr(
+                        "Not official support platform"
+                    )
+                );
+            }
+        );
+
         return;
     }
 
-    auto resp = NetworkRequestHelper::HttpGet("https://api.github.com/repos/throneproj/Gryph/releases");
-    if (!resp.error.isEmpty()) {
-        runOnUiThread([=, this] {
-            MessageBoxWarning(QObject::tr("Update"), QObject::tr("Requesting update error: %1").arg(resp.error + "\n" + resp.data));
-            });
+
+    // =========================================================
+    // Request releases
+    // =========================================================
+
+    const auto resp =
+        NetworkRequestHelper::HttpGet(
+            "https://api.github.com/repos/"
+            "throneproj/Gryph/releases"
+        );
+
+
+    if (!resp.error.isEmpty())
+    {
+        const QString errorMessage =
+            resp.error
+            + "\n"
+            + resp.data;
+
+
+        runOnUiThread(
+            this,
+
+            [
+                errorMessage
+            ]()
+            {
+                MessageBoxWarning(
+                    QObject::tr("Update"),
+                    QObject::tr(
+                        "Requesting update error: %1"
+                    )
+                    .arg(
+                        errorMessage
+                    )
+                );
+            }
+                    );
+
         return;
     }
 
-    QString assets_name, release_download_url, release_url, release_note, note_pre_release;
-    bool exitFlag = false;
-    QJsonArray array = QString2QJsonArray(resp.data);
-    for (const QJsonValue value : array) {
-        QJsonObject release = value.toObject();
-        if (release["prerelease"].toBool() && !Configs::dataManager->settingsRepo->allow_beta_update) continue;
-        for (const QJsonValue asset : release["assets"].toArray()) {
-            if (asset["name"].toString().contains(search) && asset["name"].toString().section('.', -1) == QString("zip")) {
-                note_pre_release = release["prerelease"].toBool() ? " (Pre-release)" : "";
-                release_url = release["html_url"].toString();
-                release_note = release["body"].toString();
-                assets_name = asset["name"].toString();
-                release_download_url = asset["browser_download_url"].toString();
-                exitFlag = true;
+
+    // =========================================================
+    // Find appropriate release asset
+    // =========================================================
+
+    QString assets_name;
+    QString release_download_url;
+    QString release_url;
+    QString release_note;
+    QString note_pre_release;
+
+    bool exitFlag =
+        false;
+
+
+    const QJsonArray array =
+        QString2QJsonArray(
+            resp.data
+        );
+
+
+    for (const QJsonValue& value : array)
+    {
+        const QJsonObject release =
+            value.toObject();
+
+
+        if (release["prerelease"].toBool()
+            &&
+            !Configs::dataManager
+            ->settingsRepo
+            ->allow_beta_update)
+        {
+            continue;
+        }
+
+
+        const QJsonArray assets =
+            release["assets"].toArray();
+
+
+        for (const QJsonValue& assetValue : assets)
+        {
+            const QJsonObject asset =
+                assetValue.toObject();
+
+
+            const QString assetName =
+                asset["name"].toString();
+
+
+            if (assetName.contains(search)
+                &&
+                assetName.section('.', -1)
+                == QStringLiteral("zip"))
+            {
+                note_pre_release =
+                    release["prerelease"].toBool()
+                    ? QStringLiteral(
+                        " (Pre-release)"
+                    )
+                    : QString();
+
+
+                release_url =
+                    release["html_url"]
+                    .toString();
+
+
+                release_note =
+                    release["body"]
+                    .toString();
+
+
+                assets_name =
+                    assetName;
+
+
+                release_download_url =
+                    asset[
+                        "browser_download_url"
+                    ]
+                    .toString();
+
+
+                exitFlag =
+                    true;
+
                 break;
             }
         }
-        if (exitFlag) break;
+
+
+        if (exitFlag)
+        {
+            break;
+        }
     }
 
-    if (release_download_url.isEmpty() || !isNewer(assets_name)) {
-        runOnUiThread([=, this] {
-            MessageBoxInfo(QObject::tr("Update"), QObject::tr("No update"));
-            });
+
+    // =========================================================
+    // No newer release
+    // =========================================================
+
+    if (release_download_url.isEmpty()
+        ||
+        !isNewer(assets_name))
+    {
+        runOnUiThread(
+            this,
+
+            []()
+            {
+                MessageBoxInfo(
+                    QObject::tr("Update"),
+                    QObject::tr("No update")
+                );
+            }
+        );
+
         return;
     }
 
-    runOnUiThread([=, this] {
-        auto allow_updater = !Configs::dataManager->settingsRepo->flag_use_appdata;
-        QMessageBox box(QMessageBox::Question, QObject::tr("Update") + note_pre_release,
-            QObject::tr("Update found: %1\nRelease note:\n%2").arg(assets_name, release_note));
-        //
-        QAbstractButton* btn1 = nullptr;
-        if (allow_updater) {
-            btn1 = box.addButton(QObject::tr("Update"), QMessageBox::AcceptRole);
-        }
-        QAbstractButton* btn2 = box.addButton(QObject::tr("Open in browser"), QMessageBox::AcceptRole);
-        box.addButton(QObject::tr("Close"), QMessageBox::RejectRole);
-        box.exec();
-        //
-        if (btn1 == box.clickedButton() && allow_updater) {
-            // Download Update
-            runOnNewThread([=, this] {
-                if (!mu_download_update.tryLock()) {
-                    runOnUiThread([=, this]() {
-                        MessageBoxWarning(tr("Cannot start"), tr("Last download request has not finished yet"));
-                        });
-                    return;
-                }
-                QString errors;
-                if (!release_download_url.isEmpty()) {
-                    auto res = NetworkRequestHelper::DownloadAsset(release_download_url, "Gryph.zip");
-                    if (!res.isEmpty()) {
-                        errors += res;
-                    }
-                }
-                mu_download_update.unlock();
-                runOnUiThread([=, this] {
-                    if (errors.isEmpty()) {
-                        auto q = QMessageBox::question(nullptr, QObject::tr("Update"),
-                            QObject::tr("Update is ready, restart to install?"));
-                        if (q == QMessageBox::StandardButton::Yes) {
-                            this->exit_reason = 1;
-                            on_menu_exit_triggered();
+
+    // =========================================================
+    // Copy all data needed by queued UI callback.
+    //
+    // These are local variables of CheckUpdate().
+    // Never capture them by reference.
+    // =========================================================
+
+    const QString updateAssetName =
+        assets_name;
+
+    const QString updateDownloadUrl =
+        release_download_url;
+
+    const QString updateReleaseUrl =
+        release_url;
+
+    const QString updateReleaseNote =
+        release_note;
+
+    const QString updatePreReleaseLabel =
+        note_pre_release;
+
+
+    // =========================================================
+    // Show update dialog on UI thread
+    // =========================================================
+
+    runOnUiThread(
+        this,
+
+        [
+            this,
+            updateAssetName,
+            updateDownloadUrl,
+            updateReleaseUrl,
+            updateReleaseNote,
+            updatePreReleaseLabel
+        ]()
+        {
+            const bool allowUpdater =
+                !Configs::dataManager
+                ->settingsRepo
+                ->flag_use_appdata;
+
+
+            QMessageBox box(
+                QMessageBox::Question,
+
+                QObject::tr("Update")
+                + updatePreReleaseLabel,
+
+                QObject::tr(
+                    "Update found: %1\n"
+                    "Release note:\n%2"
+                )
+                .arg(
+                    updateAssetName,
+                    updateReleaseNote
+                ),
+
+                QMessageBox::NoButton,
+
+                this
+            );
+
+
+            QAbstractButton* updateButton =
+                nullptr;
+
+
+            if (allowUpdater)
+            {
+                updateButton =
+                    box.addButton(
+                        QObject::tr("Update"),
+                        QMessageBox::AcceptRole
+                    );
+            }
+
+
+            QAbstractButton* browserButton =
+                box.addButton(
+                    QObject::tr(
+                        "Open in browser"
+                    ),
+                    QMessageBox::ActionRole
+                );
+
+
+            box.addButton(
+                QObject::tr("Close"),
+                QMessageBox::RejectRole
+            );
+
+
+            box.exec();
+
+
+            // =================================================
+            // Download update
+            // =================================================
+
+            if (updateButton != nullptr
+                &&
+                box.clickedButton()
+                == updateButton
+                &&
+                allowUpdater)
+            {
+                // IMPORTANT:
+                //
+                // updateDownloadUrl is copied into this worker.
+                // It does not reference CheckUpdate() stack.
+
+                Async::run(
+                    [
+                        this,
+                        updateDownloadUrl
+                    ]()
+                    {
+                        // -----------------------------------------
+                        // Prevent two simultaneous downloads
+                        // -----------------------------------------
+
+                        if (!mu_download_update.tryLock())
+                        {
+                            runOnUiThread(
+                                this,
+
+                                [this]()
+                                {
+                                    MessageBoxWarning(
+                                        tr(
+                                            "Cannot start"
+                                        ),
+                                        tr(
+                                            "Last download "
+                                            "request has not "
+                                            "finished yet"
+                                        )
+                                    );
+                                }
+                            );
+
+                            return;
                         }
+
+
+                        QString errors;
+
+
+                        // -----------------------------------------
+                        // Background network/disk work
+                        // -----------------------------------------
+
+                        if (!updateDownloadUrl.isEmpty())
+                        {
+                            const QString result =
+                                NetworkRequestHelper::
+                                DownloadAsset(
+                                    updateDownloadUrl,
+                                    "Gryph.zip"
+                                );
+
+
+                            if (!result.isEmpty())
+                            {
+                                errors +=
+                                    result;
+                            }
+                        }
+
+
+                        mu_download_update.unlock();
+
+
+                        // -----------------------------------------
+                        // Download finished -> UI
+                        // -----------------------------------------
+
+                        runOnUiThread(
+                            this,
+
+                            [
+                                this,
+                                errors
+                            ]()
+                            {
+                                if (errors.isEmpty())
+                                {
+                                    const auto answer =
+                                        QMessageBox::
+                                        question(
+                                            this,
+
+                                            QObject::tr(
+                                                "Update"
+                                            ),
+
+                                            QObject::tr(
+                                                "Update is ready, "
+                                                "restart to install?"
+                                            )
+                                        );
+
+
+                                    if (answer ==
+                                        QMessageBox::
+                                        StandardButton::
+                                        Yes)
+                                    {
+                                        exit_reason =
+                                            1;
+
+
+                                        on_menu_exit_triggered();
+                                    }
+                                }
+                                else
+                                {
+                                    MessageBoxWarning(
+                                        tr(
+                                            "Failed to download "
+                                            "update assets"
+                                        ),
+                                        errors
+                                    );
+                                }
+                            }
+                        );
                     }
-                    else {
-                        MessageBoxWarning(tr("Failed to download update assets"), errors);
-                    }
-                    });
-                });
+                );
+            }
+
+            // =================================================
+            // Open release page
+            // =================================================
+
+            else if (box.clickedButton()
+                == browserButton)
+            {
+                QDesktopServices::openUrl(
+                    QUrl(
+                        updateReleaseUrl
+                    )
+                );
+            }
         }
-        else if (btn2 == box.clickedButton()) {
-            QDesktopServices::openUrl(QUrl(release_url));
-        }
-        });
+    );
 }

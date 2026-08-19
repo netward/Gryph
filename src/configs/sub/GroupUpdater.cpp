@@ -1,5 +1,6 @@
 #include "include/database/entities/Profile.h"
 #include "include/global/HTTPRequestHelper.hpp"
+#include "include/global/TaskExecutor.hpp"
 
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/configs/sub/Clash.hpp"
@@ -1396,7 +1397,9 @@ namespace Subscription {
             }
         }
 
-        runOnNewThread([=, this] {
+        Async::run(
+            [=, this]
+            {
             auto gid =
                 _sub_gid;
 
