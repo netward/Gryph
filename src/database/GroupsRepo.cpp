@@ -198,6 +198,10 @@ namespace Configs
                 group.profiles
             );
 
+        json["default_profile_order"] =
+            QListInt2QJsonArray(
+                group.default_profile_order
+            );
 
         json["scroll_last_profile"] =
             group.scroll_last_profile;
@@ -297,6 +301,11 @@ namespace Configs
                 .toArray()
             );
 
+        snapshot.default_profile_order =
+            QJsonArray2QListInt(
+                json["default_profile_order"]
+                .toArray()
+            );
 
         snapshot.scroll_last_profile =
             json["scroll_last_profile"]
@@ -397,10 +406,23 @@ namespace Configs
     bool GroupsRepo::saveToDatabase(
         const GroupSnapshot& group) const
     {
-        // -------------------------------------------------
-        // Serialize immutable snapshot
-        // -------------------------------------------------
+        // =========================================================
+        // Validation
+        // =========================================================
+        if (group.id < 0)
+        {
+            MW_show_log(
+                "GroupsRepo::saveToDatabase: "
+                "invalid Group ID"
+            );
 
+            return false;
+        }
+
+
+        // =========================================================
+        // Serialize immutable snapshot
+        // =========================================================
         const QJsonArray columnWidthArray =
             QListInt2QJsonArray(
                 group.column_width
@@ -413,18 +435,18 @@ namespace Configs
             );
 
 
-        const QJsonDocument columnWidthDoc(
-            columnWidthArray
-        );
-
-        const QJsonDocument profilesDoc(
-            profilesArray
-        );
+        const QJsonArray defaultProfileOrderArray =
+            QListInt2QJsonArray(
+                group.default_profile_order
+            );
 
 
         const QString columnWidthJson =
             QString::fromUtf8(
-                columnWidthDoc.toJson(
+                QJsonDocument(
+                    columnWidthArray
+                )
+                .toJson(
                     QJsonDocument::Compact
                 )
             );
@@ -432,17 +454,33 @@ namespace Configs
 
         const QString profilesJson =
             QString::fromUtf8(
-                profilesDoc.toJson(
+                QJsonDocument(
+                    profilesArray
+                )
+                .toJson(
                     QJsonDocument::Compact
                 )
             );
 
 
-        // -------------------------------------------------
-        // Check existence
-        // -------------------------------------------------
+        const QString defaultProfileOrderJson =
+            QString::fromUtf8(
+                QJsonDocument(
+                    defaultProfileOrderArray
+                )
+                .toJson(
+                    QJsonDocument::Compact
+                )
+            );
 
-        bool exists = false;
+
+        // =========================================================
+        // Check whether Group already exists
+        // =========================================================
+        bool exists =
+            false;
+
+
         {
             auto checkQuery =
                 db.query(
@@ -451,10 +489,19 @@ namespace Configs
                     "WHERE id = ?",
                     group.id
                 );
+
+
             if (!checkQuery)
             {
+                MW_show_log(
+                    "GroupsRepo::saveToDatabase: "
+                    "failed to query Group existence"
+                );
+
                 return false;
             }
+
+
             try
             {
                 exists =
@@ -471,32 +518,139 @@ namespace Configs
             }
         }
 
-        // -------------------------------------------------
-        // UPDATE
-        // -------------------------------------------------
+
+        // =========================================================
+        // UPDATE existing Group
+        // =========================================================
         if (exists)
         {
-            return db.exec(
+            const bool updated =
+                db.exec(
+                    R"(
+                    UPDATE groups
+                    SET archive = ?,
+                        skip_auto_update = ?,
+                        auto_clear_unavailable = ?,
+                        name = ?,
+                        url = ?,
+                        info = ?,
+                        sub_last_update = ?,
+                        front_proxy_id = ?,
+                        landing_proxy_id = ?,
+                        column_width_json = ?,
+                        profiles_json = ?,
+                        default_profile_order_json = ?,
+                        scroll_last_profile = ?,
+                        test_sort_by = ?,
+                        traffic_sort_by = ?,
+                        test_items_to_show = ?,
+                        updated_at = strftime('%s', 'now')
+                    WHERE id = ?
+                    )",
+
+                    group.archive
+                    ? 1
+                    : 0,
+
+                    group.skip_auto_update
+                    ? 1
+                    : 0,
+
+                    group.auto_clear_unavailable
+                    ? 1
+                    : 0,
+
+                    group.name.toStdString(),
+
+                    group.url.toStdString(),
+
+                    group.info.toStdString(),
+
+                    static_cast<long long>(
+                        group.sub_last_update
+                        ),
+
+                    group.front_proxy_id,
+
+                    group.landing_proxy_id,
+
+                    columnWidthJson.toStdString(),
+
+                    profilesJson.toStdString(),
+
+                    defaultProfileOrderJson.toStdString(),
+
+                    group.scroll_last_profile,
+
+                    static_cast<int>(
+                        group.test_sort_by
+                        ),
+
+                    static_cast<int>(
+                        group.traffic_sort_by
+                        ),
+
+                    static_cast<int>(
+                        group.test_items_to_show
+                        ),
+
+                    group.id
+                );
+
+
+            if (!updated)
+            {
+                MW_show_log(
+                    "GroupsRepo::saveToDatabase: "
+                    "failed to update Group "
+                    +
+                    Int2String(
+                        group.id
+                    )
+                );
+
+                return false;
+            }
+
+
+            return true;
+        }
+
+
+        // =========================================================
+        // INSERT new Group
+        // =========================================================
+        const bool inserted =
+            db.exec(
                 R"(
-                UPDATE groups
-                SET archive = ?,
-                    skip_auto_update = ?,
-                    auto_clear_unavailable = ?,
-                    name = ?,
-                    url = ?,
-                    info = ?,
-                    sub_last_update = ?,
-                    front_proxy_id = ?,
-                    landing_proxy_id = ?,
-                    column_width_json = ?,
-                    profiles_json = ?,
-                    scroll_last_profile = ?,
-                    test_sort_by = ?,
-                    traffic_sort_by = ?,
-                    test_items_to_show = ?,
-                    updated_at = strftime('%s', 'now')
-                WHERE id = ?
+                    INSERT INTO groups
+                    (
+                        id,
+                        archive,
+                        skip_auto_update,
+                        auto_clear_unavailable,
+                        name,
+                        url,
+                        info,
+                        sub_last_update,
+                        front_proxy_id,
+                        landing_proxy_id,
+                        column_width_json,
+                        profiles_json,
+                        default_profile_order_json,
+                        scroll_last_profile,
+                        test_sort_by,
+                        traffic_sort_by,
+                        test_items_to_show
+                    )
+                    VALUES
+                    (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?
+                    )
                 )",
+
+                group.id,
 
                 group.archive
                 ? 1
@@ -528,6 +682,8 @@ namespace Configs
 
                 profilesJson.toStdString(),
 
+                defaultProfileOrderJson.toStdString(),
+
                 group.scroll_last_profile,
 
                 static_cast<int>(
@@ -540,138 +696,294 @@ namespace Configs
 
                 static_cast<int>(
                     group.test_items_to_show
-                    ),
-
-                group.id
+                    )
             );
+
+
+        if (!inserted)
+        {
+            MW_show_log(
+                "GroupsRepo::saveToDatabase: "
+                "failed to insert Group "
+                +
+                Int2String(
+                    group.id
+                )
+            );
+
+            return false;
         }
 
-        // -------------------------------------------------
-        // INSERT
-        // -------------------------------------------------
-        return db.exec(
-            R"(
-            INSERT INTO groups
-            (
-                id,
-                archive,
-                skip_auto_update,
-                auto_clear_unavailable,
-                name,
-                url,
-                info,
-                sub_last_update,
-                front_proxy_id,
-                landing_proxy_id,
-                column_width_json,
-                profiles_json,
-                scroll_last_profile,
-                test_sort_by,
-                traffic_sort_by,
-                test_items_to_show
-            )
-            VALUES
-            (
-                ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            )",
 
-            group.id,
-
-            group.archive
-            ? 1
-            : 0,
-
-            group.skip_auto_update
-            ? 1
-            : 0,
-
-            group.auto_clear_unavailable
-            ? 1
-            : 0,
-
-            group.name.toStdString(),
-
-            group.url.toStdString(),
-
-            group.info.toStdString(),
-
-            static_cast<long long>(
-                group.sub_last_update
-                ),
-
-            group.front_proxy_id,
-
-            group.landing_proxy_id,
-
-            columnWidthJson.toStdString(),
-
-            profilesJson.toStdString(),
-
-            group.scroll_last_profile,
-
-            static_cast<int>(
-                group.test_sort_by
-                ),
-
-            static_cast<int>(
-                group.traffic_sort_by
-                ),
-
-            static_cast<int>(
-                group.test_items_to_show
-                )
-        );
+        return true;
     }
     
-    std::shared_ptr<Group> GroupsRepo::loadFromDatabase(int id) const 
+    std::shared_ptr<Group>
+        GroupsRepo::loadFromDatabase(
+            int id) const
     {
-        auto query = db.query(R"(
-            SELECT id, archive, skip_auto_update, auto_clear_unavailable, name, url, info, sub_last_update,
-                   front_proxy_id, landing_proxy_id,
-                   column_width_json, profiles_json, scroll_last_profile, test_sort_by, traffic_sort_by, test_items_to_show
-            FROM groups WHERE id = ?
-        )", id);
-        if (!query || !query->executeStep()) {
+        if (id < 0)
+        {
             return nullptr;
         }
-        
-        QJsonObject json;
-        json["id"] = query->getColumn(0).getInt();
-        json["archive"] = query->getColumn(1).getInt() != 0;
-        json["skip_auto_update"] = query->getColumn(2).getInt() != 0;
-        json["auto_clear_unavailable"] = query->getColumn(3).getInt() != 0;
-        json["name"] = QString::fromStdString(query->getColumn(4).getText());
-        json["url"] = QString::fromStdString(query->getColumn(5).getText());
-        json["info"] = QString::fromStdString(query->getColumn(6).getText());
-        json["sub_last_update"] = static_cast<qint64>(query->getColumn(7).getInt64());
-        json["front_proxy_id"] = query->getColumn(8).getInt();
-        json["landing_proxy_id"] = query->getColumn(9).getInt();
 
-        // Parse JSON arrays
-        QString columnWidthJsonStr = QString::fromStdString(query->getColumn(10).getText());
-        if (!columnWidthJsonStr.isEmpty()) {
-            QJsonDocument columnWidthDoc = QJsonDocument::fromJson(columnWidthJsonStr.toUtf8());
-            if (!columnWidthDoc.isNull() && columnWidthDoc.isArray()) {
-                json["column_width"] = columnWidthDoc.array();
-            }
-        }
-        
-        QString profilesJsonStr = QString::fromStdString(query->getColumn(11).getText());
-        if (!profilesJsonStr.isEmpty()) {
-            QJsonDocument profilesDoc = QJsonDocument::fromJson(profilesJsonStr.toUtf8());
-            if (!profilesDoc.isNull() && profilesDoc.isArray()) {
-                json["profiles"] = profilesDoc.array();
-            }
+
+        auto query =
+            db.query(
+                R"(
+                SELECT
+                    id,
+                    archive,
+                    skip_auto_update,
+                    auto_clear_unavailable,
+                    name,
+                    url,
+                    info,
+                    sub_last_update,
+                    front_proxy_id,
+                    landing_proxy_id,
+                    column_width_json,
+                    profiles_json,
+                    default_profile_order_json,
+                    scroll_last_profile,
+                    test_sort_by,
+                    traffic_sort_by,
+                    test_items_to_show
+                FROM groups
+                WHERE id = ?
+                )",
+                id
+            );
+
+
+        if (!query)
+        {
+            return nullptr;
         }
 
-        json["scroll_last_profile"] = query->getColumn(12).getInt();
-        json["test_sort_by"] = query->getColumn(13).getInt();
-        json["traffic_sort_by"] = query->getColumn(14).getInt();
-        json["test_items_to_show"] = query->getColumn(15).getInt();
-        
-        return groupFromJson(json);
+
+        try
+        {
+            if (!query->executeStep())
+            {
+                return nullptr;
+            }
+
+
+            QJsonObject json;
+
+
+            json["id"] =
+                query
+                ->getColumn(0)
+                .getInt();
+
+
+            json["archive"] =
+                query
+                ->getColumn(1)
+                .getInt() != 0;
+
+
+            json["skip_auto_update"] =
+                query
+                ->getColumn(2)
+                .getInt() != 0;
+
+
+            json["auto_clear_unavailable"] =
+                query
+                ->getColumn(3)
+                .getInt() != 0;
+
+
+            json["name"] =
+                QString::fromStdString(
+                    query
+                    ->getColumn(4)
+                    .getText()
+                );
+
+
+            json["url"] =
+                QString::fromStdString(
+                    query
+                    ->getColumn(5)
+                    .getText()
+                );
+
+
+            json["info"] =
+                QString::fromStdString(
+                    query
+                    ->getColumn(6)
+                    .getText()
+                );
+
+
+            json["sub_last_update"] =
+                static_cast<qint64>(
+                    query
+                    ->getColumn(7)
+                    .getInt64()
+                    );
+
+
+            json["front_proxy_id"] =
+                query
+                ->getColumn(8)
+                .getInt();
+
+
+            json["landing_proxy_id"] =
+                query
+                ->getColumn(9)
+                .getInt();
+
+
+            // =====================================================
+            // column_width_json
+            // column 10
+            // =====================================================
+            {
+                const QString raw =
+                    QString::fromStdString(
+                        query
+                        ->getColumn(10)
+                        .getText()
+                    );
+
+
+                if (!raw.isEmpty())
+                {
+                    const QJsonDocument document =
+                        QJsonDocument::fromJson(
+                            raw.toUtf8()
+                        );
+
+
+                    if (document.isArray())
+                    {
+                        json["column_width"] =
+                            document.array();
+                    }
+                }
+            }
+
+
+            // =====================================================
+            // profiles_json
+            // column 11
+            // =====================================================
+            {
+                const QString raw =
+                    QString::fromStdString(
+                        query
+                        ->getColumn(11)
+                        .getText()
+                    );
+
+
+                if (!raw.isEmpty())
+                {
+                    const QJsonDocument document =
+                        QJsonDocument::fromJson(
+                            raw.toUtf8()
+                        );
+
+
+                    if (document.isArray())
+                    {
+                        json["profiles"] =
+                            document.array();
+                    }
+                }
+            }
+
+
+            // =====================================================
+            // default_profile_order_json
+            // column 12
+            // =====================================================
+            {
+                const QString raw =
+                    QString::fromStdString(
+                        query
+                        ->getColumn(12)
+                        .getText()
+                    );
+
+
+                if (!raw.isEmpty())
+                {
+                    const QJsonDocument document =
+                        QJsonDocument::fromJson(
+                            raw.toUtf8()
+                        );
+
+
+                    if (document.isArray())
+                    {
+                        json["default_profile_order"] =
+                            document.array();
+                    }
+                }
+            }
+
+
+            // =====================================================
+            // Remaining scalar values.
+            //
+            // IMPORTANT:
+            // Their indexes are shifted by +1 because
+            // default_profile_order_json is now column 12.
+            // =====================================================
+            json["scroll_last_profile"] =
+                query
+                ->getColumn(13)
+                .getInt();
+
+
+            json["test_sort_by"] =
+                query
+                ->getColumn(14)
+                .getInt();
+
+
+            json["traffic_sort_by"] =
+                query
+                ->getColumn(15)
+                .getInt();
+
+
+            json["test_items_to_show"] =
+                query
+                ->getColumn(16)
+                .getInt();
+
+
+            return groupFromJson(
+                json
+            );
+        }
+        catch (const std::exception& e)
+        {
+            MW_show_log(
+                "GroupsRepo::loadFromDatabase: "
+                "failed to load Group "
+                +
+                Int2String(id)
+                +
+                ": "
+                +
+                QString::fromUtf8(
+                    e.what()
+                )
+            );
+
+
+            return nullptr;
+        }
     }
 
     std::shared_ptr<Group> GroupsRepo::NewGroup() {
@@ -814,6 +1126,10 @@ namespace Configs
                 snapshot.profiles
             );
 
+        const QJsonArray defaultProfileOrderArray =
+            QListInt2QJsonArray(
+                snapshot.default_profile_order
+            );
 
         const QString columnWidthJson =
             QString::fromUtf8(
@@ -834,6 +1150,14 @@ namespace Configs
                 )
             );
 
+        const QString defaultProfileOrderJson =
+            QString::fromUtf8(
+                QJsonDocument(
+                    defaultProfileOrderArray
+                ).toJson(
+                    QJsonDocument::Compact
+                )
+            );
 
         GroupInsertRow row;
 
@@ -877,7 +1201,6 @@ namespace Configs
                 snapshot.sub_last_update
                 );
 
-
         row.front_proxy_id =
             snapshot.front_proxy_id;
 
@@ -890,15 +1213,16 @@ namespace Configs
             columnWidthJson
             .toStdString();
 
-
         row.profiles_json =
             profilesJson
             .toStdString();
 
+        row.default_profile_order_json =
+            defaultProfileOrderJson
+            .toStdString();
 
         row.scroll_last_profile =
             snapshot.scroll_last_profile;
-
 
         row.test_sort_by =
             static_cast<int>(

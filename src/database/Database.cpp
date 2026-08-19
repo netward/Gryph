@@ -256,31 +256,32 @@ namespace Configs {
                 db,
 
                 R"(
-            INSERT INTO groups
-            (
-                id,
-                archive,
-                skip_auto_update,
-                auto_clear_unavailable,
-                name,
-                url,
-                info,
-                sub_last_update,
-                front_proxy_id,
-                landing_proxy_id,
-                column_width_json,
-                profiles_json,
-                scroll_last_profile,
-                test_sort_by,
-                traffic_sort_by,
-                test_items_to_show
-            )
-            VALUES
-            (
-                ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?
-            )
-            )"
+                INSERT INTO groups
+                (
+                    id,
+                    archive,
+                    skip_auto_update,
+                    auto_clear_unavailable,
+                    name,
+                    url,
+                    info,
+                    sub_last_update,
+                    front_proxy_id,
+                    landing_proxy_id,
+                    column_width_json,
+                    profiles_json,
+                    default_profile_order_json,
+                    scroll_last_profile,
+                    test_sort_by,
+                    traffic_sort_by,
+                    test_items_to_show
+                )
+                VALUES
+                (
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                )"
             );
 
 
@@ -354,6 +355,11 @@ namespace Configs {
             groupStmt.bind(
                 index++,
                 row.profiles_json
+            );
+
+            groupStmt.bind(
+                index++,
+                row.default_profile_order_json
             );
 
             groupStmt.bind(
@@ -2265,12 +2271,12 @@ namespace Configs {
                     db,
 
                     R"(
-                UPDATE groups
-                SET profiles_json = ?,
-                    updated_at = strftime('%s', 'now')
-                WHERE id = ?
-                )"
-                );
+                    UPDATE groups
+                    SET profiles_json = ?,
+                        updated_at = strftime('%s', 'now')
+                    WHERE id = ?
+                    )"
+                    );
 
 
                 for (const auto& update :

@@ -62,7 +62,12 @@ namespace Configs
         int landing_proxy_id = -1;
 
         std::string column_width_json;
+
+        // Current visible/canonical Profile order.
         std::string profiles_json;
+
+        // Original/default order received from subscription.
+        std::string default_profile_order_json;
 
         int scroll_last_profile = -1;
 
