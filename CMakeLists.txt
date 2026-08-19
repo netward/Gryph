@@ -192,9 +192,9 @@ set(PROJECT_SOURCES
         src/ui/profile/edit_wireguard.cpp
         include/ui/profile/edit_wireguard.ui
 
-        src/ui/setting/dialog_basic_settings.cpp
-        include/ui/setting/dialog_basic_settings.h
-        include/ui/setting/dialog_basic_settings.ui
+        src/ui/setting/DialogBasicSettings.cpp
+        include/ui/setting/DialogBasicSettings.h
+        include/ui/setting/DialogBasicSettings.ui
 
         src/ui/group/DialogManageGroups.cpp
         include/ui/group/DialogManageGroups.h
@@ -204,13 +204,13 @@ set(PROJECT_SOURCES
         include/ui/setting/DialogManageRoutes.h
         include/ui/setting/DialogManageRoutes.ui
 
-        src/ui/setting/dialog_vpn_settings.cpp
-        include/ui/setting/dialog_vpn_settings.h
-        include/ui/setting/dialog_vpn_settings.ui
+        src/ui/setting/DialogVpnSettings.cpp
+        include/ui/setting/DialogVpnSettings.h
+        include/ui/setting/DialogVpnSettings.ui
 
-        src/ui/setting/dialog_hotkey.cpp
-        include/ui/setting/dialog_hotkey.h
-        include/ui/setting/dialog_hotkey.ui
+        src/ui/setting/DialogHotkey.cpp
+        include/ui/setting/DialogHotkey.h
+        include/ui/setting/DialogHotkey.ui
 
         src/ui/profile/ProxyItem.cpp
         include/ui/profile/ProxyItem.h

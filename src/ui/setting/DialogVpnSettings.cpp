@@ -1,4 +1,4 @@
-#include "include/ui/setting/dialog_vpn_settings.h"
+#include "include/ui/setting/DialogVpnSettings.h"
 
 #include "include/global/GuiUtils.hpp"
 #include "include/global/Configs.hpp"

@@ -3,7 +3,7 @@
 #include <QDialog>
 #include <QJsonObject>
 #include <QTimer>
-#include "ui_dialog_basic_settings.h"
+#include "ui_DialogBasicSettings.h"
 
 namespace Ui {
     class DialogBasicSettings;

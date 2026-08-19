@@ -1,7 +1,7 @@
 #pragma once
 
 #include <QDialog>
-#include "ui_dialog_vpn_settings.h"
+#include "ui_DialogVpnSettings.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {

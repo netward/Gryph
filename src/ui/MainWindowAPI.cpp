@@ -466,22 +466,72 @@ namespace MainWindowApi
         QObject* context,
         std::function<void(int)> callback)
     {
+        // =========================================================
+        // Validation
+        // =========================================================
+
+        if (!context ||
+            !callback)
+        {
+            return;
+        }
+
+
+        // =========================================================
+        // Lifetime guard
+        //
+        // The original QObject* is valid at the moment this API is
+        // called, but dispatchToMainWindow() may queue the operation.
+        //
+        // QPointer will automatically become nullptr if context is
+        // destroyed before queued delivery.
+        // =========================================================
+
+        const QPointer<QObject> safeContext(
+            context
+        );
+
+
+        // =========================================================
+        // NEVER capture raw QObject* across queued dispatch.
+        // =========================================================
+
         dispatchToMainWindow(
             [
-                context,
+                safeContext,
+
                 callback =
                 std::move(callback)
             ](MainWindow& mainWindow) mutable
             {
-                mainWindow
-                    .start_select_mode(
-                        context,
-                        std::move(callback)
-                    );
+                // =================================================
+                // Context was destroyed while this invocation was
+                // waiting in the event queue.
+                //
+                // Do not enter select mode and do not dereference it.
+                // =================================================
+
+                if (!safeContext)
+                {
+                    return;
+                }
+
+
+                // =================================================
+                // From this point MainWindow::start_select_mode()
+                // uses this object as QObject::connect receiver.
+                //
+                // Qt will automatically disconnect the callback if
+                // the receiver is destroyed later.
+                // =================================================
+
+                mainWindow.start_select_mode(
+                    safeContext.data(),
+                    callback
+                );
             }
         );
     }
-
 
     // =========================================================
     // Hotkey

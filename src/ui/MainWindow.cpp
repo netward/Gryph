@@ -19,11 +19,11 @@
 #include "include/ui/setting/ThemeManager.hpp"
 #include "include/ui/setting/Icon.hpp"
 #include "include/ui/profile/dialog_edit_profile.h"
-#include "include/ui/setting/dialog_basic_settings.h"
+#include "include/ui/setting/DialogBasicSettings.h"
 #include "include/ui/group/DialogManageGroups.h"
 #include "include/ui/setting/DialogManageRoutes.h"
-#include "include/ui/setting/dialog_vpn_settings.h"
-#include "include/ui/setting/dialog_hotkey.h"
+#include "include/ui/setting/DialogVpnSettings.h"
+#include "include/ui/setting/DialogHotkey.h"
 
 #include "3rdparty/qrcodegen.hpp"
 #include "3rdparty/qv2ray/v2/ui/LogHighlighter.hpp"
@@ -6912,9 +6912,65 @@ bool MainWindow::eventFilter(
 }
 
 // profile selector
-void MainWindow::start_select_mode(QObject* context, const std::function<void(int)>& callback) {
-    select_mode = true;
-    connectOnce(this, &MainWindow::profile_selected, context, callback);
+void MainWindow::start_select_mode(
+    QObject* context,
+    const std::function<void(int)>& callback)
+{
+    // =========================================================
+    // Validation
+    // =========================================================
+
+    if (!context ||
+        !callback)
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // This operation belongs to the GUI.
+    //
+    // Current Gryph callers use QWidget-derived objects:
+    //
+    //     EditChain
+    //     ProxyItem
+    //
+    // which live in the MainWindow/UI thread.
+    // =========================================================
+
+    if (context->thread()
+        !=
+        thread())
+    {
+        MW_show_log(
+            "MainWindow::start_select_mode: "
+            "context belongs to a different thread"
+        );
+
+        return;
+    }
+
+
+    // =========================================================
+    // Connect BEFORE publishing select_mode.
+    //
+    // The QObject context makes the callback lifetime-bound to
+    // `context`: if context is destroyed, Qt disconnects it.
+    // =========================================================
+
+    connectOnce(
+        this,
+        &MainWindow::profile_selected,
+        context,
+        callback
+    );
+
+
+    // Only now make the new mode visible.
+    select_mode =
+        true;
+
+
     refresh_status();
 }
 

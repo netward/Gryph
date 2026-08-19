@@ -2,7 +2,7 @@
 
 #include <QDialog>
 #include "include/global/Configs.hpp"
-#include "ui_dialog_hotkey.h"
+#include "ui_DialogHotkey.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {

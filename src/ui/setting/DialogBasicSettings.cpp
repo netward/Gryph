@@ -1,4 +1,4 @@
-#include "include/ui/setting/dialog_basic_settings.h"
+#include "include/ui/setting/DialogBasicSettings.h"
 
 #include "3rdparty/qv2ray/v2/ui/widgets/editors/w_JsonEditor.hpp"
 #include "include/ui/setting/ThemeManager.hpp"

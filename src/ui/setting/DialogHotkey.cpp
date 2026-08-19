@@ -1,4 +1,4 @@
-#include "include/ui/setting/dialog_hotkey.h"
+#include "include/ui/setting/DialogHotkey.h"
 
 #include <include/global/GuiUtils.hpp>
 
