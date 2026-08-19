@@ -1093,50 +1093,137 @@ namespace Configs
     bool GroupsRepo::SetGroupsTabOrder(
         const QList<int>& order)
     {
-        if (!db.exec(
-            "DELETE FROM groups_order"))
+        // =========================================================
+        // PHASE 1
+        //
+        // Validate input strictly.
+        //
+        // We do NOT silently remove invalid IDs because doing so
+        // would save an order different from the caller's request.
+        // =========================================================
+
+        QSet<int>
+            uniqueIds;
+
+
+        uniqueIds.reserve(
+            order.size()
+        );
+
+
+        for (const int groupId :
+        order)
         {
-            return false;
+            if (groupId < 0)
+            {
+                MW_show_log(
+                    "GroupsRepo::SetGroupsTabOrder: "
+                    "invalid Group ID "
+                    +
+                    Int2String(
+                        groupId
+                    )
+                );
+
+
+                return false;
+            }
+
+
+            if (uniqueIds.contains(
+                groupId))
+            {
+                MW_show_log(
+                    "GroupsRepo::SetGroupsTabOrder: "
+                    "duplicate Group ID "
+                    +
+                    Int2String(
+                        groupId
+                    )
+                );
+
+
+                return false;
+            }
+
+
+            uniqueIds.insert(
+                groupId
+            );
         }
 
 
-        if (order.isEmpty())
-        {
-            return true;
-        }
-
+        // =========================================================
+        // PHASE 2
+        //
+        // Convert Qt container into DB-only representation.
+        // =========================================================
 
         std::vector<int>
-            pairs;
+            groupIds;
 
 
-        pairs.reserve(
-            static_cast<size_t>(
-                order.size() * 2
+        groupIds.reserve(
+            static_cast<std::size_t>(
+                order.size()
                 )
         );
 
 
-        for (int i = 0;
-            i < order.size();
-            ++i)
+        for (const int groupId :
+        order)
         {
-            pairs.push_back(
-                order[i]
-            );
-
-            pairs.push_back(
-                i
+            groupIds.push_back(
+                groupId
             );
         }
 
 
-        return db.execBatchInsertIntPairs(
-            "groups_order",
-            "group_id",
-            "display_order",
-            pairs
-        );
+        // =========================================================
+        // PHASE 3
+        //
+        // Serialize GroupsRepo mutation.
+        //
+        // Existing GroupsRepo mutation methods also use this mutex.
+        //
+        // Lock order:
+        //
+        //     GroupsRepo::mutex
+        //             ↓
+        //     Database::db_mutex
+        // =========================================================
+
+        std::lock_guard<std::mutex>
+            locker(
+                mutex
+            );
+
+
+        // =========================================================
+        // PHASE 4
+        //
+        // ONE atomic SQLite operation.
+        // =========================================================
+
+        const bool persisted =
+            db.replaceGroupsOrderAtomic(
+                groupIds
+            );
+
+
+        if (!persisted)
+        {
+            MW_show_log(
+                "GroupsRepo::SetGroupsTabOrder: "
+                "failed to persist Groups tab order"
+            );
+
+
+            return false;
+        }
+
+
+        return true;
     }
 
     bool GroupsRepo::Save(

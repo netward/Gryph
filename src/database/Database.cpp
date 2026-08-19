@@ -1909,6 +1909,263 @@ namespace Configs {
         }
     }
 
+    bool Database::replaceGroupsOrderAtomic(
+        const std::vector<int>& groupIds)
+    {
+        // =========================================================
+        // PHASE 1
+        //
+        // Validate input before touching SQLite.
+        // =========================================================
+
+        std::set<int>
+            uniqueIds;
+
+
+        for (const int groupId :
+        groupIds)
+        {
+            if (groupId < 0)
+            {
+                MW_show_log(
+                    "Database::replaceGroupsOrderAtomic: "
+                    "invalid Group ID "
+                    +
+                    Int2String(groupId)
+                );
+
+                return false;
+            }
+
+
+            const auto [
+                iterator,
+                inserted
+            ] =
+                uniqueIds.insert(
+                    groupId
+                );
+
+
+            if (!inserted)
+            {
+                MW_show_log(
+                    "Database::replaceGroupsOrderAtomic: "
+                    "duplicate Group ID "
+                    +
+                    Int2String(groupId)
+                );
+
+                return false;
+            }
+        }
+
+
+        // =========================================================
+        // PHASE 2
+        //
+        // Own the single SQLite connection for the complete
+        // operation.
+        // =========================================================
+
+        std::lock_guard<
+            std::recursive_mutex
+        > locker(
+            db_mutex
+        );
+
+
+        try
+        {
+            // =====================================================
+            // ONE transaction for the WHOLE replacement.
+            // =====================================================
+
+            SQLite::Transaction transaction(
+                db,
+                SQLite::TransactionBehavior::IMMEDIATE
+            );
+
+
+            // =====================================================
+            // Validate that every supplied Group still exists.
+            //
+            // This prevents groups_order from containing references
+            // to Groups which no longer exist.
+            // =====================================================
+
+            if (!groupIds.empty())
+            {
+                SQLite::Statement existsStmt(
+                    db,
+
+                    "SELECT 1 "
+                    "FROM groups "
+                    "WHERE id = ? "
+                    "LIMIT 1"
+                );
+
+
+                for (const int groupId :
+                groupIds)
+                {
+                    existsStmt.bind(
+                        1,
+                        groupId
+                    );
+
+
+                    const bool exists =
+                        existsStmt.executeStep();
+
+
+                    if (!exists)
+                    {
+                        throw std::runtime_error(
+                            "Database::replaceGroupsOrderAtomic: "
+                            "Group does not exist: "
+                            +
+                            std::to_string(
+                                groupId
+                            )
+                        );
+                    }
+
+
+                    // Prepare the statement for the next ID.
+                    existsStmt.reset();
+                }
+            }
+
+
+            // =====================================================
+            // Remove previous order.
+            //
+            // IMPORTANT:
+            //
+            // This DELETE is NOT committed yet.
+            //
+            // If any INSERT below fails, SQLite rolls this DELETE
+            // back as well.
+            // =====================================================
+
+            SQLite::Statement deleteStmt(
+                db,
+
+                "DELETE FROM groups_order"
+            );
+
+
+            deleteStmt.exec();
+
+
+            // =====================================================
+            // Empty order is valid.
+            //
+            // It simply means groups_order remains empty after
+            // COMMIT.
+            // =====================================================
+
+            if (!groupIds.empty())
+            {
+                // =================================================
+                // Prepare INSERT once and reuse it.
+                // =================================================
+
+                SQLite::Statement insertStmt(
+                    db,
+
+                    R"(
+                INSERT INTO groups_order
+                (
+                    group_id,
+                    display_order
+                )
+                VALUES
+                (
+                    ?,
+                    ?
+                )
+                )"
+                );
+
+
+                for (std::size_t i = 0;
+                    i < groupIds.size();
+                    ++i)
+                {
+                    insertStmt.bind(
+                        1,
+                        groupIds[i]
+                    );
+
+
+                    insertStmt.bind(
+                        2,
+                        static_cast<int>(
+                            i
+                            )
+                    );
+
+
+                    insertStmt.exec();
+
+
+                    insertStmt.reset();
+                }
+            }
+
+
+            // =====================================================
+            // Every operation succeeded.
+            //
+            // Old order disappears and new order becomes visible
+            // at the same instant.
+            // =====================================================
+
+            transaction.commit();
+
+
+            // =====================================================
+            // WAL accounting.
+            //
+            // One DELETE
+            // +
+            // N INSERTs
+            // =====================================================
+
+            maybeCheckpoint(
+                static_cast<int>(
+                    1
+                    +
+                    groupIds.size()
+                    )
+            );
+
+
+            return true;
+        }
+        catch (std::exception& e)
+        {
+            // =====================================================
+            // transaction.commit() was not reached.
+            //
+            // SQLite::Transaction destructor rolls the complete
+            // operation back.
+            //
+            // Therefore the previous groups_order stays intact.
+            // =====================================================
+
+            NotifyError(
+                "Database::replaceGroupsOrderAtomic",
+                e
+            );
+
+
+            return false;
+        }
+    }
+
     bool Database::deleteProfilesWithGroupUpdatesAtomic(
         const std::vector<GroupProfilesUpdateRow>& groupUpdates,
         const std::vector<int>& profileIds)

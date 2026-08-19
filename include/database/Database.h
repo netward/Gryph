@@ -588,6 +588,26 @@ namespace Configs
             const std::vector<int>& pairs
         );
 
+        // =============================================================
+        // Replace the complete Groups tab order atomically.
+        //
+        // The complete operation:
+        //
+        //     DELETE old order
+        //     +
+        //     INSERT new order
+        //
+        // is executed inside ONE SQLite transaction.
+        //
+        // On any failure the previous groups_order contents are restored
+        // automatically by SQLite rollback.
+        // =============================================================
+
+        [[nodiscard]]
+        bool replaceGroupsOrderAtomic(
+            const std::vector<int>& groupIds
+        );
+
         [[nodiscard]]
         bool insertGroupAtomic(
             const GroupInsertRow& row
