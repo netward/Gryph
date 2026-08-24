@@ -13,6 +13,7 @@
 
 class QObject;
 class QWidget;
+class MainWindow;
 
 enum class MwMessage;
 
@@ -33,6 +34,14 @@ namespace MainWindowApi
 
     QWidget* Widget();
 
+    // =========================================================
+    // Generic lifetime-safe UI dispatch
+    // =========================================================
+
+    [[nodiscard]]
+    bool Post(
+        std::function<void(MainWindow&)> callback
+    );
 
     // =========================================================
     // Global message bridges

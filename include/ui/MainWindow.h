@@ -50,6 +50,9 @@ namespace Ui {
 }
 QT_END_NAMESPACE
 
+class QThread;
+class QSyntaxHighlighter;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
@@ -190,26 +193,18 @@ private slots:
     void on_tabWidget_customContextMenuRequested(const QPoint& p);
 
 private:
-    Ui::MainWindow *ui;
+    Ui::MainWindow* ui =
+        nullptr;
     
-    // -----------------------------------------------------
+    // =============================================================
     // Running profile
-    // -----------------------------------------------------
-
-    // -----------------------------------------------------
-    // Currently running profile
-    //
-    // Access ONLY through:
-    //   runningProfileSnapshot()
-    //   publishRunningProfile()
-    //   clearRunningProfileIf()
-    //
-    // This object is read from UI and worker threads.
-    // -----------------------------------------------------
+    // =============================================================
 
     std::atomic<
         std::shared_ptr<Configs::Profile>
-    > runningProfile_{ nullptr };
+    > runningProfile_{
+        nullptr
+    };
 
     // =============================================================
     // Runtime session state
@@ -423,80 +418,203 @@ private:
         quint64 sessionGeneration
     );
 
-    ProfilesTableModel* profilesTableModel = nullptr;
-    QSystemTrayIcon *tray;
-    QMenu *trayServerMenu = nullptr;
-    int trayServerPage = 0;
-    QShortcut *shortcut_esc = new QShortcut(QKeySequence::Cancel, this);
-    //
-    QThreadPool *parallelCoreCallPool = new QThreadPool(this);
+
+    ProfilesTableModel*
+        profilesTableModel =
+        nullptr;
+
+    // =============================================================
+    // Tray
+    // =============================================================
+
+    QSystemTrayIcon*
+        tray =
+        nullptr;
+
+
+    QMenu*
+        trayServerMenu =
+        nullptr;
+
+
+    int trayServerPage =
+        0;
+
+
+    // =============================================================
+    // Shortcuts
+    // =============================================================
+
+    QShortcut*
+        shortcut_esc =
+        new QShortcut(
+            QKeySequence::Cancel,
+            this
+        );
+
+    // =============================================================
+    // Core calls
+    // =============================================================
+
+    QThreadPool*
+        parallelCoreCallPool =
+        new QThreadPool(
+            this
+        );
+
     std::atomic_bool stopSpeedtest{
-    false
+        false
     };
+
 
     std::atomic_bool speedtestRunning{
         false
     };
 
+
     std::atomic_bool currentUnderTest{
         false
     };
-    //
-    Configs_sys::CoreProcess *core_process = nullptr;
-    QMutex coreProcessMutex; // serializes core_process init (DS_cores) vs IPC newConnection (UI)
-    QLocalServer *core_server = nullptr;
-    bool rpc_started = false;
+
+    Configs_sys::CoreProcess*
+        core_process =
+        nullptr;
+
+    QMutex coreProcessMutex;
+
+    QLocalServer*
+        core_server =
+        nullptr;
+    
+    bool rpc_started =
+        false;
+    
     QMutex defaultClientMutex;
-    qint64 vpn_pid = 0;
-    //
-    QTextDocument *qvLogDocument = new QTextDocument(this);
-    //
+
+
+    qint64 vpn_pid =
+        0;
+
+    // =============================================================
+    // Log document / highlighter
+    // =============================================================
+
+    QTextDocument*
+        qvLogDocument =
+        new QTextDocument(
+            this
+        );
+
+    QSyntaxHighlighter*
+        logHighlighter_ =
+        nullptr;
+
+
     QString title_error;
-    int icon_status = -1;
+
+
+    int icon_status =
+        -1;
 
     QString traffic_update_cache;
-    qint64 last_test_time = 0;
-    //
-    int proxy_last_order = -1;
-    bool select_mode = false;
+
+
+    qint64 last_test_time =
+        0;
+
+
+    int proxy_last_order =
+        -1;
+
+    bool select_mode =
+        false;
+
+
     QMutex mu_starting;
     QMutex mu_stopping;
     QMutex mu_exit;
-    int exit_reason = 0;
-    //
-    QMutex mu_download_update;
-    //
+
+    int exit_reason =
+        0;
+
     QMutex connectionListMu;
-    //
-    int toolTipID;
-    //
-    SpeedWidget *speedChartWidget;
-    //
-    // for data view
-    QDateTime lastUpdated = QDateTime::currentDateTime();
-    DataViewHtmlGenerator dataViewHtmlGenerator_;
 
-    // shortcuts
-    QList<QShortcut*> hiddenMenuShortcuts;
+    // IMPORTANT:
+     // Was previously uninitialized.
+    int toolTipID =
+        0;
 
-    QStringList remoteRouteProfiles;
-    QMutex mu_remoteRouteProfiles;
 
-    // search
-    bool searchEnabled = false;
+    SpeedWidget*
+        speedChartWidget =
+        nullptr;
+
+
+    QDateTime lastUpdated =
+        QDateTime::currentDateTime();
+
+    DataViewHtmlGenerator
+        dataViewHtmlGenerator_;
+
+    QList<QShortcut*>
+        hiddenMenuShortcuts;
+    
+    // =============================================================
+    // Remote route profiles
+    //
+    // All access after the refactor happens in UI thread.
+    // Therefore the old mu_remoteRouteProfiles is unnecessary.
+    // =============================================================
+
+    QStringList
+        remoteRouteProfiles;
+
+
+    bool remoteRouteProfilesLoading_ =
+        false;
+
+
+    // =============================================================
+    // Search
+    // =============================================================
+
+    bool searchEnabled =
+        false;
+
+
     QString addressFilterString;
     QString nameFilterString;
     QString typeFilterString;
     QString countryFilterString;
 
-    // log
+
+    // =============================================================
+    // Log worker
+    // =============================================================
+
     QStringList includeKeywords;
     QStringList excludeKeywords;
+
     QRegularExpression includeCombined;
     QRegularExpression excludeCombined;
+
     QMutex logMutex;
-    QQueue<QString> logQueue;
-    QWaitCondition logWaiter;
+
+    QQueue<QString>
+        logQueue;
+
+    QWaitCondition
+        logWaiter;
+
+    QThread*
+        logWorkerThread_ =
+        nullptr;
+
+
+    std::atomic_bool
+        logStopRequested_{
+            false
+    };
 
     void append_log(const QString &log);
 
@@ -531,6 +649,10 @@ private:
     // Routes user-supplied text: Gryph:// links go to the deeplink handler, the
     // rest to the subscription/profile importer.
     void import_or_handle_deeplink(const QString &text);
+
+    void rebuildLogHighlighter(
+        bool dark
+    );
 
     void refresh_proxy_list_column_size();
 

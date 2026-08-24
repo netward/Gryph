@@ -5,6 +5,7 @@
 #include <functional>
 #include <utility>
 
+#include <QDebug>
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QMutex>
@@ -28,6 +29,20 @@ namespace
     QMutex
         g_mainWindowMutex;
 
+    // =========================================================
+    // MainWindow instance generation
+    //
+    // Incremented every time MainWindow is published or
+    // detached.
+    //
+    // A queued callback remembers the generation which existed
+    // when it was submitted. If the window is replaced before
+    // delivery, that callback is discarded.
+    // =========================================================
+
+    quint64
+        g_mainWindowGeneration =
+        0;
 
     // =========================================================
     // Asynchronous context-bound dispatch
@@ -43,136 +58,56 @@ namespace
     // =========================================================
 
     bool dispatchToMainWindow(
-        std::function<void(MainWindow&)> callback)
+        std::function<void(MainWindow&)> callback
+    )
     {
+        // =========================================================
+        // Validate callback
+        // =========================================================
+
         if (!callback)
         {
             return false;
         }
 
 
-        MainWindow* target =
-            nullptr;
-
-
-        bool sameThread =
-            false;
-
-
-        {
-            QMutexLocker locker(
-                &g_mainWindowMutex
-            );
-
-
-            target =
-                g_mainWindow.data();
-
-
-            if (!target)
-            {
-                return false;
-            }
-
-
-            sameThread =
-                target->thread()
-                ==
-                QThread::currentThread();
-
-
-            // =================================================
-            // Worker thread -> UI thread
-            // =================================================
-
-            if (!sameThread)
-            {
-                return QMetaObject::invokeMethod(
-                    target,
-
-                    [
-                        target,
-                        callback =
-                        std::move(callback)
-                    ]() mutable
-                    {
-                        callback(
-                            *target
-                        );
-                    },
-
-                    Qt::QueuedConnection
-                );
-            }
-        }
-
-
-        // =====================================================
-        // Already in UI thread.
-        //
-        // Execute outside registry mutex so callback may itself
-        // call MainWindowApi without deadlocking.
-        // =====================================================
-
-        callback(
-            *target
-        );
-
-
-        return true;
-    }
-
-    // =========================================================
-    // Synchronous boolean dispatch
-    //
-    // Required for APIs which must return a result immediately,
-    // e.g. StopVpnProcess().
-    //
-    // UI thread:
-    //     direct call.
-    //
-    // Worker thread:
-    //     BlockingQueuedConnection.
-    // =========================================================
-    bool dispatchBoolToMainWindow(
-        std::function<bool(MainWindow&)> callback,
-        bool fallback = false)
-    {
-        if (!callback)
-        {
-            return fallback;
-        }
-
-
-        QCoreApplication* application =
+        QCoreApplication* const application =
             QCoreApplication::instance();
 
+
+        // =========================================================
+        // Application is already shutting down.
+        //
+        // Do not enqueue any new MainWindow work.
+        // =========================================================
 
         if (!application ||
             QCoreApplication::closingDown())
         {
-            return fallback;
+            return false;
         }
 
 
-        QThread* uiThread =
+        QThread* const uiThread =
             application->thread();
 
 
         if (!uiThread)
         {
-            return fallback;
+            return false;
         }
 
+
         // =========================================================
-        // Already on UI thread
+        // Already running in the UI thread
         // =========================================================
+
         if (QThread::currentThread()
             ==
             uiThread)
         {
-            MainWindow* target =
-                nullptr;
+            QPointer<MainWindow>
+                target;
 
 
             {
@@ -182,81 +117,124 @@ namespace
 
 
                 target =
-                    g_mainWindow.data();
+                    g_mainWindow;
             }
 
 
             if (!target)
             {
-                return fallback;
+                return false;
             }
 
 
-            return callback(
+            // UI thread cannot simultaneously destroy MainWindow
+            // while this code is synchronously executing.
+            callback(
                 *target
             );
+
+
+            return true;
         }
+
+
+        // =========================================================
+        // Worker thread
+        //
+        // IMPORTANT:
+        //
+        // Do NOT dereference MainWindow here.
+        // Do NOT call target->thread().
+        // Do NOT invoke directly against MainWindow.
+        //
+        // We only take a snapshot of the registry generation.
+        // =========================================================
+
+        quint64 expectedGeneration =
+            0;
+
+
+        {
+            QMutexLocker locker(
+                &g_mainWindowMutex
+            );
+
+
+            if (!g_mainWindow)
+            {
+                return false;
+            }
+
+
+            expectedGeneration =
+                g_mainWindowGeneration;
+        }
+
 
         // =========================================================
         // Worker -> UI
+        //
+        // QCoreApplication is used as the QObject context.
+        //
+        // Therefore actual MainWindow lookup happens only after
+        // execution reaches the UI thread.
         // =========================================================
-        bool result =
-            fallback;
+
+        return QMetaObject::invokeMethod(
+            application,
+
+            [
+                expectedGeneration,
+
+                callback =
+                std::move(callback)
+            ]() mutable
+            {
+                // We are now in the UI thread.
+
+                QPointer<MainWindow>
+                    target;
 
 
-        const bool invoked =
-            QMetaObject::invokeMethod(
-                application,
-
-                [
-                    callback =
-                        std::move(callback),
-
-                        fallback,
-
-                        &result
-                ]() mutable
                 {
-                    MainWindow* target =
-                        nullptr;
+                    QMutexLocker locker(
+                        &g_mainWindowMutex
+                    );
 
 
+                    // ---------------------------------------------
+                    // Window was destroyed/replaced while this
+                    // callback was waiting in the event queue.
+                    // ---------------------------------------------
+
+                    if (g_mainWindowGeneration
+                        !=
+                        expectedGeneration)
                     {
-                        QMutexLocker locker(
-                            &g_mainWindowMutex
-                        );
-
-
-                        target =
-                            g_mainWindow.data();
-                    }
-
-
-                    if (!target)
-                    {
-                        result =
-                            fallback;
-
                         return;
                     }
 
 
-                    result =
-                        callback(
-                            *target
-                        );
-                },
-
-                        Qt::BlockingQueuedConnection
-                        );
+                    target =
+                        g_mainWindow;
+                }
 
 
-        return invoked
-            ? result
-            : fallback;
+                if (!target)
+                {
+                    return;
+                }
+
+
+                callback(
+                    *target
+                );
+            },
+
+            Qt::QueuedConnection
+        );
     }
 }
-
 
 // =============================================================
 // MainWindowApi
@@ -270,7 +248,33 @@ namespace MainWindowApi
     // =========================================================
 
     void Initialize()
-    {
+    {   
+
+        QCoreApplication* const application =
+            QCoreApplication::instance();
+
+
+        if (!application)
+        {
+            qCritical()
+                << "MainWindowApi::Initialize(): "
+                "QCoreApplication does not exist.";
+
+            return;
+        }
+
+
+        if (QThread::currentThread()
+            !=
+            application->thread())
+        {
+            qCritical()
+                << "MainWindowApi::Initialize(): "
+                "must be called from UI thread.";
+
+            return;
+        }
+
         // -----------------------------------------------------
         // Check whether window already exists.
         // -----------------------------------------------------
@@ -322,6 +326,8 @@ namespace MainWindowApi
 
             g_mainWindow =
                 createdWindow;
+            // New published MainWindow instance.
+            ++g_mainWindowGeneration;
         }
 
         // =========================================================
@@ -336,13 +342,22 @@ namespace MainWindowApi
         MW_FlushPendingMainWindowEvents();
     }
 
+    bool Post(
+        std::function<void(MainWindow&)> callback
+    )
+    {
+        return dispatchToMainWindow(
+            std::move(callback)
+        );
+    }
 
     // =========================================================
     // Lifetime detachment
     // =========================================================
 
     void Detach(
-        QWidget* expectedWindow)
+        QWidget* expectedWindow
+    )
     {
         if (!expectedWindow)
         {
@@ -365,6 +380,13 @@ namespace MainWindowApi
 
         g_mainWindow =
             nullptr;
+
+
+        // ---------------------------------------------------------
+        // Invalidate all callbacks submitted for this MainWindow.
+        // ---------------------------------------------------------
+
+        ++g_mainWindowGeneration;
     }
 
     // =========================================================
@@ -563,14 +585,25 @@ namespace MainWindowApi
 
     bool StopVpnProcess()
     {
-        return dispatchBoolToMainWindow(
+        // =========================================================
+        // IMPORTANT:
+        //
+        // Do not synchronously block a worker waiting for the UI.
+        //
+        // MainWindow::StopVPNProcess() may itself communicate with
+        // DS_cores, so BlockingQueuedConnection here could create:
+        //
+        // DS_cores -> UI -> DS_cores
+        //
+        // dispatchToMainWindow() is asynchronous for worker callers.
+        // =========================================================
+
+        return dispatchToMainWindow(
             [](MainWindow& mainWindow)
             {
-                return mainWindow
+                (void)mainWindow
                     .StopVPNProcess();
-            },
-
-            false
+            }
         );
     }
 

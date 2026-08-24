@@ -6,6 +6,8 @@
 #include <memory>
 #include <atomic>
 #include <ranges>
+#include <algorithm>
+#include <utility>
 
 #include <QSemaphore>
 #include <QMutexLocker>
@@ -136,6 +138,11 @@ static bool themeUsesDarkLog(const QString& theme) {
     return isDarkMode(); // bi-mode themes, follow system preference
 }
 
+namespace
+{
+    QMutex g_updateDownloadMutex;
+}
+
 std::shared_ptr<Configs::Profile>
 MainWindow::runningProfileSnapshot() const noexcept
 {
@@ -224,28 +231,91 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
     // Настройка просмотрщика журналов.
     ui->splitter->restoreState(DecodeB64IfValid(Configs::dataManager->settingsRepo->splitter_state));
-    new SyntaxHighlighter(themeUsesDarkLog(Configs::dataManager->settingsRepo->theme), qvLogDocument);
+    rebuildLogHighlighter(
+        themeUsesDarkLog(
+            Configs::dataManager
+            ->settingsRepo
+            ->theme
+        )
+    );
     qvLogDocument->setUndoRedoEnabled(false);
     qvLogDocument->setMaximumBlockCount(Configs::dataManager->settingsRepo->max_log_line);
     ui->masterLogBrowser->setUndoRedoEnabled(false);
     ui->masterLogBrowser->setDocument(qvLogDocument);
     applyLogBrowserFont();
     updateLogFilterFields();
-    runOnThread([=, this] {
-        log_process_loop();
-        }, LogThread);
+    logStopRequested_.store(
+        false,
+        std::memory_order_release
+    );
+
+
+    logWorkerThread_ =
+        QThread::create(
+            [this]()
+            {
+                log_process_loop();
+            }
+        );
+
+
+    logWorkerThread_
+        ->setObjectName(
+            QStringLiteral(
+                "GryphLogWorker"
+            )
+        );
+
+
+    logWorkerThread_
+        ->start();
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    connect(qApp->styleHints(), &QStyleHints::colorSchemeChanged, this, [=, this](const Qt::ColorScheme& scheme) {
-        new SyntaxHighlighter(scheme == Qt::ColorScheme::Dark, qvLogDocument);
-        themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme, true);
-        });
+    connect(
+        qApp->styleHints(),
+        &QStyleHints::colorSchemeChanged,
+        this,
+
+        [this](
+            const Qt::ColorScheme scheme
+            )
+        {
+            rebuildLogHighlighter(
+                scheme ==
+                Qt::ColorScheme::Dark
+            );
+
+
+            themeManager->ApplyTheme(
+                Configs::dataManager
+                ->settingsRepo
+                ->theme,
+
+                true
+            );
+        }
+    );
 #endif
     // Реакция на смену темы из настроек.
-    connect(themeManager, &ThemeManager::themeChanged, this, [=, this](const QString& theme) {
-        new SyntaxHighlighter(themeUsesDarkLog(theme), qvLogDocument);
-        scheduleProxyListRefresh();
-        });
+    connect(
+        themeManager,
+        &ThemeManager::themeChanged,
+        this,
+
+        [this](
+            const QString& theme
+            )
+        {
+            rebuildLogHighlighter(
+                themeUsesDarkLog(
+                    theme
+                )
+            );
+
+
+            scheduleProxyListRefresh();
+        }
+    );
     
     // Выбор входящего порта.
     if (Configs::dataManager->settingsRepo->random_inbound_port)
@@ -410,14 +480,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         &QToolButton::clicked,
         this,
 
-        [this]
+        [this]()
         {
-            Async::run(
-                [this]
-                {
-                    CheckUpdate();
-                }
-            );
+            CheckUpdate();
         }
     );
 
@@ -439,11 +504,13 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Повторное нажатие на тот же столбец
     // переключает направление.
     const auto sortGroupAsync =
-        [this](
+        [](
             const std::shared_ptr<
             Configs::Group
             >& group,
-            const GroupSortAction& action)
+
+            const GroupSortAction& action
+            )
         {
             if (!group)
             {
@@ -457,15 +524,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
             Async::run(
                 [
-                    this,
                     group,
                     groupId,
                     action
                 ]()
                 {
-                    if (!group->SortProfiles(action))
+                    // =================================================
+                    // Background part
+                    //
+                    // No MainWindow pointer.
+                    // =================================================
+
+                    if (!group->SortProfiles(
+                        action
+                    ))
                     {
-                        if (!group->SortProfiles(action))
+                        // Retry once because the Group may have changed
+                        // between snapshot and commit.
+
+                        if (!group->SortProfiles(
+                            action
+                        ))
                         {
                             MW_show_log(
                                 "Group changed while sorting; "
@@ -479,47 +558,53 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
                     Configs::dataManager
                         ->groupsRepo
-                        ->Save(group);
+                        ->Save(
+                            group
+                        );
 
 
-                    runOnUiThread(
-                        this,
+                    // =================================================
+                    // UI part
+                    // =================================================
 
+                    (void)MainWindowApi::Post(
                         [
-                            this,
                             groupId
-                        ]()
+                        ](MainWindow& window)
                         {
-                            auto currentGroup =
+                            const auto currentGroup =
                                 Configs::dataManager
                                 ->groupsRepo
                                 ->CurrentGroup();
 
 
+                            // User may have switched tabs while the sort
+                            // operation was running.
                             if (!currentGroup ||
-                                currentGroup->Id() != groupId)
+                                currentGroup->Id()
+                                != groupId)
                             {
                                 return;
                             }
 
 
-                            refresh_proxy_list(
+                            window.refresh_proxy_list(
                                 {},
                                 true
                             );
                         }
-                    );
+                                );
                 }
             );
         };
 
     // =========================================================
-// Profile table sort state
-//
-// 0 = default subscription order
-// 1 = ascending
-// 2 = descending
-// =========================================================
+    // Profile table sort state
+    //
+    // 0 = default subscription order
+    // 1 = ascending
+    // 2 = descending
+    // =========================================================
 
     struct ProfileSortState
     {
@@ -533,10 +618,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
 
     const auto restoreDefaultOrderAsync =
-        [this](
+        [](
             const std::shared_ptr<
             Configs::Group
-            >& group)
+            >& group
+            )
         {
             if (!group)
             {
@@ -550,13 +636,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
             Async::run(
                 [
-                    this,
                     group,
                     groupId
                 ]()
                 {
-                    // Restore the canonical order received
-                    // from the subscription.
+                    // =================================================
+                    // Background work
+                    // =================================================
+
                     if (!group
                         ->RestoreDefaultProfileOrder())
                     {
@@ -571,35 +658,40 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
                     Configs::dataManager
                         ->groupsRepo
-                        ->Save(group);
+                        ->Save(
+                            group
+                        );
 
 
-                    runOnUiThread(
+                    // =================================================
+                    // UI completion
+                    // =================================================
+
+                    (void)MainWindowApi::Post(
                         [
-                            this,
                             groupId
-                        ]()
+                        ](MainWindow& window)
                         {
-                            auto currentGroup =
+                            const auto currentGroup =
                                 Configs::dataManager
                                 ->groupsRepo
                                 ->CurrentGroup();
 
 
                             if (!currentGroup ||
-                                currentGroup->Id() !=
-                                groupId)
+                                currentGroup->Id()
+                                != groupId)
                             {
                                 return;
                             }
 
 
-                            refresh_proxy_list(
+                            window.refresh_proxy_list(
                                 {},
                                 true
                             );
                         }
-                    );
+                                );
                 }
             );
         };
@@ -1095,7 +1187,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                             ->groupsRepo
                             ->Save(group);
 
-                        refresh_proxy_list();
+                        MainWindowApi::RefreshProxyList();
                     };
 
 
@@ -1407,33 +1499,56 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Фильтры таблицы профилей.
     connect(static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::typeFilterChanged, this, [=, this](const QString& currentText)
         {
-            typeFilterString = currentText;
-            refresh_proxy_list({}, true);
+            typeFilterString =
+                currentText;
+
+
+            refresh_proxy_list(
+                {},
+                true
+            );
         });
     connect(static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::addressFilterChanged, this, [=, this](const QString& currentText)
         {
-            addressFilterString = currentText;
-            refresh_proxy_list({}, true);
+            addressFilterString = 
+                currentText;
+            refresh_proxy_list(
+                {},
+                true
+            );
         });
     connect(static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::nameFilterChanged, this, [=, this](const QString& currentText)
         {
             nameFilterString = currentText;
-            refresh_proxy_list({}, true);
+            refresh_proxy_list(
+                {},
+                true
+            );
         });
     connect(static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::testFilterChanged, this, [=, this](const QString& currentText)
         {
             countryFilterString = currentText;
-            refresh_proxy_list({}, true);
+            refresh_proxy_list(
+                {},
+                true
+            );
         });
 
     // Загрузка групп, создание вкладок и отображение текущей группы.
     this->refresh_groups();
 
     // Системный трей.
-    tray = new QSystemTrayIcon(nullptr);
+    tray =
+        new QSystemTrayIcon(
+            this
+        );
+
     tray->setIcon(GetTrayIcon(Icon::NONE));
     QApplication::setWindowIcon(Icon::GetTrayIcon(Icon::NONE));
-    auto* trayMenu = new QMenu();
+    auto* trayMenu =
+        new QMenu(
+            this
+        );
     trayMenu->addAction(ui->actionShow_window);
     trayMenu->addSeparator();
     trayMenu->addAction(ui->actionStart_with_system);
@@ -1444,7 +1559,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Подменю выбора профиля создаётся заново при каждом открытии.
     // Пагинация ограничивает размер меню пятнадцатью профилями.
     constexpr int PAGE_CAPACITY = 15;
-    trayServerMenu = new QMenu(tr("Select Server"));
+    trayServerMenu =
+        new QMenu(
+            tr("Select Server"),
+            trayMenu
+        );
     trayMenu->addMenu(trayServerMenu);
     connect(
         trayServerMenu,
@@ -1805,12 +1924,29 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(trayMenu, &QMenu::aboutToShow, this, [=, this]() {
         trayServerPage = 0;
         });
-    connect(tray, &QSystemTrayIcon::activated, qApp, [=, this](QSystemTrayIcon::ActivationReason reason) {
-        if (reason == QSystemTrayIcon::Trigger && getOS() != Darwin) {
-            ActivateWindow(this);
-            refresh_proxy_list_column_size();
+    connect(
+        tray,
+        &QSystemTrayIcon::activated,
+        this,
+
+        [this](
+            QSystemTrayIcon::ActivationReason reason
+            )
+        {
+            if (reason ==
+                QSystemTrayIcon::Trigger
+                &&
+                getOS() != Darwin)
+            {
+                ActivateWindow(
+                    this
+                );
+
+
+                refresh_proxy_list_column_size();
+            }
         }
-        });
+    );
 
     // Общие команды и режимы работы.
     ui->actionRemember_last_proxy->setChecked(Configs::dataManager->settingsRepo->remember_enable);
@@ -1822,12 +1958,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(ui->menu_add_from_clipboard2, &QAction::triggered, ui->menu_add_from_clipboard, &QAction::trigger);
     // Перезапуск прокси фактически останавливает профиль и завершает ядро;
     // дальнейшее восстановление выполняется общей логикой процесса.
-    connect(ui->actionRestart_Proxy, &QAction::triggered, this, [=, this] {
-        runOnThread([=, this] {
-            profile_stop(true, true, true);
-            core_process->Kill();
-            }, DS_cores);
-        });
+    connect(
+        ui->actionRestart_Proxy,
+        &QAction::triggered,
+        this,
+
+        [this]()
+        {
+            // MainWindow operation stays in UI thread.
+            profile_stop(
+                true,
+                true,
+                true
+            );
+
+
+            // CoreProcess operation is routed to DS_cores.
+            StopVPNProcess();
+        }
+    );
     connect(ui->actionRestart_Program, &QAction::triggered, this, [=, this] { MW_dialog_message(MwMessage::RestartProgram, {}); });
     connect(ui->actionShow_window, &QAction::triggered, this, [=, this] { ActivateWindow(this); });
     connect(ui->actionRemember_last_proxy, &QAction::triggered, this, [=, this](bool checked) {
@@ -1980,50 +2129,173 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     );
 
     // Получение каталога удалённых профилей маршрутизации
-    auto getRemoteRouteProfiles = [=, this]
+    const auto requestRemoteRouteProfiles =
+        [this]()
         {
-            auto resp = NetworkRequestHelper::HttpGet(
-                "https://api.github.com/repos/netward/routeprofiles/contents/profiles?ref=main"
-            );
-
-            if (!resp.error.isEmpty()) {
-                MW_show_log(
-                    "Failed to get remote route profiles: "
-                    + resp.error
-                    + "\n"
-                    + resp.data
-                );
+            if (remoteRouteProfilesLoading_)
+            {
                 return;
             }
 
-            QStringList newRemoteRouteProfiles;
-            const QJsonArray files = QString2QJsonArray(resp.data);
 
-            for (const QJsonValue& value : files) {
-                const QJsonObject fileObject = value.toObject();
+            remoteRouteProfilesLoading_ =
+                true;
 
-                if (fileObject["type"].toString() != "file")
-                    continue;
 
-                QString profile = fileObject["name"].toString();
+            Async::run(
+                []()
+                {
+                    const auto response =
+                        NetworkRequestHelper::HttpGet(
+                            "https://api.github.com/repos/"
+                            "netward/routeprofiles/contents/"
+                            "profiles?ref=main"
+                        );
 
-                if (!profile.endsWith(".json", Qt::CaseInsensitive))
-                    continue;
 
-                if (!profile.startsWith("bypass", Qt::CaseInsensitive) &&
-                    !profile.startsWith("proxy", Qt::CaseInsensitive))
-                    continue;
+                    if (!response.error.isEmpty())
+                    {
+                        const QString error =
+                            response.error
+                            +
+                            "\n"
+                            +
+                            response.data;
 
-                profile.chop(5); // удалить .json
-                newRemoteRouteProfiles.push_back(profile);
-            }
 
-            QMutexLocker locker(&mu_remoteRouteProfiles);
-            remoteRouteProfiles = newRemoteRouteProfiles;
+                        (void)MainWindowApi::Post(
+                            [
+                                error
+                            ](
+                                MainWindow& window
+                                )
+                            {
+                                window
+                                    .remoteRouteProfilesLoading_ =
+                                    false;
+
+
+                                MW_show_log(
+                                    "Failed to get remote route profiles: "
+                                    +
+                                    error
+                                );
+                            }
+                                    );
+
+
+                        return;
+                    }
+
+
+                    QStringList profiles;
+
+
+                    const QJsonArray files =
+                        QString2QJsonArray(
+                            response.data
+                        );
+
+
+                    for (const QJsonValue& value :
+                        files)
+                    {
+                        if (!value.isObject())
+                        {
+                            continue;
+                        }
+
+
+                        const QJsonObject object =
+                            value.toObject();
+
+
+                        if (object[
+                            QStringLiteral("type")
+                        ].toString()
+                                != QStringLiteral("file"))
+                        {
+                            continue;
+                        }
+
+
+                        QString name =
+                            object[
+                                QStringLiteral("name")
+                            ].toString();
+
+
+                        if (!name.endsWith(
+                            QStringLiteral(".json"),
+                            Qt::CaseInsensitive
+                        ))
+                        {
+                            continue;
+                        }
+
+
+                        if (!name.startsWith(
+                            QStringLiteral("bypass"),
+                            Qt::CaseInsensitive
+                        )
+                            &&
+                            !name.startsWith(
+                                QStringLiteral("proxy"),
+                                Qt::CaseInsensitive
+                            ))
+                        {
+                            continue;
+                        }
+
+
+                        name.chop(
+                            5
+                        );
+
+
+                        profiles.append(
+                            name
+                        );
+                    }
+
+
+                    profiles.removeDuplicates();
+
+
+                    std::sort(
+                        profiles.begin(),
+                        profiles.end()
+                    );
+
+
+                    (void)MainWindowApi::Post(
+                        [
+                            profiles =
+                                std::move(
+                                    profiles
+                                )
+                        ](
+                            MainWindow& window
+                            ) mutable
+                        {
+                            window.remoteRouteProfiles =
+                                std::move(
+                                    profiles
+                                );
+
+
+                            window.remoteRouteProfilesLoading_ =
+                                false;
+                        }
+                                );
+                }
+            );
         };
-    Async::run(
-        getRemoteRouteProfiles
-    );
+        QTimer::singleShot(
+            0,
+            this,
+            requestRemoteRouteProfiles
+        );
 
     // Сброс сохранённых ширин возвращает автоматический расчёт столбцов.
     connect(ui->actionRefresh_Column_Widths, &QAction::triggered, this, [=, this] {
@@ -2052,9 +2324,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         {
             if (remoteRouteProfiles.isEmpty())
             {
-                Async::run(
-                    getRemoteRouteProfiles
-                );
+                requestRemoteRouteProfiles();
             }
             ui->menuRouting_Menu->clear();
             ui->menuRouting_Menu->addAction(ui->menu_routing_settings);
@@ -2086,43 +2356,204 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             ui->menuRouting_Menu->addAction(actionWarp);
 
             // Загрузка шаблонов удаленных профилей маршрутизации.
-            mu_remoteRouteProfiles.lock();
             if (!remoteRouteProfiles.isEmpty()) {
                 QMenu* profilesMenu = ui->menuRouting_Menu->addMenu(QObject::tr("Download Profiles"));
                 for (const auto& profile : remoteRouteProfiles)
                 {
                     auto* action = new QAction(profilesMenu);
                     action->setText(profile);
-                    connect(action, &QAction::triggered, this, [=, this]()
+                    connect(
+                        action,
+                        &QAction::triggered,
+                        this,
+
+                        [
+                            profile
+                        ]()
                         {
-                            auto resp = NetworkRequestHelper::HttpGet(Configs::get_jsdelivr_link("https://raw.githubusercontent.com/netward/routeprofiles/main/profiles/" + profile + ".json"));
-                            if (!resp.error.isEmpty()) {
-                                runOnUiThread([=] {
-                                    MessageBoxWarning(QObject::tr("Download Profiles"), QObject::tr("Requesting profile error: %1").arg(resp.error + "\n" + resp.data));
-                                    });
-                                return;
-                            }
-                            auto err = new QString;
-                            auto parsed = Configs::RouteProfile::parseJsonArray(QString2QJsonArray(resp.data), err);
-                            if (!err->isEmpty()) {
-                                runOnUiThread([=]
+                            Async::run(
+                                [
+                                    profile
+                                ]()
+                                {
+                                    // =============================================
+                                    // HTTP in background
+                                    // =============================================
+
+                                    const QString url =
+                                        Configs::get_jsdelivr_link(
+                                            "https://raw.githubusercontent.com/"
+                                            "netward/routeprofiles/main/profiles/"
+                                            +
+                                            profile
+                                            +
+                                            ".json"
+                                        );
+
+
+                                    const auto response =
+                                        NetworkRequestHelper::HttpGet(
+                                            url
+                                        );
+
+
+                                    if (!response.error.isEmpty())
                                     {
-                                        MessageBoxInfo(tr("Invalid JSON Array"), tr("The provided input cannot be parsed to a valid route rule array:\n") + *err);
-                                    });
-                                return;
-                            }
-                            // Создание локальной копии удалённого профиля, доступную для редактирования пользователем.
-                            auto chain = Configs::dataManager->routesRepo->NewRouteProfile();
-                            chain->name = QString(profile).replace('_', ' ');
-                            chain->defaultOutboundID = profile.startsWith("bypass", Qt::CaseInsensitive) ? Configs::proxyID : Configs::directID;
-                            chain->Rules.clear();
-                            chain->Rules << parsed;
-                            Configs::dataManager->routesRepo->AddRouteProfile(chain);
-                        });
+                                        const QString error =
+                                            response.error
+                                            +
+                                            "\n"
+                                            +
+                                            response.data;
+
+
+                                        (void)MainWindowApi::Post(
+                                            [
+                                                error
+                                            ](
+                                                MainWindow&
+                                                )
+                                            {
+                                                MessageBoxWarning(
+                                                    QObject::tr(
+                                                        "Download Profiles"
+                                                    ),
+
+                                                    QObject::tr(
+                                                        "Requesting profile error: %1"
+                                                    )
+                                                    .arg(
+                                                        error
+                                                    )
+                                                );
+                                            }
+                                                    );
+
+
+                                        return;
+                                    }
+
+
+                                    // =============================================
+                                    // Parse in background
+                                    // =============================================
+
+                                    QString parseError;
+
+
+                                    auto parsed =
+                                        Configs::RouteProfile::
+                                        parseJsonArray(
+                                            QString2QJsonArray(
+                                                response.data
+                                            ),
+
+                                            &parseError
+                                        );
+
+
+                                    if (!parseError.isEmpty())
+                                    {
+                                        (void)MainWindowApi::Post(
+                                            [
+                                                parseError
+                                            ](
+                                                MainWindow&
+                                                )
+                                            {
+                                                MessageBoxInfo(
+                                                    QObject::tr(
+                                                        "Invalid JSON Array"
+                                                    ),
+
+                                                    QObject::tr(
+                                                        "The provided input cannot "
+                                                        "be parsed to a valid route "
+                                                        "rule array:\n"
+                                                    )
+                                                    +
+                                                    parseError
+                                                );
+                                            }
+                                                    );
+
+
+                                        return;
+                                    }
+
+
+                                    // =============================================
+                                    // Commit
+                                    // =============================================
+
+                                    (void)MainWindowApi::Post(
+                                        [
+                                            profile,
+
+                                            parsed =
+                                            std::move(
+                                                parsed
+                                            )
+
+                                        ](
+                                            MainWindow&
+                                            ) mutable
+                                        {
+                                            auto chain =
+                                                Configs::dataManager
+                                                ->routesRepo
+                                                ->NewRouteProfile();
+
+
+                                            if (!chain)
+                                            {
+                                                return;
+                                            }
+
+
+                                            chain->name =
+                                                QString(
+                                                    profile
+                                                )
+                                                .replace(
+                                                    '_',
+                                                    ' '
+                                                );
+
+
+                                            chain->defaultOutboundID =
+                                                profile.startsWith(
+                                                    QStringLiteral(
+                                                        "bypass"
+                                                    ),
+
+                                                    Qt::CaseInsensitive
+                                                )
+                                                ? Configs::proxyID
+                                                : Configs::directID;
+
+
+                                            chain->Rules.clear();
+
+
+                                            chain->Rules <<
+                                                parsed;
+
+
+                                            Configs::dataManager
+                                                ->routesRepo
+                                                ->AddRouteProfile(
+                                                    chain
+                                                );
+                                        }
+                                    );
+                                }
+                                        );
+                        }
+                                );
                     profilesMenu->addAction(action);
                 }
             }
-            mu_remoteRouteProfiles.unlock();
 
             // Добавление сохраненных локальных профилей маршрутизации.
             ui->menuRouting_Menu->addSeparator();
@@ -2164,7 +2595,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                 3
             );
         }
-        refresh_proxy_list();
+        MainWindowApi::RefreshProxyList();
         });
     connect(ui->actionUrl_Test_Selected, &QAction::triggered, this, [=, this]() {
         urltest_current_group(get_now_selected_list());
@@ -2389,23 +2820,77 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     // Сохранение состояния и периодические таймеры.
     connect(qApp, &QGuiApplication::commitDataRequest, this, &MainWindow::on_commitDataRequest);
     // Синхронизация индикаторов состояния с настройками каждые 2 секунды.
-    auto t = new QTimer;
-    connect(t, &QTimer::timeout, this, [=, this]() { refresh_status(); });
-    t->start(2000);
+    auto* statusTimer =
+        new QTimer(
+            this
+        );
+
+
+    connect(
+        statusTimer,
+        &QTimer::timeout,
+        this,
+
+        [this]()
+        {
+            refresh_status();
+        }
+    );
+
+
+    statusTimer->start(
+        2000
+    );
     // Счётчик журналов сбрасывается каждую секунду и используется для ограничения или расчёта частоты сообщений.
-    t = new QTimer;
-    connect(t, &QTimer::timeout, this, [&] { Configs_sys::logCounter.fetchAndStoreRelaxed(0); });
-    t->start(1000);
+    auto* logCounterTimer =
+        new QTimer(
+            this
+        );
+
+
+    connect(
+        logCounterTimer,
+        &QTimer::timeout,
+        this,
+
+        []()
+        {
+            Configs_sys::logCounter
+                .fetchAndStoreRelaxed(
+                    0
+                );
+        }
+    );
+
+
+    logCounterTimer->start(
+        1000
+    );
 
     // Отложенное обновление таблицы профилей.
     // Множественные события изменения шрифта, темы или размера окна могут приходить подряд. 
     // Одноразовый таймер объединяет их в одно обновление через 200 мс и предотвращает лишние перерасчёты таблицы.
     m_proxyListRefreshDebounce = new QTimer(this);
     m_proxyListRefreshDebounce->setSingleShot(true);
-    connect(m_proxyListRefreshDebounce, &QTimer::timeout, this, [this] { refresh_proxy_list({}, false); });
+    connect(
+        m_proxyListRefreshDebounce,
+        &QTimer::timeout,
+        this,
+
+        [this]()
+        {
+            refresh_proxy_list(
+                {},
+                false
+            );
+        }
+    );
 
     // Периодическое обновление подписок.
-    TM_auto_update_subsctiption = new QTimer;
+    TM_auto_update_subsctiption =
+        new QTimer(
+            this
+        );
     TM_auto_update_subsctiption_Reset_Minute = [&](int m) {
         TM_auto_update_subsctiption->stop();
         if (m >= 30) TM_auto_update_subsctiption->start(m * 60 * 1000);
@@ -2546,16 +3031,7 @@ void MainWindow::dropEvent(QDropEvent* event)
 MainWindow::~MainWindow()
 {
     // =========================================================
-    // FIRST:
-    // detach this window from every global dispatcher.
-    //
-    // From this point:
-    //
-    // MW_show_log()
-    // MW_dialog_message()
-    // MW_handle_deeplink()
-    //
-    // can no longer schedule NEW work against this MainWindow.
+    // Stop accepting new external MainWindow callbacks.
     // =========================================================
 
     MainWindowApi::Detach(
@@ -2564,7 +3040,42 @@ MainWindow::~MainWindow()
 
 
     // =========================================================
-    // Invalidate detached runtime workers.
+    // Stop permanent log worker BEFORE destroying any member
+    // which the worker may touch.
+    // =========================================================
+
+    logStopRequested_.store(
+        true,
+        std::memory_order_release
+    );
+
+
+    {
+        QMutexLocker locker(
+            &logMutex
+        );
+
+
+        logWaiter.wakeAll();
+    }
+
+
+    if (logWorkerThread_)
+    {
+        logWorkerThread_
+            ->wait();
+
+
+        delete logWorkerThread_;
+
+
+        logWorkerThread_ =
+            nullptr;
+    }
+
+
+    // =========================================================
+    // Invalidate proxy-session async operations.
     // =========================================================
 
     if (runtimeSessionState_)
@@ -2575,7 +3086,21 @@ MainWindow::~MainWindow()
 
 
     // =========================================================
-    // Destroy UI only after external dispatch has been detached.
+    // Remove tray icon before child destruction.
+    // =========================================================
+
+    if (tray)
+    {
+        tray->hide();
+
+        tray->setContextMenu(
+            nullptr
+        );
+    }
+
+
+    // =========================================================
+    // UI can now be destroyed safely.
     // =========================================================
 
     delete ui;
@@ -2587,18 +3112,45 @@ MainWindow::~MainWindow()
 
 // Group tab manage
 
-inline int tabIndex2GroupId(int index) {
-    auto tabOrder = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
-    if (tabOrder.length() <= index) return -1;
-    return tabOrder[index];
+inline int tabIndex2GroupId(
+    int index
+)
+{
+    const auto tabOrder =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroupsTabOrder();
+
+
+    if (index < 0 ||
+        index >= tabOrder.size())
+    {
+        return -1;
+    }
+
+
+    return tabOrder.at(
+        index
+    );
 }
 
-inline int groupId2TabIndex(int gid) {
-    auto tabOrder = Configs::dataManager->groupsRepo->GetGroupsTabOrder();
-    for (int key = 0; key < tabOrder.count(); key++) {
-        if (tabOrder[key] == gid) return key;
-    }
-    return 0;
+inline int groupId2TabIndex(
+    int gid
+)
+{
+    const auto tabOrder =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroupsTabOrder();
+
+
+    const int index =
+        tabOrder.indexOf(
+            gid
+        );
+
+
+    return index;
 }
 
 void MainWindow::on_tabWidget_currentChanged(int index) {
@@ -2608,51 +3160,224 @@ void MainWindow::on_tabWidget_currentChanged(int index) {
     show_group(gid);
 }
 
-void MainWindow::show_group(int gid) {
-    if (Configs::dataManager->settingsRepo->refreshing_group) return;
-    Configs::dataManager->settingsRepo->refreshing_group = true;
-
-    auto group = Configs::dataManager->groupsRepo->GetGroup(gid);
-    if (group == nullptr) {
-        MessageBoxWarning(tr("Error"), QString("No such group: %1").arg(gid));
-        Configs::dataManager->settingsRepo->refreshing_group = false;
+void MainWindow::show_group(
+    int gid
+)
+{
+    if (Configs::dataManager
+        ->settingsRepo
+        ->refreshing_group)
+    {
         return;
     }
 
-    if (Configs::dataManager->settingsRepo->current_group != gid) {
-        saveProfileFocusState();
-        if (auto lastGroup = Configs::dataManager->groupsRepo->CurrentGroup()) {
-            lastGroup->SetScrollLastProfile(
-                ui->profilesTableView
-                ->firstVisibleRow()
-            );
-            Configs::dataManager->groupsRepo->Save(lastGroup);
-        }
-        Configs::dataManager->settingsRepo->current_group = gid;
-        Configs::dataManager->settingsRepo->Save();
+
+    Configs::dataManager
+        ->settingsRepo
+        ->refreshing_group =
+        true;
+
+
+    auto group =
+        Configs::dataManager
+        ->groupsRepo
+        ->GetGroup(
+            gid
+        );
+
+
+    if (!group)
+    {
+        MessageBoxWarning(
+            tr("Error"),
+            QString(
+                "No such group: %1"
+            )
+            .arg(gid)
+        );
+
+
+        Configs::dataManager
+            ->settingsRepo
+            ->refreshing_group =
+            false;
+
+        return;
     }
 
-    ui->tabWidget->widget(groupId2TabIndex(gid))->layout()->addWidget(ui->profilesTableView);
 
-    // show proxies
-    refresh_proxy_list({}, true);
+    if (Configs::dataManager
+        ->settingsRepo
+        ->current_group != gid)
+    {
+        saveProfileFocusState();
 
-    int rowCount = profilesTableModel->rowCount();
+
+        if (auto lastGroup =
+            Configs::dataManager
+            ->groupsRepo
+            ->CurrentGroup())
+        {
+            lastGroup
+                ->SetScrollLastProfile(
+                    ui->profilesTableView
+                    ->firstVisibleRow()
+                );
+
+
+            Configs::dataManager
+                ->groupsRepo
+                ->Save(
+                    lastGroup
+                );
+        }
+
+
+        Configs::dataManager
+            ->settingsRepo
+            ->current_group =
+            gid;
+
+
+        Configs::dataManager
+            ->settingsRepo
+            ->Save();
+    }
+
+    const int tabIndex =
+        groupId2TabIndex(
+            gid
+        );
+
+
+    if (tabIndex < 0)
+    {
+        MW_show_log(
+            QString(
+                "Group %1 has no tab."
+            )
+            .arg(
+                gid
+            )
+        );
+
+        Configs::dataManager
+            ->settingsRepo
+            ->refreshing_group =
+            false;
+
+        return;
+    }
+
+
+    QWidget* const tab =
+        ui->tabWidget
+        ->widget(
+            tabIndex
+        );
+
+
+    if (!tab ||
+        !tab->layout())
+    {
+        MW_show_log(
+            QString(
+                "Group %1 tab is invalid."
+            )
+            .arg(
+                gid
+            )
+        );
+
+        Configs::dataManager
+            ->settingsRepo
+            ->refreshing_group =
+            false;
+
+        return;
+    }
+
+
+    tab->layout()
+        ->addWidget(
+            ui->profilesTableView
+        );
+
+
+    // IMPORTANT:
+    //
+    // Direct MainWindow call.
+    // show_group() may execute during MainWindow construction,
+    // before MainWindowApi publishes the window.
+
+    refresh_proxy_list(
+        {},
+        true
+    );
+
+
+    const int rowCount =
+        profilesTableModel
+        ->rowCount();
+
+
     const auto groupSnapshot =
         group->Snapshot();
-    int targetRow =
-        groupSnapshot.scroll_last_profile;
-    if (targetRow >= rowCount && rowCount > 0) targetRow = rowCount - 1;
-    QTimer::singleShot(0, ui->profilesTableView, [=, this]() {
-        if (targetRow >= 0) {
-            if (QModelIndex idx = profilesTableModel->index(targetRow, 0); idx.isValid()) {
-                ui->profilesTableView->scrollTo(idx, QAbstractItemView::PositionAtTop);
-            }
-        }
-        refresh_proxy_list_column_size();
-        });
 
-    Configs::dataManager->settingsRepo->refreshing_group = false;
+
+    int targetRow =
+        groupSnapshot
+        .scroll_last_profile;
+
+
+    if (targetRow >= rowCount &&
+        rowCount > 0)
+    {
+        targetRow =
+            rowCount - 1;
+    }
+
+
+    QTimer::singleShot(
+        0,
+        ui->profilesTableView,
+
+        [
+            this,
+            targetRow
+        ]()
+        {
+            if (targetRow >= 0)
+            {
+                const QModelIndex index =
+                    profilesTableModel
+                    ->index(
+                        targetRow,
+                        0
+                    );
+
+
+                if (index.isValid())
+                {
+                    ui->profilesTableView
+                        ->scrollTo(
+                            index,
+                            QAbstractItemView::
+                            PositionAtTop
+                        );
+                }
+            }
+
+
+            refresh_proxy_list_column_size();
+        }
+    );
+
+
+    Configs::dataManager
+        ->settingsRepo
+        ->refreshing_group =
+        false;
 }
 
 // =============================================================
@@ -2888,7 +3613,7 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList& args) {
         loadShortcuts();
         break;
     case MwMessage::ProfileChanged:
-        refresh_proxy_list({}, true);
+        MainWindowApi::RefreshProxyList({}, true);
         if (changed(MwArg::RestartProxy) &&
             QMessageBox::question(GetMessageBoxParent(), tr("Confirmation"), tr("Settings changed, restart proxy?")) == QMessageBox::StandardButton::Yes) {
             profile_start(settings->started_id);
@@ -2898,7 +3623,7 @@ void MainWindow::dialog_message_impl(MwMessage cmd, const QStringList& args) {
         refresh_groups();
         break;
     case MwMessage::SubscriptionFinished:
-        refresh_proxy_list({}, true);
+        MainWindowApi::RefreshProxyList({}, true);
         if (!changed(MwArg::Quiet)) {
             MW_show_log(tr("Imported %1 profile(s)").arg(settings->imported_count));
         }
@@ -3178,23 +3903,55 @@ bool MainWindow::get_elevated_permissions(int reason) {
     }
     if (Configs::IsAdmin()) return true;
 #ifdef Q_OS_LINUX
-    if (!Linux_HavePkexec()) {
-        MessageBoxWarning(software_name, "Please install \"pkexec\" first.");
+
+    if (!Linux_HavePkexec())
+    {
+        MessageBoxWarning(
+            software_name,
+            "Please install \"pkexec\" first."
+        );
+
         return false;
     }
-    auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please give the core root privileges"), QMessageBox::Yes | QMessageBox::No);
-    if (n == QMessageBox::Yes) {
+
+
+    const auto answer =
+        QMessageBox::warning(
+            GetMessageBoxParent(),
+            software_name,
+            tr("Please give the core root privileges"),
+            QMessageBox::Yes |
+            QMessageBox::No
+        );
+
+
+    if (answer == QMessageBox::Yes)
+    {
+        // =====================================================
+        // Finite background operation.
+        //
+        // No MainWindow pointer is required here.
+        // =====================================================
         Async::run(
-            [=, this]
+            []()
             {
-                auto chownArgs =
-                    QString(
+                const QString corePath =
+                    Configs::FindCoreRealPath();
+
+
+                // =====================================================
+                // Owner
+                // =====================================================
+
+                const QString chownArgs =
+                    QStringLiteral(
                         "root:root "
-                        + Configs::FindCoreRealPath()
-                    );
+                    )
+                    +
+                    corePath;
 
 
-                const auto ret =
+                int ret =
                     Linux_Run_Command(
                         "chown",
                         chownArgs
@@ -3205,17 +3962,76 @@ bool MainWindow::get_elevated_permissions(int reason) {
                 {
                     MW_show_log(
                         QString(
-                            "Failed to run chown %1 "
+                            "Failed to run chown %1, "
                             "code is %2"
                         )
-                        .arg(chownArgs)
-                        .arg(ret)
+                        .arg(
+                            chownArgs
+                        )
+                        .arg(
+                            ret
+                        )
                     );
+
+
+                    return;
                 }
+
+
+                // =====================================================
+                // setuid
+                // =====================================================
+
+                const QString chmodArgs =
+                    QStringLiteral(
+                        "u+s "
+                    )
+                    +
+                    corePath;
+
+
+                ret =
+                    Linux_Run_Command(
+                        "chmod",
+                        chmodArgs
+                    );
+
+
+                if (ret != 0)
+                {
+                    MW_show_log(
+                        QString(
+                            "Failed to run chmod %1, "
+                            "code is %2"
+                        )
+                        .arg(
+                            chmodArgs
+                        )
+                        .arg(
+                            ret
+                        )
+                    );
+
+
+                    return;
+                }
+
+
+                // Core process interaction belongs back to MainWindow /
+                // DS_cores, not to this Async worker.
+                (void)MainWindowApi::Post(
+                    [](
+                        MainWindow& window
+                        )
+                    {
+                        window.StopVPNProcess();
+                    }
+                );
             }
         );
         return false;
     }
+
 #endif
 #ifdef Q_OS_WIN
     auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please run Gryph as admin"), QMessageBox::Yes | QMessageBox::No);
@@ -3261,17 +4077,21 @@ void MainWindow::set_system_proxy(bool enable) {
 
 void MainWindow::set_spmode_system_proxy(
     bool enable,
-    bool save)
+    bool save
+)
 {
     // =====================================================
     // Validate operation
     // =====================================================
+
     if (enable &&
         Configs::dataManager
         ->settingsRepo
         ->disable_mixed_inbound)
     {
         runOnUiThread(
+            this,
+
             [this]()
             {
                 MessageBoxWarning(
@@ -3279,46 +4099,49 @@ void MainWindow::set_spmode_system_proxy(
                     "Cannot set system proxy when "
                     "mixed inbound is disabled."
                 );
+
+
                 ui->checkBox_SystemProxy
                     ->setChecked(
                         false
                     );
             }
         );
+
+
         return;
     }
+
 
     // =====================================================
     // Save requested state
     // =====================================================
+
     Configs::dataManager
         ->settingsRepo
         ->spmode_system_proxy =
         enable;
 
+
     // =====================================================
-    // Take one stable snapshot of the currently
-    // running profile.
-    //
-    // Do not access runningProfile_ directly after this.
+    // Stable snapshot of running profile
     // =====================================================
+
     const auto runningSnapshot =
         runningProfileSnapshot();
 
+
     // =====================================================
-    // Apply system proxy state to currently running profile
+    // Apply system proxy
     // =====================================================
+
     if (runningSnapshot)
     {
         set_system_proxy(
             enable
         );
 
-        // -------------------------------------------------
-        // When system proxy is disabled and Gryph is
-        // configured to reset/restart the active profile,
-        // restart exactly the profile captured above.
-        // -------------------------------------------------
+
         if (!enable &&
             Configs::dataManager
             ->settingsRepo
@@ -3337,9 +4160,11 @@ void MainWindow::set_spmode_system_proxy(
         }
     }
 
+
     // =====================================================
     // Persist settings
     // =====================================================
+
     if (save)
     {
         Configs::dataManager
@@ -3347,9 +4172,11 @@ void MainWindow::set_spmode_system_proxy(
             ->Save();
     }
 
+
     // =====================================================
     // Refresh UI
     // =====================================================
+
     refresh_status();
 }
 
@@ -3377,10 +4204,16 @@ void MainWindow::set_spmode_vpn(bool enable, bool save) {
 }
 
 void MainWindow::UpdateDataView(
-    bool force)
+    bool force
+)
 {
     runOnUiThread(
-        [this, force]()
+        this,
+
+        [
+            this,
+            force
+        ]()
         {
             const auto now =
                 QDateTime::
@@ -3422,30 +4255,168 @@ void MainWindow::setDownloadReport(const DownloadProgressReport& report, bool sh
 
 void MainWindow::setupConnectionList()
 {
-    ui->connections->horizontalHeader()->setHighlightSections(false);
-    ui->connections->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    ui->connections->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    ui->connections->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    ui->connections->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    ui->connections->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    ui->connections->horizontalHeader()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    ui->connections->verticalHeader()->hide();
-    connect(ui->connections, &QTableWidget::cellClicked, this, [=, this](int row, int column)
+    ui->connections
+        ->horizontalHeader()
+        ->setHighlightSections(
+            false
+        );
+
+
+    ui->connections
+        ->setEditTriggers(
+            QAbstractItemView::NoEditTriggers
+        );
+
+
+    ui->connections
+        ->horizontalHeader()
+        ->setSectionResizeMode(
+            0,
+            QHeaderView::Stretch
+        );
+
+
+    ui->connections
+        ->horizontalHeader()
+        ->setSectionResizeMode(
+            1,
+            QHeaderView::Stretch
+        );
+
+
+    ui->connections
+        ->horizontalHeader()
+        ->setSectionResizeMode(
+            2,
+            QHeaderView::ResizeToContents
+        );
+
+
+    ui->connections
+        ->horizontalHeader()
+        ->setSectionResizeMode(
+            3,
+            QHeaderView::ResizeToContents
+        );
+
+
+    ui->connections
+        ->horizontalHeader()
+        ->setSectionResizeMode(
+            4,
+            QHeaderView::ResizeToContents
+        );
+
+
+    ui->connections
+        ->verticalHeader()
+        ->hide();
+
+
+    connect(
+        ui->connections,
+        &QTableWidget::cellClicked,
+        this,
+
+        [this](
+            int row,
+            int column
+            )
         {
-            if (column > 3) return;
-            auto selected = ui->connections->item(row, column);
-            QApplication::clipboard()->setText(selected->text());
-            QPoint pos = ui->connections->mapToGlobal(ui->connections->visualItemRect(selected).center());
-            QToolTip::showText(pos, "Copied!", this);
-            auto r = ++toolTipID;
-            QTimer::singleShot(1500, [=, this] {
-                if (r != toolTipID)
+            // =================================================
+            // Only columns containing copyable textual data.
+            // =================================================
+
+            if (column < 0 ||
+                column > 3)
+            {
+                return;
+            }
+
+
+            // =================================================
+            // Resolve clicked item safely.
+            // =================================================
+
+            QTableWidgetItem* const selected =
+                ui->connections
+                ->item(
+                    row,
+                    column
+                );
+
+
+            if (!selected)
+            {
+                return;
+            }
+
+
+            // =================================================
+            // Copy
+            // =================================================
+
+            QApplication::clipboard()
+                ->setText(
+                    selected->text()
+                );
+
+
+            // =================================================
+            // Tooltip position
+            // =================================================
+
+            const QPoint tooltipPos =
+                ui->connections
+                ->mapToGlobal(
+                    ui->connections
+                    ->visualItemRect(
+                        selected
+                    )
+                    .center()
+                );
+
+
+            QToolTip::showText(
+                tooltipPos,
+                QStringLiteral("Copied!"),
+                this
+            );
+
+
+            // =================================================
+            // Every new click invalidates the previous timeout.
+            // =================================================
+
+            const int requestId =
+                ++toolTipID;
+
+
+            // QObject context = this.
+            //
+            // If MainWindow is destroyed before 1500 ms,
+            // Qt will discard this callback.
+            QTimer::singleShot(
+                1500,
+                this,
+
+                [
+                    this,
+                    requestId
+                ]()
                 {
-                    return;
+                    if (requestId !=
+                        toolTipID)
+                    {
+                        return;
+                    }
+
+
+                    QToolTip::hideText();
                 }
-                QToolTip::hideText();
-                });
-        });
+            );
+        }
+    );
 }
 
 void MainWindow::UpdateConnectionList(const QMap<QString, Stats::ConnectionMetadata>& toUpdate, const QMap<QString, Stats::ConnectionMetadata>& toAdd)
@@ -4201,38 +5172,130 @@ void MainWindow::update_traffic_graph(int proxyDl, int proxyUp, int directDl, in
 // refresh_groups -> show_group -> refresh_proxy_list
 void MainWindow::refresh_groups()
 {
-    Configs::dataManager
+    auto* const settings =
+        Configs::dataManager
         ->settingsRepo
-        ->refreshing_group_list = true;
+        .get();
+
+
+    settings->refreshing_group_list =
+        true;
+
+
+    // =========================================================
+    // Remove old group tabs
+    //
+    // Tab 0 is kept because the UI creates it in Designer.
+    // =========================================================
 
     for (int i =
         ui->tabWidget->count() - 1;
         i > 0;
         --i)
     {
-        ui->tabWidget->removeTab(i);
+        ui->tabWidget
+            ->removeTab(i);
     }
+
 
     const auto groupOrder =
         Configs::dataManager
         ->groupsRepo
         ->GetGroupsTabOrder();
 
-    int index = 0;
 
-    for (const int gid : groupOrder)
+    // =========================================================
+    // No groups
+    //
+    // IMPORTANT:
+    // Do not call show_group(0).
+    // There is no valid group to display.
+    // =========================================================
+
+    if (groupOrder.isEmpty())
     {
-        auto group =
+        settings->current_group =
+            -1;
+
+
+        // Clear the remaining Designer-created tab.
+        if (ui->tabWidget->count() > 0)
+        {
+            ui->tabWidget
+                ->setTabText(
+                    0,
+                    tr("No groups")
+                );
+
+
+            ui->tabWidget
+                ->tabBar()
+                ->setTabData(
+                    0,
+                    -1
+                );
+        }
+
+
+        // Empty profile table as well.
+        if (profilesTableModel)
+        {
+            profilesTableModel
+                ->refreshTable(
+                    {},
+                    true
+                );
+        }
+
+
+        settings->refreshing_group_list =
+            false;
+
+
+        return;
+    }
+
+
+    // =========================================================
+    // Rebuild tabs
+    // =========================================================
+
+    int index =
+        0;
+
+
+    for (const int gid :
+    groupOrder)
+    {
+        const auto group =
             Configs::dataManager
             ->groupsRepo
-            ->GetGroup(gid);
+            ->GetGroup(
+                gid
+            );
 
-        if (!group) {
+
+        if (!group)
+        {
+            MW_show_log(
+                QString(
+                    "refresh_groups: group %1 "
+                    "exists in tab order but "
+                    "cannot be loaded."
+                )
+                .arg(
+                    gid
+                )
+            );
+
+
             continue;
         }
 
+
         const auto snapshot =
             group->Snapshot();
+
 
         if (index == 0)
         {
@@ -4244,21 +5307,29 @@ void MainWindow::refresh_groups()
         }
         else
         {
-            auto* widget =
-                new QWidget();
+            auto* const widget =
+                new QWidget(
+                    ui->tabWidget
+                );
 
-            auto* layout =
-                new QVBoxLayout();
 
-            layout->setContentsMargins(
-                QMargins()
-            );
+            auto* const layout =
+                new QVBoxLayout(
+                    widget
+                );
 
-            layout->setSpacing(0);
 
-            widget->setLayout(
-                layout
-            );
+            layout
+                ->setContentsMargins(
+                    QMargins()
+                );
+
+
+            layout
+                ->setSpacing(
+                    0
+                );
+
 
             ui->tabWidget
                 ->addTab(
@@ -4267,6 +5338,7 @@ void MainWindow::refresh_groups()
                 );
         }
 
+
         ui->tabWidget
             ->tabBar()
             ->setTabData(
@@ -4274,55 +5346,138 @@ void MainWindow::refresh_groups()
                 gid
             );
 
+
         ++index;
     }
 
-    if (Configs::dataManager
-        ->groupsRepo
-        ->CurrentGroup() == nullptr)
+
+    // =========================================================
+    // All IDs were invalid
+    //
+    // groupOrder itself was not empty, but every Group lookup
+    // failed.
+    // =========================================================
+
+    if (index == 0)
     {
+        settings->current_group =
+            -1;
+
+
+        ui->tabWidget
+            ->setTabText(
+                0,
+                tr("No groups")
+            );
+
+
+        ui->tabWidget
+            ->tabBar()
+            ->setTabData(
+                0,
+                -1
+            );
+
+
+        if (profilesTableModel)
+        {
+            profilesTableModel
+                ->refreshTable(
+                    {},
+                    true
+                );
+        }
+
+
+        settings->refreshing_group_list =
+            false;
+
+
+        return;
+    }
+
+
+    // =========================================================
+    // Determine target group
+    // =========================================================
+
+    int targetGroupId =
+        settings->current_group;
+
+
+    auto currentGroup =
         Configs::dataManager
-            ->settingsRepo
-            ->current_group = -1;
-
-        const int targetGroup =
-            !groupOrder.isEmpty()
-            ? groupOrder.first()
-            : 0;
-
-        ui->tabWidget
-            ->setCurrentIndex(
-                groupId2TabIndex(
-                    targetGroup
-                )
-            );
-
-        show_group(
-            targetGroup
+        ->groupsRepo
+        ->GetGroup(
+            targetGroupId
         );
-    }
-    else
+
+
+    // Current group disappeared or was never valid.
+    if (!currentGroup)
     {
-        const int currentGroupId =
-            Configs::dataManager
-            ->settingsRepo
-            ->current_group;
+        targetGroupId =
+            groupOrder.first();
 
-        ui->tabWidget
-            ->setCurrentIndex(
-                groupId2TabIndex(
-                    currentGroupId
-                )
-            );
 
-        show_group(
-            currentGroupId
-        );
+        settings->current_group =
+            targetGroupId;
+
+
+        settings->Save();
     }
 
-    Configs::dataManager
-        ->settingsRepo
-        ->refreshing_group_list = false;
+
+    // =========================================================
+    // Resolve corresponding tab
+    // =========================================================
+
+    const int targetTabIndex =
+        groupId2TabIndex(
+            targetGroupId
+        );
+
+
+    if (targetTabIndex < 0 ||
+        targetTabIndex >=
+        ui->tabWidget->count())
+    {
+        MW_show_log(
+            QString(
+                "refresh_groups: group %1 "
+                "has no corresponding tab."
+            )
+            .arg(
+                targetGroupId
+            )
+        );
+
+
+        settings->refreshing_group_list =
+            false;
+
+
+        return;
+    }
+
+
+    // =========================================================
+    // Activate group
+    // =========================================================
+
+    ui->tabWidget
+        ->setCurrentIndex(
+            targetTabIndex
+        );
+
+
+    show_group(
+        targetGroupId
+    );
+
+
+    settings->refreshing_group_list =
+        false;
 }
 
 void MainWindow::refresh_proxy_list_column_size()
@@ -4786,7 +5941,7 @@ void MainWindow::on_menu_delete_repeat_triggered()
             deleteIDs,
             true
         );
-    refresh_proxy_list(
+    MainWindowApi::RefreshProxyList(
         {},
         true
     );
@@ -4797,7 +5952,7 @@ void MainWindow::on_menu_delete_triggered() {
     if (entIDs.count() == 0) return;
     if (Configs::dataManager->settingsRepo->skip_delete_confirmation || QMessageBox::question(this, tr("Confirmation"), QString(tr("Remove %1 item(s) ?")).arg(entIDs.count())) == QMessageBox::StandardButton::Yes) {
         Configs::dataManager->profilesRepo->BatchDeleteProfiles(entIDs, true);
-        refresh_proxy_list({}, true);
+        MainWindowApi::RefreshProxyList({}, true);
     }
 }
 
@@ -4845,7 +6000,7 @@ void MainWindow::on_menu_reset_traffic_triggered()
         );
     }
 
-    refresh_proxy_list(
+    MainWindowApi::RefreshProxyList(
         entIDs
     );
 }
@@ -5169,20 +6324,71 @@ void MainWindow::parseQrImage(const QPixmap* image)
     }
 }
 
-void MainWindow::on_menu_scan_qr_triggered() {
+void MainWindow::on_menu_scan_qr_triggered()
+{
     hide();
-    QThread::sleep(1);
 
-    bool ok = true;
-    QPixmap qpx(grabScreen(QGuiApplication::primaryScreen(), ok));
 
-    show();
-    if (ok) {
-        parseQrImage(&qpx);
-    }
-    else {
-        MessageBoxInfo(software_name, tr("Unable to capture screen"));
-    }
+    QTimer::singleShot(
+        1000,
+
+        this,
+
+        [this]()
+        {
+            bool ok =
+                true;
+
+
+            QScreen* const screen =
+                QGuiApplication::
+                primaryScreen();
+
+
+            if (!screen)
+            {
+                show();
+
+
+                MessageBoxInfo(
+                    software_name,
+                    tr(
+                        "Unable to capture screen"
+                    )
+                );
+
+                return;
+            }
+
+
+            const QPixmap pixmap =
+                grabScreen(
+                    screen,
+                    ok
+                );
+
+
+            show();
+
+
+            if (!ok)
+            {
+                MessageBoxInfo(
+                    software_name,
+                    tr(
+                        "Unable to capture screen"
+                    )
+                );
+
+                return;
+            }
+
+
+            parseQrImage(
+                &pixmap
+            );
+        }
+    );
 }
 
 void MainWindow::on_menu_clear_test_result_triggered()
@@ -5223,7 +6429,7 @@ void MainWindow::on_menu_clear_test_result_triggered()
         );
     }
 
-    refresh_proxy_list();
+    MainWindowApi::RefreshProxyList();
 }
 
 void MainWindow::on_menu_select_all_triggered() {
@@ -5298,294 +6504,364 @@ void MainWindow::on_menu_remove_unavailable_triggered() {
 
 void MainWindow::on_menu_remove_invalid_triggered()
 {
-    Async::run(
-        [this]()
+    // =========================================================
+    // Take all required UI/application state BEFORE starting
+    // asynchronous work.
+    // =========================================================
+
+    const auto currentGroup =
+        Configs::dataManager
+        ->groupsRepo
+        ->CurrentGroup();
+
+
+    if (!currentGroup)
+    {
+        return;
+    }
+
+
+    const QList<int> profileIDs =
+        currentGroup->Profiles();
+
+
+    if (profileIDs.isEmpty())
+    {
+        return;
+    }
+
+
+    const auto loadedProfiles =
+        Configs::dataManager
+        ->profilesRepo
+        ->GetProfileBatch(
+            profileIDs
+        );
+
+
+    QList<
+        std::shared_ptr<
+        Configs::Profile
+        >
+    > profiles;
+
+
+    profiles.reserve(
+        loadedProfiles.size()
+    );
+
+
+    for (const auto& profile :
+        loadedProfiles)
+    {
+        if (profile)
         {
-            // -------------------------------------------------
-            // Get current group
-            // -------------------------------------------------
-
-            auto currentGroup =
-                Configs::dataManager
-                ->groupsRepo
-                ->CurrentGroup();
-
-
-            if (!currentGroup)
-            {
-                return;
-            }
-
-
-            // -------------------------------------------------
-            // Take ONE immutable profile ID snapshot.
-            //
-            // Do not call Profiles() again below.
-            // Otherwise the group could change between calls.
-            // -------------------------------------------------
-
-            const QList<int> profileIDs =
-                currentGroup->Profiles();
-
-
-            if (profileIDs.isEmpty())
-            {
-                return;
-            }
-
-
-            // -------------------------------------------------
-            // Result storage
-            // -------------------------------------------------
-
-            QList<
-                std::shared_ptr<
-                Configs::Profile
-                >
-            > invalidProfiles;
-
-
-            QMutex invalidProfilesMutex;
-
-
-            // -------------------------------------------------
-            // Completion semaphore.
-            //
-            // Every started task releases exactly one permit.
-            // The outer worker waits for all permits.
-            // -------------------------------------------------
-
-            auto completion =
-                std::make_shared<QSemaphore>(
-                    0
-                );
-
-
-            int taskCount = 0;
-
-
-            // -------------------------------------------------
-            // Start validation tasks
-            // -------------------------------------------------
-
-            for (const int profileID :
-            profileIDs)
-            {
-                auto profile =
-                    Configs::dataManager
-                    ->profilesRepo
-                    ->GetProfile(
-                        profileID
-                    );
-
-
-                // Profile may have been deleted meanwhile.
-                if (!profile)
-                {
-                    continue;
-                }
-
-
-                ++taskCount;
-                parallelCoreCallPool->start(
-                    [
-                        profile,
-                        completion,
-                        &invalidProfiles,
-                        &invalidProfilesMutex
-                    ]()
-                    {
-                        // -------------------------------------
-                        // Validate profile
-                        // -------------------------------------
-                        if (!IsValid(profile))
-                        {
-                            QMutexLocker locker(
-                                &invalidProfilesMutex
-                            );
-
-
-                            invalidProfiles.append(
-                                profile
-                            );
-                        }
-                        // -------------------------------------
-                        // Signal task completion.
-                        //
-                        // IMPORTANT:
-                        // QSemaphore may be released by
-                        // another thread. QMutex may not.
-                        // -------------------------------------
-
-                        completion->release();
-                    }
-                );
-            }
-            // -------------------------------------------------
-            // Wait until every actually started task finishes.
-            // -------------------------------------------------
-            if (taskCount > 0)
-            {
-                completion->acquire(
-                    taskCount
-                );
-            }
-            // No pool task can touch invalidProfiles anymore
-            // after acquire(taskCount) returns.
-            if (invalidProfiles.isEmpty())
-            {
-                return;
-            }
-            // -------------------------------------------------
-            // Prepare confirmation text outside UI thread
-            // -------------------------------------------------
-            QString removeDisplay;
-            int removeDisplayCount = 0;
-            for (const auto& profile :
-                invalidProfiles)
-            {
-                if (!profile)
-
-                {
-
-                    continue;
-
-                }
-
-
-                const auto outbound =
-
-                    profile->OutboundClone();
-
-
-                if (!outbound)
-
-                {
-
-                    continue;
-
-                }
-
-
-                removeDisplay +=
-
-                    outbound->DisplayTypeAndName()
-
-                    +
-
-                    "\n";
-                ++removeDisplayCount;
-                if (removeDisplayCount == 20)
-                {
-                    removeDisplay +=
-                        "...";
-
-                    break;
-                }
-            }
-
-            // -------------------------------------------------
-            // UI interaction + deletion
-            // -------------------------------------------------
-            runOnUiThread(
-                [
-                    this,
-                    invalidProfiles,
-                    removeDisplay
-                ]()
-                {
-                    if (invalidProfiles.isEmpty())
-                    {
-                        return;
-                    }
-                    const bool skipConfirmation =
-                        Configs::dataManager
-                        ->settingsRepo
-                        ->skip_delete_confirmation;
-
-                    bool confirmed =
-                        skipConfirmation;
-
-                    if (!confirmed)
-                    {
-                        confirmed =
-                            QMessageBox::question(
-                                this,
-                                tr("Confirmation"),
-
-                                tr(
-                                    "Remove %1 Invalid "
-                                    "item(s) ?"
-                                )
-                                .arg(
-                                    invalidProfiles.size()
-                                )
-                                +
-                                "\n"
-                                +
-                                removeDisplay
-                            )
-                            ==
-                            QMessageBox::
-                            StandardButton::Yes;
-                    }
-
-                    if (!confirmed)
-                    {
-                        return;
-                    }
-
-                    // -----------------------------------------
-                    // Convert Profile objects to IDs
-                    // -----------------------------------------
-                    QList<int> deleteIDs;
-
-                    deleteIDs.reserve(
-                        invalidProfiles.size()
-                    );
-
-                    for (const auto& profile :
-                        invalidProfiles)
-                    {
-                        if (!profile)
-                        {
-                            continue;
-                        }
-                        const int profileId =
-                            profile->Id();
-
-                        if (profileId < 0)
-                        {
-                            continue;
-                        }
-
-                        deleteIDs.append(
-                            profileId
-                        );
-                    }
-
-                    if (deleteIDs.isEmpty())
-                    {
-                        return;
-                    }
-
-                    // -----------------------------------------
-                    // Delete
-                    // -----------------------------------------
-                    Configs::dataManager
-                        ->profilesRepo
-                        ->BatchDeleteProfiles(
-                            deleteIDs,
-                            true
-                        );
-                    refresh_proxy_list(
-                        {},
-                        true
-                    );
-                }
+            profiles.append(
+                profile
             );
         }
+    }
+
+
+    if (profiles.isEmpty())
+    {
+        return;
+    }
+
+
+    // =========================================================
+    // Shared scan state.
+    //
+    // Its lifetime is independent of MainWindow.
+    // =========================================================
+
+    struct InvalidScanState final
+    {
+        QMutex mutex;
+
+        QList<
+            std::shared_ptr<
+            Configs::Profile
+            >
+        > invalidProfiles;
+
+
+        std::atomic_int remaining{
+            0
+        };
+    };
+
+
+    const auto state =
+        std::make_shared<
+        InvalidScanState
+        >();
+
+
+    state->remaining.store(
+        profiles.size(),
+        std::memory_order_release
     );
+
+
+    // =========================================================
+    // One finite task per profile.
+    //
+    // QThreadPool is bounded by TaskExecutor, so this does NOT
+    // create one OS thread per profile.
+    // =========================================================
+
+    for (const auto& profile :
+        profiles)
+    {
+        Async::run(
+            [
+                profile,
+                state
+            ]()
+            {
+                // ---------------------------------------------
+                // Validate
+                // ---------------------------------------------
+
+                if (!IsValid(
+                    profile
+                ))
+                {
+                    QMutexLocker locker(
+                        &state->mutex
+                    );
+
+
+                    state
+                        ->invalidProfiles
+                        .append(
+                            profile
+                        );
+                }
+
+
+                // ---------------------------------------------
+                // Last completed worker performs aggregation.
+                // ---------------------------------------------
+
+                const int oldRemaining =
+                    state->remaining
+                    .fetch_sub(
+                        1,
+                        std::memory_order_acq_rel
+                    );
+
+
+                if (oldRemaining != 1)
+                {
+                    return;
+                }
+
+
+                QList<
+                    std::shared_ptr<
+                    Configs::Profile
+                    >
+                > invalidProfiles;
+
+
+                {
+                    QMutexLocker locker(
+                        &state->mutex
+                    );
+
+
+                    invalidProfiles =
+                        state
+                        ->invalidProfiles;
+                }
+
+
+                if (invalidProfiles.isEmpty())
+                {
+                    return;
+                }
+
+
+                // =============================================
+                // Prepare display text outside UI thread
+                // =============================================
+
+                QString removeDisplay;
+
+                int removeDisplayCount =
+                    0;
+
+
+                for (const auto& invalid :
+                    invalidProfiles)
+                {
+                    if (!invalid)
+                    {
+                        continue;
+                    }
+
+
+                    const auto outbound =
+                        invalid
+                        ->OutboundClone();
+
+
+                    if (!outbound)
+                    {
+                        continue;
+                    }
+
+
+                    removeDisplay +=
+                        outbound
+                        ->DisplayTypeAndName();
+
+                    removeDisplay +=
+                        '\n';
+
+
+                    ++removeDisplayCount;
+
+
+                    if (removeDisplayCount >= 20)
+                    {
+                        removeDisplay +=
+                            QStringLiteral(
+                                "..."
+                            );
+
+                        break;
+                    }
+                }
+
+
+                // =============================================
+                // UI interaction
+                // =============================================
+
+                (void)MainWindowApi::Post(
+                    [
+                        invalidProfiles =
+                            std::move(
+                                invalidProfiles
+                            ),
+
+                            removeDisplay =
+                            std::move(
+                                removeDisplay
+                            )
+
+                    ](
+                        MainWindow& window
+                        ) mutable
+                        {
+                            if (invalidProfiles.isEmpty())
+                            {
+                                return;
+                            }
+
+
+                            const bool skipConfirmation =
+                                Configs::dataManager
+                                ->settingsRepo
+                                ->skip_delete_confirmation;
+
+
+                            bool confirmed =
+                                skipConfirmation;
+
+
+                            if (!confirmed)
+                            {
+                                confirmed =
+                                    QMessageBox::question(
+                                        &window,
+
+                                        QObject::tr(
+                                            "Confirmation"
+                                        ),
+
+                                        QObject::tr(
+                                            "Remove %1 Invalid "
+                                            "item(s) ?"
+                                        )
+                                        .arg(
+                                            invalidProfiles.size()
+                                        )
+                                        +
+                                        "\n"
+                                        +
+                                        removeDisplay
+                                    )
+                                    ==
+                                    QMessageBox::
+                                    StandardButton::
+                                    Yes;
+                            }
+
+
+                            if (!confirmed)
+                            {
+                                return;
+                            }
+
+
+                            QList<int>
+                                deleteIDs;
+
+
+                            deleteIDs.reserve(
+                                invalidProfiles.size()
+                            );
+
+
+                            for (const auto& invalid :
+                                invalidProfiles)
+                            {
+                                if (!invalid)
+                                {
+                                    continue;
+                                }
+
+
+                                const int id =
+                                    invalid->Id();
+
+
+                                if (id >= 0)
+                                {
+                                    deleteIDs.append(
+                                        id
+                                    );
+                                }
+                            }
+
+
+                            if (deleteIDs.isEmpty())
+                            {
+                                return;
+                            }
+
+
+                            Configs::dataManager
+                                ->profilesRepo
+                                ->BatchDeleteProfiles(
+                                    deleteIDs,
+                                    true
+                                );
+
+
+                            window.refresh_proxy_list(
+                                {},
+                                true
+                            );
+                        }
+                            );
+            }
+        );
+    }
 }
 
 void MainWindow::on_menu_resolve_selected_triggered()
@@ -5679,25 +6955,25 @@ void MainWindow::on_menu_resolve_selected_triggered()
     {
         profile
             ->ResolveDomainToIP(
-                [this, profile, settings]()
+                [
+                    profile,
+                    settings
+                ]()
                 {
                     Configs::dataManager
                         ->profilesRepo
-                        ->Save(profile);
+                        ->Save(
+                            profile
+                        );
 
 
-                    refresh_proxy_list(
+                    MainWindowApi::RefreshProxyList(
                         {
                             profile->Id()
                         }
                     );
 
 
-                    // fetch_sub() returns the OLD value.
-                    //
-                    // old == 1 means:
-                    // this callback completed the final
-                    // outstanding resolve operation.
                     if (settings
                         ->resolve_count
                         .fetch_sub(
@@ -5836,14 +7112,19 @@ on_menu_resolve_domain_triggered()
     {
         profile
             ->ResolveDomainToIP(
-                [this, profile, settings]()
+                [
+                    profile,
+                    settings
+                ]()
                 {
                     Configs::dataManager
                         ->profilesRepo
-                        ->Save(profile);
+                        ->Save(
+                            profile
+                        );
 
 
-                    refresh_proxy_list(
+                    MainWindowApi::RefreshProxyList(
                         {
                             profile->Id()
                         }
@@ -5862,7 +7143,6 @@ on_menu_resolve_domain_triggered()
                     }
 
 
-                    // Last resolve completed.
                     mw_sub_updating.store(
                         false,
                         std::memory_order_release
@@ -6190,7 +7470,7 @@ void MainWindow::clearUnavailableProfiles(bool confirm, QList<int> profileIDs) {
 
     auto clearFunc = [&, this] {
         Configs::dataManager->profilesRepo->BatchDeleteProfiles(del_ids);
-        refresh_proxy_list({}, true);
+        MainWindowApi::RefreshProxyList({}, true);
         };
 
     if (!del_ids.isEmpty()) {
@@ -6229,55 +7509,242 @@ inline void FastAppendTextDocument(const QString& message, QTextDocument* doc) {
     cursor.endEditBlock();
 }
 
-void MainWindow::append_log(const QString& log) {
-    if (log.size() > 20000) {
-        append_log(QString("TRUNCATED LONG LOG: ") + log.first(1000) + "...");
+void MainWindow::append_log(
+    const QString& log
+)
+{
+    if (logStopRequested_.load(
+        std::memory_order_acquire
+    ))
+    {
         return;
     }
-    QMutexLocker locker(&logMutex);
-    if (logQueue.size() > 1000) {
-        // log is overloaded, just discard it
+
+
+    QString value =
+        log;
+
+
+    if (value.size() > 20000)
+    {
+        value =
+            QStringLiteral(
+                "TRUNCATED LONG LOG: "
+            )
+            +
+            value.first(
+                1000
+            )
+            +
+            QStringLiteral("...");
+    }
+
+
+    QMutexLocker locker(
+        &logMutex
+    );
+
+
+    if (logStopRequested_.load(
+        std::memory_order_relaxed
+    ))
+    {
         return;
     }
-    logQueue.enqueue(log);
-    if (logQueue.size() == 1) logWaiter.wakeOne();
+
+
+    if (logQueue.size() >= 1000)
+    {
+        return;
+    }
+
+
+    const bool wasEmpty =
+        logQueue.isEmpty();
+
+
+    logQueue.enqueue(
+        std::move(value)
+    );
+
+
+    if (wasEmpty)
+    {
+        logWaiter.wakeOne();
+    }
 }
 
-void MainWindow::log_process_loop() {
-    while (true) {
-        logMutex.lock();
-        while (logQueue.isEmpty()) {
-            logWaiter.wait(&logMutex);
-        }
-        auto logLines = logQueue.dequeue().split("\n");
-
+void MainWindow::log_process_loop()
+{
+    for (;;)
+    {
         QString batchToPrint;
-        for (const auto& logLine : logLines) {
-            if (should_print_log(logLine)) {
-                batchToPrint += logLine + "\n";
+
+
+        // =====================================================
+        // Wait for log data or shutdown
+        // =====================================================
+
+        {
+            QMutexLocker locker(
+                &logMutex
+            );
+
+
+            while (
+                logQueue.isEmpty()
+                &&
+                !logStopRequested_.load(
+                    std::memory_order_acquire
+                )
+                )
+            {
+                logWaiter.wait(
+                    &logMutex
+                );
+            }
+
+
+            if (logStopRequested_.load(
+                std::memory_order_acquire
+            ))
+            {
+                break;
+            }
+
+
+            const QString value =
+                logQueue.dequeue();
+
+
+            const QStringList lines =
+                value.split(
+                    '\n'
+                );
+
+
+            for (const QString& line :
+                lines)
+            {
+                if (should_print_log(
+                    line
+                ))
+                {
+                    batchToPrint +=
+                        line;
+
+                    batchToPrint +=
+                        '\n';
+                }
             }
         }
-        logMutex.unlock();
 
-        if (!batchToPrint.isEmpty()) {
-            QString trimmedBatch = batchToPrint.trimmed();
-            runOnUiThread([trimmedBatch = std::move(trimmedBatch), this] {
-                auto bar = ui->masterLogBrowser->verticalScrollBar();
-                auto layout = qvLogDocument->documentLayout();
-                // Anchor to the block at the top of the viewport; if trim shifts its
-                // document-Y afterwards, we replay the original sub-block offset.
-                QTextBlock anchorBlock = ui->masterLogBrowser->cursorForPosition(QPoint(0, 0)).block();
-                int viewportOffset = bar->value() - static_cast<int>(layout->blockBoundingRect(anchorBlock).y());
-                FastAppendTextDocument(trimmedBatch, qvLogDocument);
-                if (Configs::dataManager->settingsRepo->log_auto_scroll) {
-                    bar->setValue(bar->maximum());
-                }
-                else if (anchorBlock.isValid()) {
-                    int newY = static_cast<int>(layout->blockBoundingRect(anchorBlock).y());
-                    bar->setValue(newY + viewportOffset);
-                }
-                });
+
+        if (batchToPrint.isEmpty())
+        {
+            continue;
         }
+
+
+        QString trimmedBatch =
+            batchToPrint.trimmed();
+
+
+        // =====================================================
+        // Worker -> UI
+        //
+        // No raw MainWindow pointer crosses the thread boundary.
+        // =====================================================
+
+        (void)MainWindowApi::Post(
+            [
+                trimmedBatch =
+                    std::move(
+                        trimmedBatch
+                    )
+            ](
+                MainWindow& window
+                )
+            {
+                if (!window.ui ||
+                    !window.ui->masterLogBrowser)
+                {
+                    return;
+                }
+
+
+                auto* const browser =
+                    window.ui
+                    ->masterLogBrowser;
+
+
+                auto* const bar =
+                    browser
+                    ->verticalScrollBar();
+
+
+                auto* const layout =
+                    window.qvLogDocument
+                    ->documentLayout();
+
+
+                const QTextBlock anchorBlock =
+                    browser
+                    ->cursorForPosition(
+                        QPoint(
+                            0,
+                            0
+                        )
+                    )
+                    .block();
+
+
+                const int viewportOffset =
+                    bar->value()
+                    -
+                    static_cast<int>(
+                        layout
+                        ->blockBoundingRect(
+                            anchorBlock
+                        )
+                        .y()
+                        );
+
+
+                FastAppendTextDocument(
+                    trimmedBatch,
+                    window.qvLogDocument
+                );
+
+
+                if (Configs::dataManager
+                    ->settingsRepo
+                    ->log_auto_scroll)
+                {
+                    bar->setValue(
+                        bar->maximum()
+                    );
+                }
+                else if (anchorBlock.isValid())
+                {
+                    const int newY =
+                        static_cast<int>(
+                            layout
+                            ->blockBoundingRect(
+                                anchorBlock
+                            )
+                            .y()
+                            );
+
+
+                    bar->setValue(
+                        newY
+                        +
+                        viewportOffset
+                    );
+                }
+            }
+                    );
     }
 }
 
@@ -7113,530 +8580,1093 @@ void MainWindow::loadShortcuts()
 }
 
 
-void MainWindow::HotkeyEvent(const QString& key) {
-    if (key.isEmpty()) return;
-    runOnUiThread([=, this] {
-        if (key == Configs::dataManager->settingsRepo->hotkey_mainwindow) {
-            tray->activated(QSystemTrayIcon::ActivationReason::Trigger);
-        }
-        else if (key == Configs::dataManager->settingsRepo->hotkey_group) {
-            on_menu_manage_groups_triggered();
-        }
-        else if (key == Configs::dataManager->settingsRepo->hotkey_route) {
-            on_menu_routing_settings_triggered();
-        }
-        else if (key == Configs::dataManager->settingsRepo->hotkey_system_proxy_menu) {
-            ui->menu_spmode->popup(QCursor::pos());
-        }
-        else if (key == Configs::dataManager->settingsRepo->hotkey_toggle_system_proxy) {
-            toggle_system_proxy();
-        }
-        });
-}
-
-bool MainWindow::StopVPNProcess() {
-    runOnThread([=, this]
-        {
-            core_process->Kill();
-        }, DS_cores, true);
-
-    return true;
-}
-
-bool isNewer(QString assetName) {
-    if (QString(NKR_VERSION).isEmpty()) return false;
-    assetName = assetName.mid(7); // take out Gryph-
-    QString version;
-    auto spl = assetName.split('-');
-    version += spl[0]; // version: 1.2.3
-    if (spl[1].contains("beta") || spl[1].contains("alpha") || spl[1].contains("rc")) version += "." + spl[1]; // .beta.13
-    auto parts = version.split("."); // [1,2,3,beta,13]
-    auto currentParts = QString(NKR_VERSION).replace("-", ".").split('.');
-    if (parts.size() < 3 || currentParts.size() < 3)
-    {
-        MW_show_log("Version strings seem to be invalid" + QString(NKR_VERSION) + " and " + version);
-        return false;
-    }
-    std::vector<int> verNums;
-    std::vector<int> currNums;
-    // add base version first
-    verNums.push_back(parts[0].toInt());
-    verNums.push_back(parts[1].toInt());
-    verNums.push_back(parts[2].toInt());
-    if (parts.size() > 3)
-    {
-        if (parts[3] == "alpha") verNums.push_back(1);
-        if (parts[3] == "beta") verNums.push_back(2);
-        if (parts[3] == "rc") verNums.push_back(3);
-        if (parts.size() > 4) verNums.push_back(parts[4].toInt());
-    }
-
-    currNums.push_back(currentParts[0].toInt());
-    currNums.push_back(currentParts[1].toInt());
-    currNums.push_back(currentParts[2].toInt());
-    if (currentParts.size() > 3)
-    {
-        if (currentParts[3] == "alpha") currNums.push_back(1);
-        if (currentParts[3] == "beta") currNums.push_back(2);
-        if (currentParts[3] == "rc") currNums.push_back(3);
-        if (currentParts.size() > 4) currNums.push_back(currentParts[4].toInt());
-    }
-
-    if (verNums.size() < 3 || currNums.size() < 3)
-    {
-        MW_show_log("Version strings seem to be invalid" + QString(NKR_VERSION) + " and " + version);
-        return false;
-    }
-
-    for (int i = 0; i < 3; i++)
-    {
-        if (verNums[i] > currNums[i]) return true;
-        if (verNums[i] < currNums[i]) return false;
-    }
-
-    // equal base version, check beta-ness
-    if (verNums.size() == 5 && currNums.size() == 3) return false;
-    if (verNums.size() == 3 && currNums.size() == 5) return true;
-    if (verNums.size() == 5 && currNums.size() == 5)
-    {
-        for (int i = 3; i < 5; i++)
-        {
-            if (verNums[i] > currNums[i]) return true;
-            if (verNums[i] < currNums[i]) return false;
-        }
-    }
-    else
-    {
-        MW_show_log("There are no updates. You have the latest version - " + QString(NKR_VERSION));
-        return false;
-    }
-    return false;
-}
-
-void MainWindow::CheckUpdate()
+void MainWindow::HotkeyEvent(
+    const QString& key
+)
 {
-    QString search;
-
-#ifdef Q_OS_WIN
-#  ifdef Q_PROCESSOR_ARM_64
-    search = "windows-arm64";
-#  else
-#    ifdef Q_OS_WIN64
-    if (WinVersion::IsBuildNumGreaterOrEqual(
-        BuildNumber::Windows_10_1809))
+    if (key.isEmpty())
     {
-        search = "windows64";
-    }
-    else
-    {
-        search = "windowslegacy64";
-    }
-#    else
-    search = "windows32";
-#    endif
-#  endif
-#endif
-
-#ifdef Q_OS_LINUX
-#  ifdef Q_PROCESSOR_X86_64
-    search = "linux-amd64";
-#  else
-    search = "linux-arm64";
-#  endif
-#endif
-
-#ifdef Q_OS_MACOS
-#  ifdef Q_PROCESSOR_X86_64
-    search = "macos-amd64";
-#  else
-    search = "macos-arm64";
-#  endif
-#endif
-
-
-    // =========================================================
-    // Unsupported platform
-    // =========================================================
-
-    if (search.isEmpty())
-    {
-        runOnUiThread(
-            this,
-
-            [this]()
-            {
-                MessageBoxWarning(
-                    QObject::tr("Update"),
-                    QObject::tr(
-                        "Not official support platform"
-                    )
-                );
-            }
-        );
-
         return;
     }
 
-
-    // =========================================================
-    // Request releases
-    // =========================================================
-
-    const auto resp =
-        NetworkRequestHelper::HttpGet(
-            "https://api.github.com/repos/"
-            "throneproj/Gryph/releases"
-        );
-
-
-    if (!resp.error.isEmpty())
-    {
-        const QString errorMessage =
-            resp.error
-            + "\n"
-            + resp.data;
-
-
-        runOnUiThread(
-            this,
-
-            [
-                errorMessage
-            ]()
-            {
-                MessageBoxWarning(
-                    QObject::tr("Update"),
-                    QObject::tr(
-                        "Requesting update error: %1"
-                    )
-                    .arg(
-                        errorMessage
-                    )
-                );
-            }
-                    );
-
-        return;
-    }
-
-
-    // =========================================================
-    // Find appropriate release asset
-    // =========================================================
-
-    QString assets_name;
-    QString release_download_url;
-    QString release_url;
-    QString release_note;
-    QString note_pre_release;
-
-    bool exitFlag =
-        false;
-
-
-    const QJsonArray array =
-        QString2QJsonArray(
-            resp.data
-        );
-
-
-    for (const QJsonValue& value : array)
-    {
-        const QJsonObject release =
-            value.toObject();
-
-
-        if (release["prerelease"].toBool()
-            &&
-            !Configs::dataManager
-            ->settingsRepo
-            ->allow_beta_update)
-        {
-            continue;
-        }
-
-
-        const QJsonArray assets =
-            release["assets"].toArray();
-
-
-        for (const QJsonValue& assetValue : assets)
-        {
-            const QJsonObject asset =
-                assetValue.toObject();
-
-
-            const QString assetName =
-                asset["name"].toString();
-
-
-            if (assetName.contains(search)
-                &&
-                assetName.section('.', -1)
-                == QStringLiteral("zip"))
-            {
-                note_pre_release =
-                    release["prerelease"].toBool()
-                    ? QStringLiteral(
-                        " (Pre-release)"
-                    )
-                    : QString();
-
-
-                release_url =
-                    release["html_url"]
-                    .toString();
-
-
-                release_note =
-                    release["body"]
-                    .toString();
-
-
-                assets_name =
-                    assetName;
-
-
-                release_download_url =
-                    asset[
-                        "browser_download_url"
-                    ]
-                    .toString();
-
-
-                exitFlag =
-                    true;
-
-                break;
-            }
-        }
-
-
-        if (exitFlag)
-        {
-            break;
-        }
-    }
-
-
-    // =========================================================
-    // No newer release
-    // =========================================================
-
-    if (release_download_url.isEmpty()
-        ||
-        !isNewer(assets_name))
-    {
-        runOnUiThread(
-            this,
-
-            []()
-            {
-                MessageBoxInfo(
-                    QObject::tr("Update"),
-                    QObject::tr("No update")
-                );
-            }
-        );
-
-        return;
-    }
-
-
-    // =========================================================
-    // Copy all data needed by queued UI callback.
-    //
-    // These are local variables of CheckUpdate().
-    // Never capture them by reference.
-    // =========================================================
-
-    const QString updateAssetName =
-        assets_name;
-
-    const QString updateDownloadUrl =
-        release_download_url;
-
-    const QString updateReleaseUrl =
-        release_url;
-
-    const QString updateReleaseNote =
-        release_note;
-
-    const QString updatePreReleaseLabel =
-        note_pre_release;
-
-
-    // =========================================================
-    // Show update dialog on UI thread
-    // =========================================================
 
     runOnUiThread(
         this,
 
         [
             this,
-            updateAssetName,
-            updateDownloadUrl,
-            updateReleaseUrl,
-            updateReleaseNote,
-            updatePreReleaseLabel
+            key
         ]()
         {
-            const bool allowUpdater =
-                !Configs::dataManager
+            auto* const settings =
+                Configs::dataManager
                 ->settingsRepo
-                ->flag_use_appdata;
+                .get();
 
 
-            QMessageBox box(
-                QMessageBox::Question,
+            // =================================================
+            // Main window
+            // =================================================
 
-                QObject::tr("Update")
-                + updatePreReleaseLabel,
-
-                QObject::tr(
-                    "Update found: %1\n"
-                    "Release note:\n%2"
-                )
-                .arg(
-                    updateAssetName,
-                    updateReleaseNote
-                ),
-
-                QMessageBox::NoButton,
-
-                this
-            );
-
-
-            QAbstractButton* updateButton =
-                nullptr;
-
-
-            if (allowUpdater)
+            if (key ==
+                settings->hotkey_mainwindow)
             {
-                updateButton =
-                    box.addButton(
-                        QObject::tr("Update"),
-                        QMessageBox::AcceptRole
+                if (tray)
+                {
+                    tray->activated(
+                        QSystemTrayIcon::
+                        ActivationReason::
+                        Trigger
                     );
+                }
+
+
+                return;
             }
 
 
-            QAbstractButton* browserButton =
-                box.addButton(
-                    QObject::tr(
-                        "Open in browser"
-                    ),
-                    QMessageBox::ActionRole
-                );
+            // =================================================
+            // Groups
+            // =================================================
+
+            if (key ==
+                settings->hotkey_group)
+            {
+                on_menu_manage_groups_triggered();
+
+                return;
+            }
 
 
-            box.addButton(
-                QObject::tr("Close"),
-                QMessageBox::RejectRole
+            // =================================================
+            // Routing
+            // =================================================
+
+            if (key ==
+                settings->hotkey_route)
+            {
+                on_menu_routing_settings_triggered();
+
+                return;
+            }
+
+
+            // =================================================
+            // System proxy menu
+            // =================================================
+
+            if (key ==
+                settings
+                ->hotkey_system_proxy_menu)
+            {
+                if (ui &&
+                    ui->menu_spmode)
+                {
+                    ui->menu_spmode
+                        ->popup(
+                            QCursor::pos()
+                        );
+                }
+
+
+                return;
+            }
+
+
+            // =================================================
+            // Toggle system proxy
+            // =================================================
+
+            if (key ==
+                settings
+                ->hotkey_toggle_system_proxy)
+            {
+                toggle_system_proxy();
+            }
+        }
+    );
+}
+
+void MainWindow::rebuildLogHighlighter(
+    bool dark
+)
+{
+    if (logHighlighter_)
+    {
+        delete logHighlighter_;
+
+        logHighlighter_ =
+            nullptr;
+    }
+
+
+    logHighlighter_ =
+        new SyntaxHighlighter(
+            dark,
+            qvLogDocument
+        );
+}
+
+bool MainWindow::StopVPNProcess()
+{
+    // =========================================================
+    // Core thread must exist
+    // =========================================================
+
+    if (!DS_cores)
+    {
+        return false;
+    }
+
+
+    const auto killCore =
+        [this]() -> bool
+        {
+            QMutexLocker locker(
+                &coreProcessMutex
             );
 
 
-            box.exec();
-
-
-            // =================================================
-            // Download update
-            // =================================================
-
-            if (updateButton != nullptr
-                &&
-                box.clickedButton()
-                == updateButton
-                &&
-                allowUpdater)
+            if (!core_process)
             {
-                // IMPORTANT:
-                //
-                // updateDownloadUrl is copied into this worker.
-                // It does not reference CheckUpdate() stack.
+                return false;
+            }
 
-                Async::run(
-                    [
-                        this,
-                        updateDownloadUrl
-                    ]()
+
+            core_process->Kill();
+
+
+            return true;
+        };
+
+
+    // =========================================================
+    // Already inside DS_cores
+    //
+    // Never synchronously dispatch back to the same thread.
+    // =========================================================
+
+    if (QThread::currentThread()
+        ==
+        DS_cores)
+    {
+        return killCore();
+    }
+
+
+    // =========================================================
+    // Other thread -> DS_cores
+    // =========================================================
+
+    bool result =
+        false;
+
+
+    runOnThread(
+        [
+            killCore,
+            &result
+        ]()
+        {
+            result =
+                killCore();
+        },
+
+        DS_cores,
+
+        true
+    );
+
+
+    return result;
+}
+
+namespace
+{
+    struct VersionKey final
+    {
+        bool valid =
+            false;
+
+        int major =
+            0;
+
+        int minor =
+            0;
+
+        int patch =
+            0;
+
+        // alpha = 1
+        // beta  = 2
+        // rc    = 3
+        // stable = 4
+        int stage =
+            4;
+
+        int stageNumber =
+            0;
+    };
+
+
+    VersionKey parseVersionKey(
+        QString value,
+        bool assetFileName
+    )
+    {
+        VersionKey result;
+
+
+        value =
+            value.trimmed();
+
+
+        if (assetFileName)
+        {
+            const QString prefix =
+                QStringLiteral("Gryph-");
+
+
+            if (!value.startsWith(
+                prefix,
+                Qt::CaseInsensitive
+            ))
+            {
+                return result;
+            }
+
+
+            value.remove(
+                0,
+                prefix.size()
+            );
+        }
+
+
+        // Examples:
+        //
+        // 1.2.3
+        // 1.2.3-beta.4
+        //
+        // asset:
+        //
+        // 1.2.3-windows64.zip
+        // 1.2.3-beta.4-windows64.zip
+
+        const QStringList hyphenParts =
+            value.split(
+                '-',
+                Qt::KeepEmptyParts
+            );
+
+
+        if (hyphenParts.isEmpty())
+        {
+            return result;
+        }
+
+
+        const QStringList baseParts =
+            hyphenParts
+            .first()
+            .split(
+                '.',
+                Qt::KeepEmptyParts
+            );
+
+
+        if (baseParts.size() != 3)
+        {
+            return result;
+        }
+
+
+        bool majorOk =
+            false;
+
+        bool minorOk =
+            false;
+
+        bool patchOk =
+            false;
+
+
+        result.major =
+            baseParts[0].toInt(
+                &majorOk
+            );
+
+        result.minor =
+            baseParts[1].toInt(
+                &minorOk
+            );
+
+        result.patch =
+            baseParts[2].toInt(
+                &patchOk
+            );
+
+
+        if (!majorOk ||
+            !minorOk ||
+            !patchOk)
+        {
+            return {};
+        }
+
+
+        // Default is stable.
+        result.stage =
+            4;
+
+        result.stageNumber =
+            0;
+
+
+        // Second "-" section may either be:
+        //
+        // beta.4
+        //
+        // or:
+        //
+        // windows64.zip
+        //
+        // Only alpha/beta/rc are interpreted as prerelease.
+
+        if (hyphenParts.size() >= 2)
+        {
+            const QString prerelease =
+                hyphenParts[1];
+
+
+            const QStringList preParts =
+                prerelease.split(
+                    '.',
+                    Qt::KeepEmptyParts
+                );
+
+
+            if (!preParts.isEmpty())
+            {
+                const QString type =
+                    preParts[0]
+                    .toLower();
+
+
+                if (type ==
+                    QStringLiteral("alpha"))
+                {
+                    result.stage =
+                        1;
+                }
+                else if (type ==
+                    QStringLiteral("beta"))
+                {
+                    result.stage =
+                        2;
+                }
+                else if (type ==
+                    QStringLiteral("rc"))
+                {
+                    result.stage =
+                        3;
+                }
+
+
+                if (result.stage < 4 &&
+                    preParts.size() >= 2)
+                {
+                    bool numberOk =
+                        false;
+
+
+                    const int number =
+                        preParts[1]
+                        .toInt(
+                            &numberOk
+                        );
+
+
+                    if (numberOk)
                     {
-                        // -----------------------------------------
-                        // Prevent two simultaneous downloads
-                        // -----------------------------------------
+                        result.stageNumber =
+                            number;
+                    }
+                }
+            }
+        }
 
-                        if (!mu_download_update.tryLock())
-                        {
-                            runOnUiThread(
-                                this,
 
-                                [this]()
-                                {
-                                    MessageBoxWarning(
-                                        tr(
-                                            "Cannot start"
-                                        ),
-                                        tr(
-                                            "Last download "
-                                            "request has not "
-                                            "finished yet"
-                                        )
-                                    );
-                                }
+        result.valid =
+            true;
+
+
+        return result;
+    }
+
+
+    bool versionGreater(
+        const VersionKey& candidate,
+        const VersionKey& current
+    )
+    {
+        if (!candidate.valid ||
+            !current.valid)
+        {
+            return false;
+        }
+
+
+        if (candidate.major !=
+            current.major)
+        {
+            return candidate.major >
+                current.major;
+        }
+
+
+        if (candidate.minor !=
+            current.minor)
+        {
+            return candidate.minor >
+                current.minor;
+        }
+
+
+        if (candidate.patch !=
+            current.patch)
+        {
+            return candidate.patch >
+                current.patch;
+        }
+
+
+        // Stable > rc > beta > alpha
+        if (candidate.stage !=
+            current.stage)
+        {
+            return candidate.stage >
+                current.stage;
+        }
+
+
+        return candidate.stageNumber >
+            current.stageNumber;
+    }
+}
+
+bool isNewer(
+    const QString& assetName
+)
+{
+    const QString currentVersion =
+        QStringLiteral(
+            NKR_VERSION
+        )
+        .trimmed();
+
+
+    if (currentVersion.isEmpty())
+    {
+        return false;
+    }
+
+
+    const VersionKey candidate =
+        parseVersionKey(
+            assetName,
+            true
+        );
+
+
+    const VersionKey current =
+        parseVersionKey(
+            currentVersion,
+            false
+        );
+
+
+    if (!candidate.valid ||
+        !current.valid)
+    {
+        MW_show_log(
+            QString(
+                "Invalid version comparison: "
+                "asset='%1', current='%2'"
+            )
+            .arg(
+                assetName,
+                currentVersion
+            )
+        );
+
+        return false;
+    }
+
+
+    return versionGreater(
+        candidate,
+        current
+    );
+}
+
+void MainWindow::CheckUpdate()
+{
+    // =========================================================
+    // UI-thread entry point.
+    //
+    // Only collect immutable input here.
+    // =========================================================
+
+    QString search;
+
+
+#ifdef Q_OS_WIN
+
+#  ifdef Q_PROCESSOR_ARM_64
+
+    search =
+        QStringLiteral(
+            "windows-arm64"
+        );
+
+#  else
+
+#    ifdef Q_OS_WIN64
+
+    if (WinVersion::IsBuildNumGreaterOrEqual(
+        BuildNumber::Windows_10_1809
+    ))
+    {
+        search =
+            QStringLiteral(
+                "windows64"
+            );
+    }
+    else
+    {
+        search =
+            QStringLiteral(
+                "windowslegacy64"
+            );
+    }
+
+#    else
+
+    search =
+        QStringLiteral(
+            "windows32"
+        );
+
+#    endif
+
+#  endif
+
+#endif
+
+
+#ifdef Q_OS_LINUX
+
+#  ifdef Q_PROCESSOR_X86_64
+
+    search =
+        QStringLiteral(
+            "linux-amd64"
+        );
+
+#  else
+
+    search =
+        QStringLiteral(
+            "linux-arm64"
+        );
+
+#  endif
+
+#endif
+
+
+#ifdef Q_OS_MACOS
+
+#  ifdef Q_PROCESSOR_X86_64
+
+    search =
+        QStringLiteral(
+            "macos-amd64"
+        );
+
+#  else
+
+    search =
+        QStringLiteral(
+            "macos-arm64"
+        );
+
+#  endif
+
+#endif
+
+
+    if (search.isEmpty())
+    {
+        MessageBoxWarning(
+            QObject::tr("Update"),
+            QObject::tr(
+                "Not official support platform"
+            )
+        );
+
+        return;
+    }
+
+
+    // Snapshot setting before worker starts.
+    const bool allowBeta =
+        Configs::dataManager
+        ->settingsRepo
+        ->allow_beta_update;
+
+
+    // =========================================================
+    // Background update check
+    // =========================================================
+
+    Async::run(
+        [
+            search,
+            allowBeta
+        ]()
+        {
+            const auto response =
+                NetworkRequestHelper::HttpGet(
+                    "https://api.github.com/repos/"
+                    "netward/Gryph/releases"
+                );
+
+
+            // =================================================
+            // Request error
+            // =================================================
+
+            if (!response.error.isEmpty())
+            {
+                const QString error =
+                    response.error
+                    +
+                    "\n"
+                    +
+                    response.data;
+
+
+                (void)MainWindowApi::Post(
+                    [
+                        error
+                    ](
+                        MainWindow&
+                        )
+                    {
+                        MessageBoxWarning(
+                            QObject::tr(
+                                "Update"
+                            ),
+
+                            QObject::tr(
+                                "Requesting update error: %1"
+                            )
+                            .arg(
+                                error
+                            )
+                        );
+                    }
                             );
 
-                            return;
-                        }
+
+                return;
+            }
 
 
-                        QString errors;
+            QString assetName;
+
+            QString downloadUrl;
+
+            QString releaseUrl;
+
+            QString releaseNote;
+
+            QString preReleaseLabel;
 
 
-                        // -----------------------------------------
-                        // Background network/disk work
-                        // -----------------------------------------
+            const QJsonArray releases =
+                QString2QJsonArray(
+                    response.data
+                );
 
-                        if (!updateDownloadUrl.isEmpty())
+
+            // =================================================
+            // Find suitable asset
+            // =================================================
+
+            for (const QJsonValue& releaseValue :
+                releases)
+            {
+                if (!releaseValue.isObject())
+                {
+                    continue;
+                }
+
+
+                const QJsonObject release =
+                    releaseValue.toObject();
+
+
+                const bool prerelease =
+                    release[
+                        QStringLiteral(
+                            "prerelease"
+                        )
+                    ].toBool();
+
+
+                if (prerelease &&
+                    !allowBeta)
+                {
+                    continue;
+                }
+
+
+                const QJsonArray assets =
+                    release[
+                        QStringLiteral(
+                            "assets"
+                        )
+                    ].toArray();
+
+
+                for (const QJsonValue& assetValue :
+                    assets)
+                {
+                    if (!assetValue.isObject())
+                    {
+                        continue;
+                    }
+
+
+                    const QJsonObject asset =
+                        assetValue.toObject();
+
+
+                    const QString name =
+                        asset[
+                            QStringLiteral(
+                                "name"
+                            )
+                        ].toString();
+
+
+                    if (!name.contains(
+                        search
+                    ))
+                    {
+                        continue;
+                    }
+
+
+                    if (name.section(
+                        '.',
+                        -1
+                    )
+                        !=
+                        QStringLiteral("zip"))
+                    {
+                        continue;
+                    }
+
+
+                    assetName =
+                        name;
+
+
+                    downloadUrl =
+                        asset[
+                            QStringLiteral(
+                                "browser_download_url"
+                            )
+                        ].toString();
+
+
+                    releaseUrl =
+                        release[
+                            QStringLiteral(
+                                "html_url"
+                            )
+                        ].toString();
+
+
+                    releaseNote =
+                        release[
+                            QStringLiteral(
+                                "body"
+                            )
+                        ].toString();
+
+
+                    preReleaseLabel =
+                        prerelease
+                        ? QStringLiteral(
+                            " (Pre-release)"
+                        )
+                        : QString();
+
+
+                    break;
+                }
+
+
+                if (!downloadUrl.isEmpty())
+                {
+                    break;
+                }
+            }
+
+
+            // =================================================
+            // No update
+            // =================================================
+
+            if (downloadUrl.isEmpty() ||
+                !isNewer(
+                    assetName
+                ))
+            {
+                (void)MainWindowApi::Post(
+                    [](
+                        MainWindow&
+                        )
+                    {
+                        MessageBoxInfo(
+                            QObject::tr(
+                                "Update"
+                            ),
+
+                            QObject::tr(
+                                "No update"
+                            )
+                        );
+                    }
+                );
+
+
+                return;
+            }
+
+
+            // =================================================
+            // Show update dialog in UI thread
+            // =================================================
+
+            (void)MainWindowApi::Post(
+                [
+                    assetName,
+                    downloadUrl,
+                    releaseUrl,
+                    releaseNote,
+                    preReleaseLabel
+
+                ](
+                    MainWindow& window
+                    )
+                {
+                    const bool allowUpdater =
+                        !Configs::dataManager
+                        ->settingsRepo
+                        ->flag_use_appdata;
+
+
+                    QMessageBox box(
+                        QMessageBox::Question,
+
+                        QObject::tr(
+                            "Update"
+                        )
+                        +
+                        preReleaseLabel,
+
+                        QObject::tr(
+                            "Update found: %1\n"
+                            "Release note:\n%2"
+                        )
+                        .arg(
+                            assetName,
+                            releaseNote
+                        ),
+
+                        QMessageBox::NoButton,
+
+                        &window
+                    );
+
+
+                    QAbstractButton*
+                        updateButton =
+                        nullptr;
+
+
+                    if (allowUpdater)
+                    {
+                        updateButton =
+                            box.addButton(
+                                QObject::tr(
+                                    "Update"
+                                ),
+
+                                QMessageBox::
+                                AcceptRole
+                            );
+                    }
+
+
+                    QAbstractButton*
+                        browserButton =
+                        box.addButton(
+                            QObject::tr(
+                                "Open in browser"
+                            ),
+
+                            QMessageBox::
+                            ActionRole
+                        );
+
+
+                    box.addButton(
+                        QObject::tr(
+                            "Close"
+                        ),
+
+                        QMessageBox::
+                        RejectRole
+                    );
+
+
+                    box.exec();
+
+
+                    // =========================================
+                    // Browser
+                    // =========================================
+
+                    if (box.clickedButton()
+                        ==
+                        browserButton)
+                    {
+                        QDesktopServices::openUrl(
+                            QUrl(
+                                releaseUrl
+                            )
+                        );
+
+                        return;
+                    }
+
+
+                    // =========================================
+                    // No download selected
+                    // =========================================
+
+                    if (!updateButton ||
+                        box.clickedButton()
+                        != updateButton ||
+                        !allowUpdater)
+                    {
+                        return;
+                    }
+
+
+                    // =========================================
+                    // Background download
+                    // =========================================
+
+                    Async::run(
+                        [
+                            downloadUrl
+                        ]()
                         {
+                            if (!g_updateDownloadMutex
+                                .tryLock())
+                            {
+                                (void)MainWindowApi::Post(
+                                    [](
+                                        MainWindow&
+                                        )
+                                    {
+                                        MessageBoxWarning(
+                                            QObject::tr(
+                                                "Cannot start"
+                                            ),
+
+                                            QObject::tr(
+                                                "Last download request "
+                                                "has not finished yet"
+                                            )
+                                        );
+                                    }
+                                );
+
+
+                                return;
+                            }
+
+
+                            QString errors;
+
+
                             const QString result =
                                 NetworkRequestHelper::
                                 DownloadAsset(
-                                    updateDownloadUrl,
+                                    downloadUrl,
                                     "Gryph.zip"
                                 );
 
 
                             if (!result.isEmpty())
                             {
-                                errors +=
+                                errors =
                                     result;
                             }
-                        }
 
 
-                        mu_download_update.unlock();
+                            g_updateDownloadMutex
+                                .unlock();
 
 
-                        // -----------------------------------------
-                        // Download finished -> UI
-                        // -----------------------------------------
+                            // =================================
+                            // Completion
+                            // =================================
 
-                        runOnUiThread(
-                            this,
-
-                            [
-                                this,
-                                errors
-                            ]()
-                            {
-                                if (errors.isEmpty())
+                            (void)MainWindowApi::Post(
+                                [
+                                    errors
+                                ](
+                                    MainWindow& window
+                                    )
                                 {
+                                    if (!errors.isEmpty())
+                                    {
+                                        MessageBoxWarning(
+                                            QObject::tr(
+                                                "Failed to download "
+                                                "update assets"
+                                            ),
+
+                                            errors
+                                        );
+
+                                        return;
+                                    }
+
+
                                     const auto answer =
-                                        QMessageBox::
-                                        question(
-                                            this,
+                                        QMessageBox::question(
+                                            &window,
 
                                             QObject::tr(
                                                 "Update"
@@ -7649,47 +9679,27 @@ void MainWindow::CheckUpdate()
                                         );
 
 
-                                    if (answer ==
+                                    if (answer !=
                                         QMessageBox::
                                         StandardButton::
                                         Yes)
                                     {
-                                        exit_reason =
-                                            1;
-
-
-                                        on_menu_exit_triggered();
+                                        return;
                                     }
-                                }
-                                else
-                                {
-                                    MessageBoxWarning(
-                                        tr(
-                                            "Failed to download "
-                                            "update assets"
-                                        ),
-                                        errors
-                                    );
-                                }
-                            }
-                        );
-                    }
-                );
-            }
 
-            // =================================================
-            // Open release page
-            // =================================================
 
-            else if (box.clickedButton()
-                == browserButton)
-            {
-                QDesktopServices::openUrl(
-                    QUrl(
-                        updateReleaseUrl
-                    )
-                );
-            }
+                                    window.exit_reason =
+                                        1;
+
+
+                                    window
+                                        .on_menu_exit_triggered();
+                                }
+                                        );
+                        }
+                                );
+                }
+            );
         }
     );
 }
