@@ -93,7 +93,7 @@ func main() {
 		}
 	}()
 
-	test_utils.TestCtx, test_utils.CancelTests = context.WithCancel(context.Background())
+	test_utils.ResetTestContext()
 	RunCore()
 	return
 }

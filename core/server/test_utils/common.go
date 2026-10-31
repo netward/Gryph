@@ -7,10 +7,39 @@ import (
 	"github.com/sagernet/sing/common/metadata"
 	"net"
 	"time"
+	"sync"
 )
 
-var TestCtx context.Context
-var CancelTests context.CancelFunc
+
+var (
+    testContextMu sync.RWMutex
+    activeTestContext context.Context
+    activeTestCancel context.CancelFunc
+)
+
+// TestContext returns a safe snapshot of the current test context.
+func TestContext() context.Context {
+    testContextMu.RLock()
+    ctx := activeTestContext
+    testContextMu.RUnlock()
+
+    if ctx == nil {
+        return context.Background()
+    }
+    return ctx
+}
+
+// ResetTestContext cancels previous tests and prepares a fresh context.
+func ResetTestContext() {
+    testContextMu.Lock()
+    defer testContextMu.Unlock()
+
+    if activeTestCancel != nil {
+        activeTestCancel()
+    }
+    activeTestContext, activeTestCancel = context.WithCancel(context.Background())
+}
+
 
 const FetchServersTimeout = 8 * time.Second
 const MaxConcurrentTests = 100

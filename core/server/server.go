@@ -338,7 +338,7 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	if maxConcurrency >= 500 || maxConcurrency == 0 {
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
-	results := test_utils.BatchURLTest(test_utils.TestCtx, testInstance, outboundTags, *in.Url, int(maxConcurrency), twice, time.Duration(*in.TestTimeoutMs)*time.Millisecond)
+	results := test_utils.BatchURLTest(test_utils.TestContext(), testInstance, outboundTags, *in.Url, int(maxConcurrency), twice, time.Duration(*in.TestTimeoutMs)*time.Millisecond)
 
 	res := make([]*gen.URLTestResp, 0)
 	for idx, data := range results {
@@ -356,11 +356,13 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	return &gen.TestResp{Results: res}, nil
 }
 
-func (s *server) StopTest(ctx context.Context, in *gen.EmptyReq) (*gen.EmptyResp, error) {
-	test_utils.CancelTests()
-	test_utils.TestCtx, test_utils.CancelTests = context.WithCancel(context.Background())
+func (s *server) StopTest(
+    ctx context.Context,
+    in *gen.EmptyReq,
+) (*gen.EmptyResp, error) {
+    test_utils.ResetTestContext()
 
-	return &gen.EmptyResp{}, nil
+    return &gen.EmptyResp{}, nil
 }
 
 func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.QueryURLTestResponse, _ error) {
@@ -415,7 +417,7 @@ func (s *server) IPTest(ctx context.Context, in *gen.IPTestRequest) (*gen.IPTest
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
 	timeout := time.Duration(*in.TestTimeoutMs) * time.Millisecond
-	results := test_utils.BatchIPTest(test_utils.TestCtx, testInstance, outboundTags, int(maxConcurrency), timeout)
+	results := test_utils.BatchIPTest(test_utils.TestContext(), testInstance, outboundTags, int(maxConcurrency), timeout)
 
 	res := make([]*gen.IPTestRes, 0, len(results))
 	for idx, data := range results {
@@ -593,7 +595,7 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 		outboundTags = []string{outbound.Tag()}
 	}
 
-	results := test_utils.BatchSpeedTest(test_utils.TestCtx, testInstance, outboundTags, *in.TestDownload, *in.TestUpload, *in.SimpleDownload, *in.SimpleDownloadAddr, time.Duration(*in.TimeoutMs)*time.Millisecond, *in.OnlyCountry, *in.CountryConcurrency)
+	results := test_utils.BatchSpeedTest(test_utils.TestContext(), testInstance, outboundTags, *in.TestDownload, *in.TestUpload, *in.SimpleDownload, *in.SimpleDownloadAddr, time.Duration(*in.TimeoutMs)*time.Millisecond, *in.OnlyCountry, *in.CountryConcurrency)
 
 	res := make([]*gen.SpeedTestResult, 0)
 	for _, data := range results {
