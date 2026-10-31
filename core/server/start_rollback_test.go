@@ -40,7 +40,7 @@ func TestStartRollbackFailedExtraProcess(t *testing.T) {
 			CoreConfig:       To("{}"),
 			NeedExtraProcess: To(true),
 			ExtraProcessPath: To(missingExecutable),
-			ExtraNoOut:      To(true),
+			ExtraNoOut:       To(true),
 		},
 	)
 
@@ -127,8 +127,8 @@ func TestStartRollbackXrayFailureAfterExtraProcess(t *testing.T) {
 			ExtraProcessPath: To(executable),
 			ExtraProcessArgs: To("-test.run=^TestRollbackChildProcess$"),
 			ExtraNoOut:       To(true),
-			NeedXray:        To(true),
-			XrayConfig:      To(invalidXrayConfig),
+			NeedXray:         To(true),
+			XrayConfig:       To(invalidXrayConfig),
 		},
 	)
 
