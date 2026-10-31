@@ -31,25 +31,41 @@ type SpeedTestResult struct {
 }
 
 type SpeedTestResultQuerier struct {
-	isRunning bool
-	current   SpeedTestResult
-	mu        sync.RWMutex
+	active  int
+	current SpeedTestResult
+	mu      sync.RWMutex
 }
 
 func (s *SpeedTestResultQuerier) Result() (SpeedTestResult, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.current, s.isRunning
+
+	return s.current, s.active > 0
 }
 
 func (s *SpeedTestResultQuerier) storeResult(result *SpeedTestResult) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
 	s.current = *result
 }
 
-func (s *SpeedTestResultQuerier) setIsRunning(isRunning bool) {
-	s.isRunning = isRunning
+func (s *SpeedTestResultQuerier) beginTest() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.active++
+}
+
+func (s *SpeedTestResultQuerier) endTest() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.active <= 0 {
+		panic("SpeedTestResultQuerier: unbalanced endTest")
+	}
+
+	s.active--
 }
 
 type CountryTestResults struct {
@@ -187,8 +203,8 @@ func simpleDownloadTest(ctx context.Context, dialer func(ctx context.Context, ne
 	ticker := time.NewTicker(time.Millisecond * 50)
 	defer ticker.Stop()
 
-	SpTQuerier.setIsRunning(true)
-	defer SpTQuerier.setIsRunning(false)
+	SpTQuerier.beginTest()
+	defer SpTQuerier.endTest()
 
 	for {
 		select {
@@ -218,8 +234,8 @@ func speedTestWithDialer(ctx context.Context, dialer func(ctx context.Context, n
 
 	done := make(chan struct{})
 
-	SpTQuerier.setIsRunning(true)
-	defer SpTQuerier.setIsRunning(false)
+	SpTQuerier.beginTest()
+	defer SpTQuerier.endTest()
 
 	go func() {
 		defer func() { close(done) }()
