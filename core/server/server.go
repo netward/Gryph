@@ -23,7 +23,6 @@ import (
 	"github.com/google/shlex"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/experimental/clashapi"
-	"github.com/sagernet/sing/common"
 	E "github.com/sagernet/sing/common/exceptions"
 	"github.com/sagernet/sing/service"
 	"github.com/xtls/xray-core/core"
@@ -313,8 +312,6 @@ func (s *server) CheckConfig(ctx context.Context, in *gen.LoadConfigReq) (out *g
 
 func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, error) {
 	var testInstance *boxbox.Box
-	var xrayTestIntance *core.Instance
-	var cancel context.CancelFunc
 	var err error
 	var twice = true
 	testCtx := test_utils.TestContext()
@@ -337,25 +334,24 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 		defer release()
 		twice = false
 	} else {
-		if in.GetNeedXray() {
-			xrayTestIntance, err = xray.CreateXrayInstance(in.GetXrayConfig())
-			if err != nil {
-				return nil, err
-			}
-			err = xrayTestIntance.Start()
-			if err != nil {
-				return nil, err
-			}
-			defer func() {
-				common.Must(xrayTestIntance.Close())
-			}() // crash in case it does not close properly
-		}
-		testInstance, cancel, err = boxmain.Create([]byte(in.GetConfig()))
-		if err != nil {
-			return nil, err
-		}
-		defer testInstance.CloseWithTimeout(cancel, 2*time.Second, log.Println, false)
+	    runtime, err := newTemporaryTestRuntime(
+	        in.GetConfig(),
+	        in.GetNeedXray(),
+	        in.GetXrayConfig(),
+	    )
+	    if err != nil {
+	        return nil, err
+	    }
+	
+	    testInstance = runtime.box
+	
+	    defer func() {
+	        if err := runtime.Close(); err != nil {
+	            log.Printf("Test cleanup failed: %v", err)
+	        }
+	    }()
 	}
+
 
 	outboundTags := in.OutboundTags
 	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
@@ -416,24 +412,23 @@ func (s *server) IPTest(ctx context.Context, in *gen.IPTestRequest) (*gen.IPTest
 	var xrayTestInstance *core.Instance
 	var cancel context.CancelFunc
 	var err error
-	if in.GetNeedXray() {
-		xrayTestInstance, err = xray.CreateXrayInstance(in.GetXrayConfig())
-		if err != nil {
-			return nil, err
-		}
-		err = xrayTestInstance.Start()
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			common.Must(xrayTestInstance.Close())
-		}()
-	}
-	testInstance, cancel, err = boxmain.Create([]byte(in.GetConfig()))
+	
+	runtime, err := newTemporaryTestRuntime(
+	    in.GetConfig(),
+	    in.GetNeedXray(),
+	    in.GetXrayConfig(),
+	)
 	if err != nil {
-		return nil, err
+	    return nil, err
 	}
-	defer testInstance.CloseWithTimeout(cancel, 2*time.Second, log.Println, false)
+	
+	testInstance := runtime.box
+	
+	defer func() {
+	    if err := runtime.Close(); err != nil {
+	        log.Printf("IPTest cleanup failed: %v", err)
+	    }
+	}()
 
 	outboundTags := in.OutboundTags
 	if in.GetUseDefaultOutbound() {
@@ -590,8 +585,6 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 		return nil, errors.New("cannot run empty test")
 	}
 	var testInstance *boxbox.Box
-	var xrayTestIntance *core.Instance
-	var cancel context.CancelFunc
 	outboundTags := in.OutboundTags
 	var err error
 	testCtx := test_utils.TestContext()
@@ -609,27 +602,26 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 				}},
 			}, nil
 		}
-
-		defer release()
-	} else {
-		if in.GetNeedXray() {
-			xrayTestIntance, err = xray.CreateXrayInstance(in.GetXrayConfig())
-			if err != nil {
-				return nil, err
-			}
-			err = xrayTestIntance.Start()
-			if err != nil {
-				return nil, err
-			}
-			defer xrayTestIntance.Close()
+		defer release()	
+		} else {
+		    runtime, err := newTemporaryTestRuntime(
+		        in.GetConfig(),
+		        in.GetNeedXray(),
+		        in.GetXrayConfig(),
+		    )
+		    if err != nil {
+		        return nil, err
+		    }
+		
+		    testInstance = runtime.box
+		
+		    defer func() {
+		        if err := runtime.Close(); err != nil {
+		            log.Printf("SpeedTest cleanup failed: %v", err)
+		        }
+		    }()
 		}
-		testInstance, cancel, err = boxmain.Create([]byte(in.GetConfig()))
-		if err != nil {
-			return nil, err
-		}
-		defer cancel()
-		defer testInstance.Close()
-	}
+		
 
 	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
 		outbound := testInstance.Outbound().Default()
