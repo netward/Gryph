@@ -98,7 +98,7 @@ func countryTest(ctx context.Context, dialer func(ctx context.Context, network s
 	return nil
 }
 
-func acquireCountrySlot(
+func acquireTestSlot(
 	ctx context.Context,
 	slots chan struct{},
 ) bool {

@@ -50,65 +50,95 @@ func (u *IPTestReporter) Results() []*IPTestResult {
 	return res
 }
 
-func BatchIPTest(ctx context.Context, i *boxbox.Box, outboundTags []string, maxConcurrency int, timeout time.Duration) []*IPTestResult {
-	if timeout <= 0 {
-		timeout = IPTestTimeout
-	}
-	outbounds := service.FromContext[adapter.OutboundManager](i.Context())
-	resMap := make(map[string]*IPTestResult)
-	resAccess := sync.Mutex{}
-	limiter := make(chan struct{}, maxConcurrency)
+func BatchIPTest(
+    ctx context.Context,
+    i *boxbox.Box,
+    outboundTags []string,
+    maxConcurrency int,
+    timeout time.Duration,
+) []*IPTestResult {
+    if timeout <= 0 {
+        timeout = IPTestTimeout
+    }
 
-	wg := &sync.WaitGroup{}
-	wg.Add(len(outboundTags))
-	for _, tag := range outboundTags {
-		select {
-		case <-ctx.Done():
-			wg.Done()
-			resAccess.Lock()
-			resMap[tag] = &IPTestResult{
-				Error: errors.New("test aborted"),
-			}
-			resAccess.Unlock()
-		default:
-			time.Sleep(2 * time.Millisecond) // don't spawn goroutines too quickly
-			limiter <- struct{}{}
-			go func(t string) {
-				defer wg.Done()
-				outbound, found := outbounds.Outbound(t)
-				if !found {
-					panic("no outbound with tag " + t + " found")
-				}
-				client := &http.Client{
-					Transport: &http.Transport{
-						DialContext: func(_ context.Context, network string, addr string) (net.Conn, error) {
-							return outbound.DialContext(ctx, "tcp", metadata.ParseSocksaddr(addr))
-						},
-					},
-					Timeout: timeout,
-				}
-				resp, err := ipTest(ctx, client)
-				resAccess.Lock()
-				u := &IPTestResult{
-					Result: resp,
-					Tag:    t,
-					Error:  err,
-				}
-				resMap[t] = u
-				IPReporter.AddResult(u)
-				resAccess.Unlock()
-				<-limiter
-			}(tag)
-		}
-	}
+    if maxConcurrency <= 0 || maxConcurrency >= 500 {
+        maxConcurrency = MaxConcurrentTests
+    }
 
-	wg.Wait()
-	res := make([]*IPTestResult, 0, len(outboundTags))
-	for _, tag := range outboundTags {
-		res = append(res, resMap[tag])
-	}
+    outbounds := service.FromContext[adapter.OutboundManager](
+        i.Context(),
+    )
 
-	return res
+    results := make([]*IPTestResult, len(outboundTags))
+    slots := make(chan struct{}, maxConcurrency)
+
+    var wg sync.WaitGroup
+
+    for idx, tag := range outboundTags {
+        result := &IPTestResult{Tag: tag}
+        results[idx] = result
+
+        if err := ctx.Err(); err != nil {
+            result.Error = err
+            IPReporter.AddResult(result)
+            continue
+        }
+
+        if !acquireTestSlot(ctx, slots) {
+            result.Error = ctx.Err()
+            IPReporter.AddResult(result)
+            continue
+        }
+
+        wg.Add(1)
+
+        go func() {
+            defer wg.Done()
+            defer func() { <-slots }()
+
+            outbound, found := outbounds.Outbound(tag)
+            if !found {
+                result.Error = fmt.Errorf(
+                    "outbound %q not found", tag,
+                )
+                IPReporter.AddResult(result)
+                return
+            }
+
+            transport := &http.Transport{
+                DialContext: func(
+                    dialCtx context.Context,
+                    network string,
+                    addr string,
+                ) (net.Conn, error) {
+                    return outbound.DialContext(
+                        dialCtx,
+                        network,
+                        metadata.ParseSocksaddr(addr),
+                    )
+                },
+            }
+            defer transport.CloseIdleConnections()
+
+            client := &http.Client{
+                Transport: transport,
+                Timeout:   timeout,
+            }
+
+            result.Result, result.Error = ipTest(
+                ctx, client,
+            )
+
+            if err := ctx.Err(); err != nil {
+                result.Error = err
+            }
+
+            IPReporter.AddResult(result)
+        }()
+    }
+
+    wg.Wait()
+    return results
 }
 
 func ipTest(ctx context.Context, client *http.Client) (IPInfo, error) {

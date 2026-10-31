@@ -361,7 +361,7 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	}
 
 	var maxConcurrency = in.GetMaxConcurrency()
-	if maxConcurrency >= 500 || maxConcurrency == 0 {
+	if maxConcurrency >= 500 || maxConcurrency <= 0 {
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
 	results := test_utils.BatchURLTest(testCtx, testInstance, outboundTags, in.GetUrl(), int(maxConcurrency), twice, time.Duration(in.GetTestTimeoutMs())*time.Millisecond)
@@ -459,7 +459,7 @@ func (s *server) IPTest(
 	}
 
 	maxConcurrency := in.GetMaxConcurrency()
-	if maxConcurrency >= 500 || maxConcurrency == 0 {
+	if maxConcurrency >= 500 || maxConcurrency <= 0 {
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
 	timeout := time.Duration(in.GetTestTimeoutMs()) * time.Millisecond
