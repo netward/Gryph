@@ -82,14 +82,24 @@ try {
         $goArgs += '-race'
     }
 
+    
     if ($KnownDefects) {
         $goArgs += '-run'
         $goArgs += '^TestKnownDefect'
         $goArgs += '.'
     }
     else {
+        # Integration tests that require a dedicated
+        # disposable Windows network adapter named winipcfg_test.
+        # Some of these tests modify IP, MTU, routes and DNS.
+    
+        $skipWinipcfgTests = '^(TestIPChangeMetric|TestIPChangeMTU|TestGetIfRow|TestAddDeleteIPAddress|TestAddDeleteRoute|TestFlushDNS|TestSetDNS)$'
+    
+        $goArgs += '-skip'
+        $goArgs += $skipWinipcfgTests
         $goArgs += './...'
     }
+
 
     & go @goArgs
 
