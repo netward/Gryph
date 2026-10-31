@@ -98,11 +98,45 @@ func countryTest(ctx context.Context, dialer func(ctx context.Context, network s
 	return nil
 }
 
-func BatchSpeedTest(ctx context.Context, i *boxbox.Box, outboundTags []string, testDl, testUl bool, simpleDL bool, simpleAddress string, timeout time.Duration, countryOnly bool, countryConcurrency int32) []*SpeedTestResult {
+func acquireCountrySlot(
+	ctx context.Context,
+	slots chan struct{},
+) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+
+	select {
+	case <-ctx.Done():
+		return false
+
+	case slots <- struct{}{}:
+		// Cancellation may happen while acquiring a slot.
+		if ctx.Err() != nil {
+			<-slots
+			return false
+		}
+		return true
+	}
+}
+
+func BatchSpeedTest(
+	ctx context.Context,
+	i *boxbox.Box,
+	outboundTags []string,
+	testDl, testUl bool,
+	simpleDL bool,
+	simpleAddress string,
+	timeout time.Duration,
+	countryOnly bool,
+	countryConcurrency int32,
+) []*SpeedTestResult {
 	outbounds := service.FromContext[adapter.OutboundManager](i.Context())
-	results := make([]*SpeedTestResult, 0)
+
+	results := make([]*SpeedTestResult, 0, len(outboundTags))
 	var queuer chan struct{}
-	wg := &sync.WaitGroup{}
+	var wg sync.WaitGroup
+
 	if countryOnly {
 		if countryConcurrency <= 0 {
 			countryConcurrency = 5
@@ -111,44 +145,96 @@ func BatchSpeedTest(ctx context.Context, i *boxbox.Box, outboundTags []string, t
 	}
 
 	for _, tag := range outboundTags {
-		select {
-		case <-ctx.Done():
-			break
-		default:
+		res := &SpeedTestResult{Tag: tag}
+		results = append(results, res)
+
+		// Preserve one result per outbound even after cancellation.
+		if err := ctx.Err(); err != nil {
+			res.Cancelled = true
+			res.Error = err
+
+			if countryOnly {
+				CountryResults.AddResult(res)
+			}
+			continue
 		}
+
 		outbound, exists := outbounds.Outbound(tag)
 		if !exists {
 			panic("no outbound with tag " + tag + " found")
 		}
-		res := new(SpeedTestResult)
-		res.Tag = tag
-		results = append(results, res)
 
-		var err error
 		if countryOnly {
-			queuer <- struct{}{}
+			if !acquireCountrySlot(ctx, queuer) {
+				res.Cancelled = true
+				res.Error = ctx.Err()
+				CountryResults.AddResult(res)
+				continue
+			}
+
 			wg.Add(1)
+
 			go func(res *SpeedTestResult, outbound adapter.Outbound) {
-				defer func() { <-queuer }()
 				defer wg.Done()
-				err := countryTest(ctx, getNetDialer(outbound.DialContext), res)
-				if err != nil && !errors.Is(err, context.Canceled) {
+				defer func() { <-queuer }()
+
+				err := countryTest(
+					ctx,
+					getNetDialer(outbound.DialContext),
+					res,
+				)
+
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					res.Cancelled = true
+					res.Error = ctxErr
+				} else {
 					res.Error = err
-					fmt.Println("Failed to countryTest with err:", err)
 				}
+
+				if err != nil &&
+					!errors.Is(err, context.Canceled) &&
+					!errors.Is(err, context.DeadlineExceeded) {
+					fmt.Println("Failed to countryTest:", err)
+				}
+
 				CountryResults.AddResult(res)
 			}(res, outbound)
+
 			continue
 		}
+
+		var err error
+
 		if simpleDL {
-			err = simpleDownloadTest(ctx, getNetDialer(outbound.DialContext), res, simpleAddress, timeout)
+			err = simpleDownloadTest(
+				ctx,
+				getNetDialer(outbound.DialContext),
+				res,
+				simpleAddress,
+				timeout,
+			)
 		} else {
-			err = speedTestWithDialer(ctx, getNetDialer(outbound.DialContext), res, testDl, testUl, timeout)
+			err = speedTestWithDialer(
+				ctx,
+				getNetDialer(outbound.DialContext),
+				res,
+				testDl,
+				testUl,
+				timeout,
+			)
 		}
-		if err != nil && !errors.Is(err, context.Canceled) {
+
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			res.Cancelled = true
+			res.Error = ctxErr
+		} else if err != nil {
 			res.Error = err
-			fmt.Println("Failed to speedtest with err:", err)
+
+			if !errors.Is(err, context.Canceled) {
+				fmt.Println("Failed to speedtest:", err)
+			}
 		}
+
 		if !testDl && !simpleDL {
 			res.DlSpeed = ""
 		}
@@ -156,8 +242,8 @@ func BatchSpeedTest(ctx context.Context, i *boxbox.Box, outboundTags []string, t
 			res.UlSpeed = ""
 		}
 	}
-	wg.Wait()
 
+	wg.Wait()
 	return results
 }
 
