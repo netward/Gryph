@@ -14,6 +14,7 @@ import (
 
 func runStopWithActiveHTTPTest(
 	t *testing.T,
+	flushBeforeWait bool,
 	run func(*server, string) error,
 ) {
 	t.Helper()
@@ -52,14 +53,20 @@ func runStopWithActiveHTTPTest(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer close(handlerDone)
 
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("initial data"))
-			w.(http.Flusher).Flush()
+			if flushBeforeWait {
+				// Simple Download:
+				// Send HTTP headers and first bytes of response.
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("initial data"))
+				w.(http.Flusher).Flush()
+			}
 
+			// Notify the test that the HTTP request reached
+			// the server and is now active.
 			close(requestStarted)
 
-			// Keep the response active until the client
-			// cancels its request.
+			// Keep the request open until Stop() or StopTest()
+			// cancels its context.
 			<-r.Context().Done()
 		}),
 	)
@@ -80,6 +87,18 @@ func runStopWithActiveHTTPTest(
 		// The HTTP test is actively using the core.
 	case <-time.After(5 * time.Second):
 		t.Fatal("HTTP test did not start")
+	}
+
+	// The test must still be running before Stop() is called.
+	select {
+	case err := <-testDone:
+		t.Fatalf(
+			"test RPC completed before Stop(): %v",
+			err,
+		)
+
+	case <-time.After(50 * time.Millisecond):
+		// Expected: the HTTP operation is still active.
 	}
 
 	stopCtx, cancelStop := context.WithTimeout(
@@ -120,15 +139,16 @@ func runStopWithActiveHTTPTest(
 func TestStopDuringCurrentURLTest(t *testing.T) {
 	runStopWithActiveHTTPTest(
 		t,
+		false,
 		func(s *server, url string) error {
 			resp, err := s.Test(
 				context.Background(),
 				&gen.TestReq{
-					TestCurrent:       To(true),
+					TestCurrent:        To(true),
 					UseDefaultOutbound: To(true),
-					Url:               To(url),
-					MaxConcurrency:    To(int32(1)),
-					TestTimeoutMs:     To(int32(30000)),
+					Url:                To(url),
+					MaxConcurrency:     To(int32(1)),
+					TestTimeoutMs:      To(int32(30000)),
 				},
 			)
 			if err != nil {
@@ -152,6 +172,7 @@ func TestStopDuringCurrentURLTest(t *testing.T) {
 func TestStopDuringCurrentSimpleDownload(t *testing.T) {
 	runStopWithActiveHTTPTest(
 		t,
+		true,
 		func(s *server, url string) error {
 			resp, err := s.SpeedTest(
 				context.Background(),
@@ -164,7 +185,7 @@ func TestStopDuringCurrentSimpleDownload(t *testing.T) {
 					SimpleDownloadAddr: To(url),
 					OnlyCountry:        To(false),
 					CountryConcurrency: To(int32(1)),
-					TimeoutMs:         To(int32(30000)),
+					TimeoutMs:          To(int32(30000)),
 				},
 			)
 			if err != nil {
