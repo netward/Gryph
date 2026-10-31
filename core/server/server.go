@@ -357,12 +357,12 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 }
 
 func (s *server) StopTest(
-    ctx context.Context,
-    in *gen.EmptyReq,
+	ctx context.Context,
+	in *gen.EmptyReq,
 ) (*gen.EmptyResp, error) {
-    test_utils.ResetTestContext()
+	test_utils.ResetTestContext()
 
-    return &gen.EmptyResp{}, nil
+	return &gen.EmptyResp{}, nil
 }
 
 func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.QueryURLTestResponse, _ error) {
