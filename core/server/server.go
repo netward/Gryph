@@ -39,7 +39,7 @@ var debug bool
 var xrayInstance *core.Instance
 
 // Serializes Start and Stop operations.
-var coreLifecycleMu sync.Mutex
+var coreLifecycleMu sync.RWMutex
 
 type server struct {
 	gen.UnimplementedLibcoreServiceServer
@@ -452,7 +452,13 @@ func (s *server) QueryIPTest(ctx context.Context, in *gen.EmptyReq) (out *gen.Qu
 	return
 }
 
-func (s *server) QueryStats(ctx context.Context, in *gen.EmptyReq) (out *gen.QueryStatsResp, err error) {
+func (s *server) QueryStats(
+	ctx context.Context,
+	in *gen.EmptyReq,
+) (out *gen.QueryStatsResp, err error) {
+	coreLifecycleMu.RLock()
+	defer coreLifecycleMu.RUnlock()
+
 	out = &gen.QueryStatsResp{}
 	out.Ups = make(map[string]int64)
 	out.Downs = make(map[string]int64)
@@ -492,7 +498,13 @@ func (s *server) QueryStats(ctx context.Context, in *gen.EmptyReq) (out *gen.Que
 	return
 }
 
-func (s *server) ListConnections(ctx context.Context, in *gen.EmptyReq) (*gen.ListConnectionsResp, error) {
+func (s *server) ListConnections(
+	ctx context.Context,
+	in *gen.EmptyReq,
+) (*gen.ListConnectionsResp, error) {
+	coreLifecycleMu.RLock()
+	defer coreLifecycleMu.RUnlock()
+
 	if boxInstance == nil {
 		return &gen.ListConnectionsResp{}, nil
 	}
