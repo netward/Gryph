@@ -53,7 +53,6 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		out = &gen.ErrorResp{}
 		if err != nil {
 			out.Error = To(err.Error())
-			boxInstance = nil
 		}
 	}()
 
@@ -61,7 +60,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		log.Println("Start:", *in.CoreConfig)
 	}
 
-	if boxInstance != nil {
+	if boxInstance != nil || xrayInstance != nil || extraProcess != nil {
 		err = errors.New("instance already started")
 		return
 	}
@@ -162,7 +161,10 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	return
 }
 
-func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp, _ error) {
+func (s *server) Stop(
+	ctx context.Context,
+	in *gen.EmptyReq,
+) (out *gen.ErrorResp, _ error) {
 	var err error
 
 	defer func() {
@@ -172,20 +174,32 @@ func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp
 		}
 	}()
 
-	if boxInstance == nil {
-		return
-	}
+	if boxInstance != nil {
+		if needUnsetDNS {
+			needUnsetDNS = false
 
-	if needUnsetDNS {
-		needUnsetDNS = false
-		err := sys.SetSystemDNS("Empty", boxInstance.Network().InterfaceMonitor())
-		if err != nil {
-			log.Println("Failed to unset system DNS:", err)
+			if e := sys.SetSystemDNS(
+				"Empty",
+				boxInstance.Network().InterfaceMonitor(),
+			); e != nil {
+				log.Println("Failed to unset system DNS:", e)
+			}
 		}
-	}
-	boxInstance.CloseWithTimeout(instanceCancel, time.Second*2, log.Println, true)
 
-	boxInstance = nil
+		boxInstance.CloseWithTimeout(
+			instanceCancel,
+			2*time.Second,
+			log.Println,
+			true,
+		)
+
+		boxInstance = nil
+	}
+
+	if instanceCancel != nil {
+		instanceCancel()
+		instanceCancel = nil
+	}
 
 	if extraProcess != nil {
 		extraProcess.Stop()
@@ -193,7 +207,9 @@ func (s *server) Stop(ctx context.Context, in *gen.EmptyReq) (out *gen.ErrorResp
 	}
 
 	if xrayInstance != nil {
-		xrayInstance.Close()
+		if e := xrayInstance.Close(); e != nil {
+			log.Println("Failed to close Xray:", e)
+		}
 		xrayInstance = nil
 	}
 

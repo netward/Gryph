@@ -332,8 +332,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     );
 
     // Подготовка параметров GryphCore.
-    auto core_path = QApplication::applicationDirPath() + "/";
-    core_path += "GryphCore";
+    QString core_path =
+        QDir(QApplication::applicationDirPath()).filePath(
+    #ifdef Q_OS_WIN
+            QStringLiteral("GryphCore.exe")
+    #else
+            QStringLiteral("GryphCore")
+    #endif
+        );
     // Режим отладки ядра в зависимости от выбранного уровня журналирования.
     bool coreDebugMode = (Configs::dataManager->settingsRepo->log_level == "debug");
 
@@ -383,6 +389,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     runOnThread(
         [=, this] {
             QMutexLocker lock(&coreProcessMutex);
+            MW_show_log(
+                "[Debug] Core path: " +
+                QDir::toNativeSeparators(core_path)
+            );
+
+            MW_show_log(
+                QString("[Debug] Core exists: %1")
+                .arg(QFileInfo::exists(core_path))
+            );
             core_process = new Configs_sys::CoreProcess(core_path, socketFullName, coreDebugMode);
             // Если включено восстановление последнего профиля, его ID сохраняется в объекте процесса до фактического запуска ядра.
             if (Configs::dataManager->settingsRepo->remember_enable &&

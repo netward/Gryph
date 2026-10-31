@@ -66,8 +66,16 @@ func (p *Process) Start() error {
 }
 
 func (p *Process) Stop() {
+	if p == nil {
+		return
+	}
+
 	p.stopped.Store(true)
-	_ = p.cmd.Process.Kill()
+
+	if p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Kill()
+	}
+
 	p.cleanup()
 }
 
