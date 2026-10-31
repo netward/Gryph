@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -16,7 +17,18 @@ func TestSimpleDownloadSuccess(t *testing.T) {
 
 	server := httptest.NewServer(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			_, _ = w.Write(payload)
+			t.Log("HTTP handler: request received")
+
+			w.Header().Set(
+				"Content-Length",
+				strconv.Itoa(len(payload)),
+			)
+
+			n, err := w.Write(payload)
+			t.Logf(
+				"HTTP handler: wrote=%d expected=%d err=%v",
+				n, len(payload), err,
+			)
 		}),
 	)
 	defer server.Close()
@@ -26,20 +38,43 @@ func TestSimpleDownloadSuccess(t *testing.T) {
 	)
 	defer cancel()
 
+	dialer := func(
+		ctx context.Context,
+		network, address string,
+	) (net.Conn, error) {
+		t.Logf("DialContext: %s %s", network, address)
+
+		conn, err := (&net.Dialer{
+			Timeout: 2 * time.Second,
+		}).DialContext(ctx, network, address)
+
+		t.Logf("DialContext: err=%v", err)
+		return conn, err
+	}
+
 	var result SpeedTestResult
-	dialer := (&net.Dialer{}).DialContext
+
+	started := time.Now()
 
 	err := simpleDownloadTest(
 		ctx, dialer, &result, server.URL, 5*time.Second,
 	)
+
+	t.Logf(
+		"Result: elapsed=%v latency=%d speed=%q cancelled=%v error=%v",
+		time.Since(started),
+		result.Latency,
+		result.DlSpeed,
+		result.Cancelled,
+		err,
+	)
+
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if result.DlSpeed == "" {
 		t.Fatal("download speed was not calculated")
 	}
-
 	if result.Cancelled {
 		t.Fatal("successful download marked as cancelled")
 	}

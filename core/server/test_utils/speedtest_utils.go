@@ -182,8 +182,7 @@ func simpleDownloadTest(
 	}
 
 	transport := &http.Transport{
-		DialContext:       dialer,
-		DisableKeepAlives: true,
+		DialContext: dialer,
 	}
 	defer transport.CloseIdleConnections()
 
