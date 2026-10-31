@@ -284,148 +284,148 @@ func simpleDownloadTest(
 }
 
 func awaitSpeedTestWorker(
-    ctx context.Context,
-    done <-chan error,
-    publishProgress func(),
+	ctx context.Context,
+	done <-chan error,
+	publishProgress func(),
 ) (error, bool) {
-    ticker := time.NewTicker(200 * time.Millisecond)
-    defer ticker.Stop()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
 
-    for {
-        select {
-        case err := <-done:
-            if ctxErr := ctx.Err(); ctxErr != nil {
-                return ctxErr, true
-            }
-            return err, false
+	for {
+		select {
+		case err := <-done:
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return ctxErr, true
+			}
+			return err, false
 
-        case <-ctx.Done():
-            // Do not release the caller's core reference until
-            // the worker has actually finished.
-            <-done
-            return ctx.Err(), true
+		case <-ctx.Done():
+			// Do not release the caller's core reference until
+			// the worker has actually finished.
+			<-done
+			return ctx.Err(), true
 
-        case <-ticker.C:
-            publishProgress()
-        }
-    }
+		case <-ticker.C:
+			publishProgress()
+		}
+	}
 }
 
 func speedTestWithDialer(
-    ctx context.Context,
-    dialer func(context.Context, string, string) (net.Conn, error),
-    res *SpeedTestResult,
-    testDl, testUl bool,
-    timeout time.Duration,
+	ctx context.Context,
+	dialer func(context.Context, string, string) (net.Conn, error),
+	res *SpeedTestResult,
+	testDl, testUl bool,
+	timeout time.Duration,
 ) error {
-    if timeout <= 0 {
-        timeout = 15 * time.Second
-    }
+	if timeout <= 0 {
+		timeout = 15 * time.Second
+	}
 
-    srv, err := getSpeedtestServer(ctx, dialer)
-    if err != nil {
-        return err
-    }
+	srv, err := getSpeedtestServer(ctx, dialer)
+	if err != nil {
+		return err
+	}
 
-    res.ServerName = srv.Name
-    res.ServerCountry = srv.Country
-    res.Latency = int32(srv.Latency.Milliseconds())
+	res.ServerName = srv.Name
+	res.ServerCountry = srv.Country
+	res.Latency = int32(srv.Latency.Milliseconds())
 
-    done := make(chan error, 1)
+	done := make(chan error, 1)
 
-    SpTQuerier.beginTest()
-    defer SpTQuerier.endTest()
+	SpTQuerier.beginTest()
+	defer SpTQuerier.endTest()
 
-    // Run each direction with its own timeout.
-    runPhase := func(
-        run func(context.Context) error,
-    ) error {
-        phaseCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Run each direction with its own timeout.
+	runPhase := func(
+		run func(context.Context) error,
+	) error {
+		phaseCtx, cancel := context.WithTimeout(ctx, timeout)
 
-        phaseErr := run(phaseCtx)
-        if phaseErr == nil {
-            phaseErr = phaseCtx.Err()
-        }
+		phaseErr := run(phaseCtx)
+		if phaseErr == nil {
+			phaseErr = phaseCtx.Err()
+		}
 
-        cancel()
-        return phaseErr
-    }
+		cancel()
+		return phaseErr
+	}
 
-    go func() {
-        if testDl {
-            if err := runPhase(srv.DownloadTestContext); err != nil {
-                done <- err
-                return
-            }
-        }
+	go func() {
+		if testDl {
+			if err := runPhase(srv.DownloadTestContext); err != nil {
+				done <- err
+				return
+			}
+		}
 
-        if err := ctx.Err(); err != nil {
-            done <- err
-            return
-        }
+		if err := ctx.Err(); err != nil {
+			done <- err
+			return
+		}
 
-        if testUl {
-            if err := runPhase(srv.UploadTestContext); err != nil {
-                done <- err
-                return
-            }
-        }
+		if testUl {
+			if err := runPhase(srv.UploadTestContext); err != nil {
+				done <- err
+				return
+			}
+		}
 
-        done <- nil
-    }()
+		done <- nil
+	}()
 
-    // These total-byte counters are read atomically
-    // by the speedtest-go data manager.
-    lastAt := time.Now()
-    lastDownload := srv.Context.GetTotalDownload()
-    lastUpload := srv.Context.GetTotalUpload()
+	// These total-byte counters are read atomically
+	// by the speedtest-go data manager.
+	lastAt := time.Now()
+	lastDownload := srv.Context.GetTotalDownload()
+	lastUpload := srv.Context.GetTotalUpload()
 
-    publishProgress := func() {
-        now := time.Now()
-        elapsed := now.Sub(lastAt).Seconds()
-        if elapsed <= 0 {
-            return
-        }
+	publishProgress := func() {
+		now := time.Now()
+		elapsed := now.Sub(lastAt).Seconds()
+		if elapsed <= 0 {
+			return
+		}
 
-        download := srv.Context.GetTotalDownload()
-        upload := srv.Context.GetTotalUpload()
+		download := srv.Context.GetTotalDownload()
+		upload := srv.Context.GetTotalUpload()
 
-        if testDl && download > lastDownload {
-            bytesPerSecond :=
-                float64(download-lastDownload) / elapsed
+		if testDl && download > lastDownload {
+			bytesPerSecond :=
+				float64(download-lastDownload) / elapsed
 
-            res.DlSpeed = internal.BrateToStr(bytesPerSecond)
-        }
+			res.DlSpeed = internal.BrateToStr(bytesPerSecond)
+		}
 
-        if testUl && upload > lastUpload {
-            bytesPerSecond :=
-                float64(upload-lastUpload) / elapsed
+		if testUl && upload > lastUpload {
+			bytesPerSecond :=
+				float64(upload-lastUpload) / elapsed
 
-            res.UlSpeed = internal.BrateToStr(bytesPerSecond)
-        }
+			res.UlSpeed = internal.BrateToStr(bytesPerSecond)
+		}
 
-        SpTQuerier.storeResult(res)
+		SpTQuerier.storeResult(res)
 
-        lastDownload = download
-        lastUpload = upload
-        lastAt = now
-    }
+		lastDownload = download
+		lastUpload = upload
+		lastAt = now
+	}
 
-    workerErr, cancelled := awaitSpeedTestWorker(
-        ctx,
-        done,
-        publishProgress,
-    )
+	workerErr, cancelled := awaitSpeedTestWorker(
+		ctx,
+		done,
+		publishProgress,
+	)
 
-    // The worker is finished. Reading final server
-    // results is now safe relative to this worker.
-    res.DlSpeed = internal.BrateToStr(float64(srv.DLSpeed))
-    res.UlSpeed = internal.BrateToStr(float64(srv.ULSpeed))
-    res.Latency = int32(srv.Latency.Milliseconds())
-    res.Cancelled = cancelled
-    res.Error = workerErr
+	// The worker is finished. Reading final server
+	// results is now safe relative to this worker.
+	res.DlSpeed = internal.BrateToStr(float64(srv.DLSpeed))
+	res.UlSpeed = internal.BrateToStr(float64(srv.ULSpeed))
+	res.Latency = int32(srv.Latency.Milliseconds())
+	res.Cancelled = cancelled
+	res.Error = workerErr
 
-    SpTQuerier.storeResult(res)
+	SpTQuerier.storeResult(res)
 
-    return workerErr
+	return workerErr
 }

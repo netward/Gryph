@@ -227,6 +227,26 @@ func (s *server) Stop(
 			out.Error = To(err.Error())
 		}
 	}()
+	
+	// Stop new users from acquiring the running instance.
+	// coreLifecycleMu.Lock() is already held here.
+	if boxInstance != nil {
+		waitCtx, cancel := context.WithTimeout(
+			ctx,
+			10*time.Second,
+		)
+
+		waitErr := currentCoreTests.cancelAndWait(waitCtx)
+		cancel()
+
+		if waitErr != nil {
+			err = fmt.Errorf(
+				"cannot stop core: active tests did not finish: %w",
+				waitErr,
+			)
+			return
+		}
+	}
 
 	if boxInstance != nil {
 		if needUnsetDNS {
@@ -297,15 +317,24 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	var cancel context.CancelFunc
 	var err error
 	var twice = true
-	if *in.TestCurrent {
-		if boxInstance == nil {
-			return &gen.TestResp{Results: []*gen.URLTestResp{{
-				OutboundTag: To("proxy"),
-				LatencyMs:   To(int32(0)),
-				Error:       To("Instance is not running"),
-			}}}, nil
+	testCtx := test_utils.TestContext()
+	
+	if in.GetTestCurrent() {
+		var release func()
+
+		testInstance, testCtx, release = acquireCurrentCoreTest()
+
+		if testInstance == nil {
+			return &gen.TestResp{
+				Results: []*gen.URLTestResp{{
+					OutboundTag: To("proxy"),
+					LatencyMs:   To(int32(0)),
+					Error:       To("Instance is not running"),
+				}},
+			}, nil
 		}
-		testInstance = boxInstance
+
+		defer release()
 		twice = false
 	} else {
 		if *in.NeedXray {
@@ -338,7 +367,7 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	if maxConcurrency >= 500 || maxConcurrency == 0 {
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
-	results := test_utils.BatchURLTest(test_utils.TestContext(), testInstance, outboundTags, *in.Url, int(maxConcurrency), twice, time.Duration(*in.TestTimeoutMs)*time.Millisecond)
+	results := test_utils.BatchURLTest(testCtx, testInstance, outboundTags, *in.Url, int(maxConcurrency), twice, time.Duration(*in.TestTimeoutMs)*time.Millisecond)
 
 	res := make([]*gen.URLTestResp, 0)
 	for idx, data := range results {
@@ -562,14 +591,23 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 	var cancel context.CancelFunc
 	outboundTags := in.OutboundTags
 	var err error
-	if *in.TestCurrent {
-		if boxInstance == nil {
-			return &gen.SpeedTestResponse{Results: []*gen.SpeedTestResult{{
-				OutboundTag: To("proxy"),
-				Error:       To("Instance is not running"),
-			}}}, nil
+	testCtx := test_utils.TestContext()
+
+	if in.GetTestCurrent() {
+		var release func()
+
+		testInstance, testCtx, release = acquireCurrentCoreTest()
+
+		if testInstance == nil {
+			return &gen.SpeedTestResponse{
+				Results: []*gen.SpeedTestResult{{
+					OutboundTag: To("proxy"),
+					Error:       To("Instance is not running"),
+				}},
+			}, nil
 		}
-		testInstance = boxInstance
+
+		defer release()
 	} else {
 		if *in.NeedXray {
 			xrayTestIntance, err = xray.CreateXrayInstance(*in.XrayConfig)
@@ -595,7 +633,7 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 		outboundTags = []string{outbound.Tag()}
 	}
 
-	results := test_utils.BatchSpeedTest(test_utils.TestContext(), testInstance, outboundTags, *in.TestDownload, *in.TestUpload, *in.SimpleDownload, *in.SimpleDownloadAddr, time.Duration(*in.TimeoutMs)*time.Millisecond, *in.OnlyCountry, *in.CountryConcurrency)
+	results := test_utils.BatchSpeedTest(testCtx, testInstance, outboundTags, *in.TestDownload, *in.TestUpload, *in.SimpleDownload, *in.SimpleDownloadAddr, time.Duration(*in.TimeoutMs)*time.Millisecond, *in.OnlyCountry, *in.CountryConcurrency)
 
 	res := make([]*gen.SpeedTestResult, 0)
 	for _, data := range results {
