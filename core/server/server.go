@@ -333,6 +333,9 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 		defer release()
 		twice = false
 	} else {
+		tempCtx, releaseTemp := temporaryTests.begin()
+		testCtx = tempCtx
+		defer releaseTemp()
 		runtime, err := newTemporaryTestRuntime(
 			in.GetConfig(),
 			in.GetNeedXray(),
@@ -379,13 +382,25 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	return &gen.TestResp{Results: res}, nil
 }
 
-func (s *server) StopTest(
-	ctx context.Context,
-	in *gen.EmptyReq,
-) (*gen.EmptyResp, error) {
-	test_utils.ResetTestContext()
 
-	return &gen.EmptyResp{}, nil
+func (s *server) StopTest(
+    ctx context.Context,
+    in *gen.EmptyReq,
+) (*gen.EmptyResp, error) {
+    waitCtx, cancel := context.WithTimeout(
+        ctx,
+        10*time.Second,
+    )
+    defer cancel()
+
+    if err := temporaryTests.cancelAndWait(waitCtx); err != nil {
+        return nil, fmt.Errorf(
+            "temporary tests did not finish: %w",
+            err,
+        )
+    }
+
+    return &gen.EmptyResp{}, nil
 }
 
 func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.QueryURLTestResponse, _ error) {
@@ -409,7 +424,8 @@ func (s *server) IPTest(
     ctx context.Context,
     in *gen.IPTestRequest,
 ) (*gen.IPTestResp, error) {
-
+	testCtx, releaseTemp := temporaryTests.begin()
+	defer releaseTemp()
     runtime, err := newTemporaryTestRuntime(
         in.GetConfig(),
         in.GetNeedXray(),
@@ -438,7 +454,7 @@ func (s *server) IPTest(
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
 	timeout := time.Duration(in.GetTestTimeoutMs()) * time.Millisecond
-	results := test_utils.BatchIPTest(test_utils.TestContext(), testInstance, outboundTags, int(maxConcurrency), timeout)
+	results := test_utils.BatchIPTest(testCtx, testInstance, outboundTags, int(maxConcurrency), timeout)
 
 	res := make([]*gen.IPTestRes, 0, len(results))
 	for idx, data := range results {
@@ -600,6 +616,9 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 		}
 		defer release()
 	} else {
+		tempCtx, releaseTemp := temporaryTests.begin()
+		testCtx = tempCtx
+		defer releaseTemp()
 		runtime, err := newTemporaryTestRuntime(
 			in.GetConfig(),
 			in.GetNeedXray(),
