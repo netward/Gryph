@@ -119,7 +119,7 @@ func (s *server) Start(
 			// The Core (not the GUI) creates the config, in a fresh randomly
 			// named temp file that cannot be hijacked by symlink/pre-existing
 			// file tricks even when the Core is elevated. See CreateExtraConfig.
-			extraConfPath, extraCleanupPath, e = process.CreateExtraConfig(*in.ExtraProcessConf)
+			extraConfPath, extraCleanupPath, e = process.CreateExtraConfig(in.GetExtraProcessConf())
 			if e != nil {
 				err = E.Cause(e, "Failed to create extra.conf")
 				return
@@ -304,7 +304,7 @@ func (s *server) CheckConfig(ctx context.Context, in *gen.LoadConfigReq) (out *g
 			out.Error = To(fmt.Sprintf("CheckConfig panic: %v", r))
 		}
 	}()
-	err := boxmain.Check([]byte(*in.CoreConfig))
+	err := boxmain.Check([]byte(in.GetCoreConfig()))
 	if err != nil {
 		out.Error = To(err.Error())
 	}
@@ -337,8 +337,8 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 		defer release()
 		twice = false
 	} else {
-		if *in.NeedXray {
-			xrayTestIntance, err = xray.CreateXrayInstance(*in.XrayConfig)
+		if in.GetNeedXray() {
+			xrayTestIntance, err = xray.CreateXrayInstance(in.GetXrayConfig())
 			if err != nil {
 				return nil, err
 			}
@@ -350,7 +350,7 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 				common.Must(xrayTestIntance.Close())
 			}() // crash in case it does not close properly
 		}
-		testInstance, cancel, err = boxmain.Create([]byte(*in.Config))
+		testInstance, cancel, err = boxmain.Create([]byte(in.GetConfig()))
 		if err != nil {
 			return nil, err
 		}
@@ -358,16 +358,16 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	}
 
 	outboundTags := in.OutboundTags
-	if *in.UseDefaultOutbound || *in.TestCurrent {
+	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
 		outbound := testInstance.Outbound().Default()
 		outboundTags = []string{outbound.Tag()}
 	}
 
-	var maxConcurrency = *in.MaxConcurrency
+	var maxConcurrency = in.GetMaxConcurrency()
 	if maxConcurrency >= 500 || maxConcurrency == 0 {
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
-	results := test_utils.BatchURLTest(testCtx, testInstance, outboundTags, *in.Url, int(maxConcurrency), twice, time.Duration(*in.TestTimeoutMs)*time.Millisecond)
+	results := test_utils.BatchURLTest(testCtx, testInstance, outboundTags, in.GetUrl(), int(maxConcurrency), twice, time.Duration(in.GetTestTimeoutMs())*time.Millisecond)
 
 	res := make([]*gen.URLTestResp, 0)
 	for idx, data := range results {
@@ -416,8 +416,8 @@ func (s *server) IPTest(ctx context.Context, in *gen.IPTestRequest) (*gen.IPTest
 	var xrayTestInstance *core.Instance
 	var cancel context.CancelFunc
 	var err error
-	if *in.NeedXray {
-		xrayTestInstance, err = xray.CreateXrayInstance(*in.XrayConfig)
+	if in.GetNeedXray() {
+		xrayTestInstance, err = xray.CreateXrayInstance(in.GetXrayConfig())
 		if err != nil {
 			return nil, err
 		}
@@ -429,23 +429,23 @@ func (s *server) IPTest(ctx context.Context, in *gen.IPTestRequest) (*gen.IPTest
 			common.Must(xrayTestInstance.Close())
 		}()
 	}
-	testInstance, cancel, err = boxmain.Create([]byte(*in.Config))
+	testInstance, cancel, err = boxmain.Create([]byte(in.GetConfig()))
 	if err != nil {
 		return nil, err
 	}
 	defer testInstance.CloseWithTimeout(cancel, 2*time.Second, log.Println, false)
 
 	outboundTags := in.OutboundTags
-	if *in.UseDefaultOutbound {
+	if in.GetUseDefaultOutbound() {
 		outbound := testInstance.Outbound().Default()
 		outboundTags = []string{outbound.Tag()}
 	}
 
-	maxConcurrency := *in.MaxConcurrency
+	maxConcurrency := in.GetMaxConcurrency()
 	if maxConcurrency >= 500 || maxConcurrency == 0 {
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
-	timeout := time.Duration(*in.TestTimeoutMs) * time.Millisecond
+	timeout := time.Duration(in.GetTestTimeoutMs()) * time.Millisecond
 	results := test_utils.BatchIPTest(test_utils.TestContext(), testInstance, outboundTags, int(maxConcurrency), timeout)
 
 	res := make([]*gen.IPTestRes, 0, len(results))
@@ -583,7 +583,10 @@ func (s *server) IsPrivileged(ctx context.Context, _ *gen.EmptyReq) (*gen.IsPriv
 }
 
 func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.SpeedTestResponse, error) {
-	if !*in.TestDownload && !*in.TestUpload && !*in.SimpleDownload && !*in.OnlyCountry {
+	if !in.GetTestDownload() &&
+		!in.GetTestUpload() &&
+		!in.GetSimpleDownload() &&
+		!in.GetOnlyCountry() {
 		return nil, errors.New("cannot run empty test")
 	}
 	var testInstance *boxbox.Box
@@ -609,8 +612,8 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 
 		defer release()
 	} else {
-		if *in.NeedXray {
-			xrayTestIntance, err = xray.CreateXrayInstance(*in.XrayConfig)
+		if in.GetNeedXray() {
+			xrayTestIntance, err = xray.CreateXrayInstance(in.GetXrayConfig())
 			if err != nil {
 				return nil, err
 			}
@@ -620,7 +623,7 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 			}
 			defer xrayTestIntance.Close()
 		}
-		testInstance, cancel, err = boxmain.Create([]byte(*in.Config))
+		testInstance, cancel, err = boxmain.Create([]byte(in.GetConfig()))
 		if err != nil {
 			return nil, err
 		}
@@ -628,12 +631,23 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 		defer testInstance.Close()
 	}
 
-	if *in.UseDefaultOutbound || *in.TestCurrent {
+	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
 		outbound := testInstance.Outbound().Default()
 		outboundTags = []string{outbound.Tag()}
 	}
 
-	results := test_utils.BatchSpeedTest(testCtx, testInstance, outboundTags, *in.TestDownload, *in.TestUpload, *in.SimpleDownload, *in.SimpleDownloadAddr, time.Duration(*in.TimeoutMs)*time.Millisecond, *in.OnlyCountry, *in.CountryConcurrency)
+	results := test_utils.BatchSpeedTest(
+		testCtx,
+		testInstance,
+		outboundTags,
+		in.GetTestDownload(),
+		in.GetTestUpload(),
+		in.GetSimpleDownload(),
+		in.GetSimpleDownloadAddr(),
+		time.Duration(in.GetTimeoutMs())*time.Millisecond,
+		in.GetOnlyCountry(),
+		in.GetCountryConcurrency(),
+	)
 
 	res := make([]*gen.SpeedTestResult, 0)
 	for _, data := range results {

@@ -87,7 +87,7 @@ func TestConcurrentStopTestStopAndRestart(t *testing.T) {
 					TestDownload:       To(true),
 					SimpleDownload:     To(true),
 					SimpleDownloadAddr: To(httpServer.URL),
-					TimeoutMs:         To(int32(30000)),
+					TimeoutMs:          To(int32(30000)),
 				},
 			)
 
