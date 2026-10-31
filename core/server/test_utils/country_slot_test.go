@@ -12,7 +12,7 @@ func TestAcquireCountrySlotAlreadyCancelled(t *testing.T) {
 
 	slots := make(chan struct{}, 1)
 
-	if acquireCountrySlot(ctx, slots) {
+	if acquireTestSlot(ctx, slots) {
 		t.Fatal("acquired slot after cancellation")
 	}
 
@@ -31,7 +31,7 @@ func TestAcquireCountrySlotCancelledWhileFull(t *testing.T) {
 	done := make(chan bool, 1)
 
 	go func() {
-		done <- acquireCountrySlot(ctx, slots)
+		done <- acquireTestSlot(ctx, slots)
 	}()
 
 	cancel()

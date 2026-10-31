@@ -165,7 +165,7 @@ func BatchSpeedTest(
 		}
 
 		if countryOnly {
-			if !acquireCountrySlot(ctx, queuer) {
+			if !acquireTestSlot(ctx, queuer) {
 				res.Cancelled = true
 				res.Error = ctx.Err()
 				CountryResults.AddResult(res)

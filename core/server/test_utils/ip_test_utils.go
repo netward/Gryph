@@ -4,7 +4,7 @@ import (
 	"GryphCore/internal/boxbox"
 	"context"
 	"encoding/json"
-	"errors"
+	"fmt"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service"
@@ -51,94 +51,94 @@ func (u *IPTestReporter) Results() []*IPTestResult {
 }
 
 func BatchIPTest(
-    ctx context.Context,
-    i *boxbox.Box,
-    outboundTags []string,
-    maxConcurrency int,
-    timeout time.Duration,
+	ctx context.Context,
+	i *boxbox.Box,
+	outboundTags []string,
+	maxConcurrency int,
+	timeout time.Duration,
 ) []*IPTestResult {
-    if timeout <= 0 {
-        timeout = IPTestTimeout
-    }
+	if timeout <= 0 {
+		timeout = IPTestTimeout
+	}
 
-    if maxConcurrency <= 0 || maxConcurrency >= 500 {
-        maxConcurrency = MaxConcurrentTests
-    }
+	if maxConcurrency <= 0 || maxConcurrency >= 500 {
+		maxConcurrency = MaxConcurrentTests
+	}
 
-    outbounds := service.FromContext[adapter.OutboundManager](
-        i.Context(),
-    )
+	outbounds := service.FromContext[adapter.OutboundManager](
+		i.Context(),
+	)
 
-    results := make([]*IPTestResult, len(outboundTags))
-    slots := make(chan struct{}, maxConcurrency)
+	results := make([]*IPTestResult, len(outboundTags))
+	slots := make(chan struct{}, maxConcurrency)
 
-    var wg sync.WaitGroup
+	var wg sync.WaitGroup
 
-    for idx, tag := range outboundTags {
-        result := &IPTestResult{Tag: tag}
-        results[idx] = result
+	for idx, tag := range outboundTags {
+		result := &IPTestResult{Tag: tag}
+		results[idx] = result
 
-        if err := ctx.Err(); err != nil {
-            result.Error = err
-            IPReporter.AddResult(result)
-            continue
-        }
+		if err := ctx.Err(); err != nil {
+			result.Error = err
+			IPReporter.AddResult(result)
+			continue
+		}
 
-        if !acquireTestSlot(ctx, slots) {
-            result.Error = ctx.Err()
-            IPReporter.AddResult(result)
-            continue
-        }
+		if !acquireTestSlot(ctx, slots) {
+			result.Error = ctx.Err()
+			IPReporter.AddResult(result)
+			continue
+		}
 
-        wg.Add(1)
+		wg.Add(1)
 
-        go func() {
-            defer wg.Done()
-            defer func() { <-slots }()
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
 
-            outbound, found := outbounds.Outbound(tag)
-            if !found {
-                result.Error = fmt.Errorf(
-                    "outbound %q not found", tag,
-                )
-                IPReporter.AddResult(result)
-                return
-            }
+			outbound, found := outbounds.Outbound(tag)
+			if !found {
+				result.Error = fmt.Errorf(
+					"outbound %q not found", tag,
+				)
+				IPReporter.AddResult(result)
+				return
+			}
 
-            transport := &http.Transport{
-                DialContext: func(
-                    dialCtx context.Context,
-                    network string,
-                    addr string,
-                ) (net.Conn, error) {
-                    return outbound.DialContext(
-                        dialCtx,
-                        network,
-                        metadata.ParseSocksaddr(addr),
-                    )
-                },
-            }
-            defer transport.CloseIdleConnections()
+			transport := &http.Transport{
+				DialContext: func(
+					dialCtx context.Context,
+					network string,
+					addr string,
+				) (net.Conn, error) {
+					return outbound.DialContext(
+						dialCtx,
+						network,
+						metadata.ParseSocksaddr(addr),
+					)
+				},
+			}
+			defer transport.CloseIdleConnections()
 
-            client := &http.Client{
-                Transport: transport,
-                Timeout:   timeout,
-            }
+			client := &http.Client{
+				Transport: transport,
+				Timeout:   timeout,
+			}
 
-            result.Result, result.Error = ipTest(
-                ctx, client,
-            )
+			result.Result, result.Error = ipTest(
+				ctx, client,
+			)
 
-            if err := ctx.Err(); err != nil {
-                result.Error = err
-            }
+			if err := ctx.Err(); err != nil {
+				result.Error = err
+			}
 
-            IPReporter.AddResult(result)
-        }()
-    }
+			IPReporter.AddResult(result)
+		}()
+	}
 
-    wg.Wait()
-    return results
+	wg.Wait()
+	return results
 }
 
 func ipTest(ctx context.Context, client *http.Client) (IPInfo, error) {

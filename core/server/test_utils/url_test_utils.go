@@ -3,7 +3,7 @@ package test_utils
 import (
 	"GryphCore/internal/boxbox"
 	"context"
-	"errors"
+	"fmt"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing/common/metadata"
 	"github.com/sagernet/sing/service"
@@ -43,104 +43,104 @@ func (u *URLTestReporter) Results() []*URLTestResult {
 }
 
 func BatchURLTest(
-    ctx context.Context,
-    i *boxbox.Box,
-    outboundTags []string,
-    url string,
-    maxConcurrency int,
-    twice bool,
-    timeout time.Duration,
+	ctx context.Context,
+	i *boxbox.Box,
+	outboundTags []string,
+	url string,
+	maxConcurrency int,
+	twice bool,
+	timeout time.Duration,
 ) []*URLTestResult {
-    if timeout <= 0 {
-        timeout = URLTestTimeout
-    }
+	if timeout <= 0 {
+		timeout = URLTestTimeout
+	}
 
-    if maxConcurrency <= 0 || maxConcurrency >= 500 {
-        maxConcurrency = MaxConcurrentTests
-    }
+	if maxConcurrency <= 0 || maxConcurrency >= 500 {
+		maxConcurrency = MaxConcurrentTests
+	}
 
-    outbounds := service.FromContext[adapter.OutboundManager](
-        i.Context(),
-    )
+	outbounds := service.FromContext[adapter.OutboundManager](
+		i.Context(),
+	)
 
-    results := make([]*URLTestResult, len(outboundTags))
-    slots := make(chan struct{}, maxConcurrency)
+	results := make([]*URLTestResult, len(outboundTags))
+	slots := make(chan struct{}, maxConcurrency)
 
-    var wg sync.WaitGroup
+	var wg sync.WaitGroup
 
-    for idx, tag := range outboundTags {
-        result := &URLTestResult{Tag: tag}
-        results[idx] = result
+	for idx, tag := range outboundTags {
+		result := &URLTestResult{Tag: tag}
+		results[idx] = result
 
-        if err := ctx.Err(); err != nil {
-            result.Error = err
-            URLReporter.AddResult(result)
-            continue
-        }
+		if err := ctx.Err(); err != nil {
+			result.Error = err
+			URLReporter.AddResult(result)
+			continue
+		}
 
-        if !acquireTestSlot(ctx, slots) {
-            result.Error = ctx.Err()
-            URLReporter.AddResult(result)
-            continue
-        }
+		if !acquireTestSlot(ctx, slots) {
+			result.Error = ctx.Err()
+			URLReporter.AddResult(result)
+			continue
+		}
 
-        wg.Add(1)
+		wg.Add(1)
 
-        go func() {
-            defer wg.Done()
-            defer func() { <-slots }()
+		go func() {
+			defer wg.Done()
+			defer func() { <-slots }()
 
-            outbound, found := outbounds.Outbound(tag)
-            if !found {
-                result.Error = fmt.Errorf(
-                    "outbound %q not found", tag,
-                )
-                URLReporter.AddResult(result)
-                return
-            }
+			outbound, found := outbounds.Outbound(tag)
+			if !found {
+				result.Error = fmt.Errorf(
+					"outbound %q not found", tag,
+				)
+				URLReporter.AddResult(result)
+				return
+			}
 
-            transport := &http.Transport{
-                DialContext: func(
-                    dialCtx context.Context,
-                    network string,
-                    addr string,
-                ) (net.Conn, error) {
-                    return outbound.DialContext(
-                        dialCtx,
-                        network,
-                        metadata.ParseSocksaddr(addr),
-                    )
-                },
-            }
-            defer transport.CloseIdleConnections()
+			transport := &http.Transport{
+				DialContext: func(
+					dialCtx context.Context,
+					network string,
+					addr string,
+				) (net.Conn, error) {
+					return outbound.DialContext(
+						dialCtx,
+						network,
+						metadata.ParseSocksaddr(addr),
+					)
+				},
+			}
+			defer transport.CloseIdleConnections()
 
-            client := &http.Client{
-                Transport: transport,
-                Timeout:   timeout,
-            }
+			client := &http.Client{
+				Transport: transport,
+				Timeout:   timeout,
+			}
 
-            result.Duration, result.Error = urlTest(
-                ctx, client, url,
-            )
+			result.Duration, result.Error = urlTest(
+				ctx, client, url,
+			)
 
-            if result.Error == nil &&
-                twice &&
-                ctx.Err() == nil {
-                result.Duration, result.Error = urlTest(
-                    ctx, client, url,
-                )
-            }
+			if result.Error == nil &&
+				twice &&
+				ctx.Err() == nil {
+				result.Duration, result.Error = urlTest(
+					ctx, client, url,
+				)
+			}
 
-            if err := ctx.Err(); err != nil {
-                result.Error = err
-            }
+			if err := ctx.Err(); err != nil {
+				result.Error = err
+			}
 
-            URLReporter.AddResult(result)
-        }()
-    }
+			URLReporter.AddResult(result)
+		}()
+	}
 
-    wg.Wait()
-    return results
+	wg.Wait()
+	return results
 }
 
 func urlTest(ctx context.Context, client *http.Client, url string) (time.Duration, error) {
