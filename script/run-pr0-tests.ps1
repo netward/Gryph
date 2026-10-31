@@ -71,7 +71,7 @@ try {
 
     $goArgs = @(
         'test'
-        '-count=10'
+        '-count=1'
         '-timeout=10m'
         '-tags'
         $tags

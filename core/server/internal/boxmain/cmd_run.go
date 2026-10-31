@@ -50,8 +50,8 @@ func parseConfig(ctx context.Context, configContent []byte) (*option.Options, er
 }
 
 func Create(configContent []byte) (*boxbox.Box, context.CancelFunc, error) {
-	preRun(nil, nil)
-	options, err := parseConfig(globalCtx, configContent)
+	baseCtx := newRuntimeContext()
+	options, err := parseConfig(baseCtx, configContent)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -61,7 +61,7 @@ func Create(configContent []byte) (*boxbox.Box, context.CancelFunc, error) {
 		}
 		options.Log.DisableColor = true
 	}
-	ctx, cancel := context.WithCancel(globalCtx)
+	ctx, cancel := context.WithCancel(baseCtx)
 	instance, err := boxbox.New(boxbox.Options{
 		Context: ctx,
 		Options: *options,

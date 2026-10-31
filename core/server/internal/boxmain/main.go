@@ -37,37 +37,76 @@ func init() {
 	mainCommand.PersistentFlags().BoolVarP(&disableColor, "disable-color", "", false, "disable color output")
 }
 
-func preRun(cmd *cobra.Command, args []string) {
-	globalCtx = context.Background()
+func newRuntimeContext() context.Context {
+	ctx := context.Background()
+
 	sudoUser := os.Getenv("SUDO_USER")
 	sudoUID, _ := strconv.Atoi(os.Getenv("SUDO_UID"))
 	sudoGID, _ := strconv.Atoi(os.Getenv("SUDO_GID"))
+
 	if sudoUID == 0 && sudoGID == 0 && sudoUser != "" {
-		sudoUserObject, _ := user.Lookup(sudoUser)
-		if sudoUserObject != nil {
+		sudoUserObject, err := user.Lookup(sudoUser)
+		if err == nil {
 			sudoUID, _ = strconv.Atoi(sudoUserObject.Uid)
 			sudoGID, _ = strconv.Atoi(sudoUserObject.Gid)
 		}
 	}
+
 	if sudoUID > 0 && sudoGID > 0 {
-		globalCtx = filemanager.WithDefault(globalCtx, "", "", sudoUID, sudoGID)
+		ctx = filemanager.WithDefault(
+			ctx, "", "", sudoUID, sudoGID,
+		)
 	}
+
+	ctx = service.ContextWith(
+		ctx,
+		deprecated.NewStderrManager(log.StdLogger()),
+	)
+
+	return box.Context(
+		ctx,
+		include.InboundRegistry(),
+		include.OutboundRegistry(),
+		include.EndpointRegistry(),
+		include.DNSTransportRegistry(),
+		include.ServiceRegistry(),
+	)
+}
+
+func preRun(cmd *cobra.Command, args []string) {
 	if disableColor {
-		log.SetStdLogger(log.NewDefaultFactory(context.Background(), log.Formatter{BaseTime: time.Now(), DisableColors: true}, os.Stderr, "", nil, false).Logger())
+		log.SetStdLogger(
+			log.NewDefaultFactory(
+				context.Background(),
+				log.Formatter{
+					BaseTime:      time.Now(),
+					DisableColors: true,
+				},
+				os.Stderr,
+				"",
+				nil,
+				false,
+			).Logger(),
+		)
 	}
+
+	ctx := newRuntimeContext()
+
 	if workingDir != "" {
 		_, err := os.Stat(workingDir)
 		if err != nil {
-			filemanager.MkdirAll(globalCtx, workingDir, 0o777)
+			filemanager.MkdirAll(ctx, workingDir, 0o777)
 		}
-		err = os.Chdir(workingDir)
-		if err != nil {
+
+		if err := os.Chdir(workingDir); err != nil {
 			log.Fatal(err)
 		}
 	}
-	if len(configPaths) == 0 && len(configDirectories) == 0 {
+
+	if len(configPaths) == 0 &&
+		len(configDirectories) == 0 {
 		configPaths = append(configPaths, "config.json")
 	}
-	globalCtx = service.ContextWith(globalCtx, deprecated.NewStderrManager(log.StdLogger()))
-	globalCtx = box.Context(globalCtx, include.InboundRegistry(), include.OutboundRegistry(), include.EndpointRegistry(), include.DNSTransportRegistry(), include.ServiceRegistry())
+
+	globalCtx = ctx
 }
