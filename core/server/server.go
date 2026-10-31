@@ -386,15 +386,25 @@ func (s *server) StopTest(
 	ctx context.Context,
 	in *gen.EmptyReq,
 ) (*gen.EmptyResp, error) {
+	// Prevent new TestCurrent operations from registering until the current generation has stopped.
+	coreLifecycleMu.Lock()
+	defer coreLifecycleMu.Unlock()
+
 	waitCtx, cancel := context.WithTimeout(
 		ctx,
 		10*time.Second,
 	)
 	defer cancel()
 
-	if err := temporaryTests.cancelAndWait(waitCtx); err != nil {
+	// Resets the common test context, cancels temporary operations and waits for their cleanup.
+	tempErr := temporaryTests.cancelAndWait(waitCtx)
+
+	// Wait for current-core operations to release their references. The parent test context has already been cancelled above.
+	currentErr := currentCoreTests.cancelAndWait(waitCtx)
+
+	if err := errors.Join(tempErr, currentErr); err != nil {
 		return nil, fmt.Errorf(
-			"temporary tests did not finish: %w",
+			"failed to stop active tests: %w",
 			err,
 		)
 	}
