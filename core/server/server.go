@@ -17,6 +17,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/shlex"
@@ -37,6 +38,9 @@ var debug bool
 // Xray core
 var xrayInstance *core.Instance
 
+// Serializes Start and Stop operations.
+var coreLifecycleMu sync.Mutex
+
 type server struct {
 	gen.UnimplementedLibcoreServiceServer
 }
@@ -46,7 +50,12 @@ func To[T any](v T) *T {
 	return &v
 }
 
-func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.ErrorResp, _ error) {
+func (s *server) Start(
+	ctx context.Context,
+	in *gen.LoadConfigReq,
+) (out *gen.ErrorResp, _ error) {
+	coreLifecycleMu.Lock()
+	defer coreLifecycleMu.Unlock()
 	var err error
 
 	defer func() {
@@ -57,7 +66,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	}()
 
 	if debug {
-	    log.Println("Start:", in.GetCoreConfig())
+		log.Println("Start:", in.GetCoreConfig())
 	}
 
 	if boxInstance != nil || xrayInstance != nil || extraProcess != nil {
@@ -124,9 +133,9 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		}
 
 		extraProcess = process.NewProcess(
-		    in.GetExtraProcessPath(),
-		    args,
-		    in.GetExtraNoOut(),
+			in.GetExtraProcessPath(),
+			args,
+			in.GetExtraNoOut(),
 		)
 		extraProcess.SetCleanupPath(extraCleanupPath)
 		err = extraProcess.Start()
@@ -135,25 +144,23 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		}
 	}
 
-	
 	if in.GetNeedXray() {
-	    xrayInstance, err = xray.CreateXrayInstance(
-	        in.GetXrayConfig(),
-	    )
-	
-	    if err != nil {
-	        return
-	    }
-	
-	    err = xrayInstance.Start()
-	    if err != nil {
-	        return
-	    }
+		xrayInstance, err = xray.CreateXrayInstance(
+			in.GetXrayConfig(),
+		)
+
+		if err != nil {
+			return
+		}
+
+		err = xrayInstance.Start()
+		if err != nil {
+			return
+		}
 	}
 
-
 	boxInstance, instanceCancel, err = boxmain.Create(
-	    []byte(in.GetCoreConfig()),
+		[]byte(in.GetCoreConfig()),
 	)
 	if err != nil {
 		if extraProcess != nil {
@@ -210,6 +217,8 @@ func (s *server) Stop(
 	ctx context.Context,
 	in *gen.EmptyReq,
 ) (out *gen.ErrorResp, _ error) {
+	coreLifecycleMu.Lock()
+	defer coreLifecycleMu.Unlock()
 	var err error
 
 	defer func() {
