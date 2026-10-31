@@ -65,6 +65,40 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		return
 	}
 
+	// Rollback при ошибке частичного запуска.
+	defer func() {
+	    if err == nil {
+	        return
+	    }
+	
+	    if boxInstance != nil {
+	        boxInstance.CloseWithTimeout(
+	            instanceCancel,
+	            2*time.Second,
+	            log.Println,
+	            true,
+	        )
+	        boxInstance = nil
+	    }
+	
+	    if instanceCancel != nil {
+	        instanceCancel()
+	        instanceCancel = nil
+	    }
+	
+	    if xrayInstance != nil {
+	        if closeErr := xrayInstance.Close(); closeErr != nil {
+	            log.Println("Failed to roll back Xray:", closeErr)
+	        }
+	        xrayInstance = nil
+	    }
+	
+	    if extraProcess != nil {
+	        extraProcess.Stop()
+	        extraProcess = nil
+	    }
+	}()
+	
 	if *in.NeedExtraProcess {
 		args, e := shlex.Split(in.GetExtraProcessArgs())
 		if e != nil {
@@ -104,7 +138,6 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		}
 		err = xrayInstance.Start()
 		if err != nil {
-			xrayInstance = nil
 			return
 		}
 	}
