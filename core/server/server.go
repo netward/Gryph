@@ -227,7 +227,7 @@ func (s *server) Stop(
 			out.Error = To(err.Error())
 		}
 	}()
-	
+
 	// Stop new users from acquiring the running instance.
 	// coreLifecycleMu.Lock() is already held here.
 	if boxInstance != nil {
@@ -318,7 +318,7 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	var err error
 	var twice = true
 	testCtx := test_utils.TestContext()
-	
+
 	if in.GetTestCurrent() {
 		var release func()
 
