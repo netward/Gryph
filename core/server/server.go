@@ -57,7 +57,7 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 	}()
 
 	if debug {
-		log.Println("Start:", *in.CoreConfig)
+	    log.Println("Start:", in.GetCoreConfig())
 	}
 
 	if boxInstance != nil || xrayInstance != nil || extraProcess != nil {
@@ -99,7 +99,8 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		}
 	}()
 
-	if *in.NeedExtraProcess {
+	if in.GetNeedExtraProcess()
+	{
 		args, e := shlex.Split(in.GetExtraProcessArgs())
 		if e != nil {
 			err = E.Cause(e, "Failed to parse args")
@@ -123,7 +124,11 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 			}
 		}
 
-		extraProcess = process.NewProcess(*in.ExtraProcessPath, args, *in.ExtraNoOut)
+		extraProcess = process.NewProcess(
+		    in.GetExtraProcessPath(),
+		    args,
+		    in.GetExtraNoOut(),
+		)
 		extraProcess.SetCleanupPath(extraCleanupPath)
 		err = extraProcess.Start()
 		if err != nil {
@@ -131,18 +136,26 @@ func (s *server) Start(ctx context.Context, in *gen.LoadConfigReq) (out *gen.Err
 		}
 	}
 
-	if *in.NeedXray {
-		xrayInstance, err = xray.CreateXrayInstance(*in.XrayConfig)
-		if err != nil {
-			return
-		}
-		err = xrayInstance.Start()
-		if err != nil {
-			return
-		}
+	
+	if in.GetNeedXray() {
+	    xrayInstance, err = xray.CreateXrayInstance(
+	        in.GetXrayConfig(),
+	    )
+	
+	    if err != nil {
+	        return
+	    }
+	
+	    err = xrayInstance.Start()
+	    if err != nil {
+	        return
+	    }
 	}
 
-	boxInstance, instanceCancel, err = boxmain.Create([]byte(*in.CoreConfig))
+
+	boxInstance, instanceCancel, err = boxmain.Create(
+	    []byte(in.GetCoreConfig()),
+	)
 	if err != nil {
 		if extraProcess != nil {
 			extraProcess.Stop()
