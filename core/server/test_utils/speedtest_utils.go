@@ -3,7 +3,6 @@ package test_utils
 import (
 	"GryphCore/internal"
 	"GryphCore/internal/boxbox"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -161,65 +161,125 @@ func BatchSpeedTest(ctx context.Context, i *boxbox.Box, outboundTags []string, t
 	return results
 }
 
-func simpleDownloadTest(ctx context.Context, dialer func(ctx context.Context, network string, address string) (net.Conn, error), res *SpeedTestResult, testURL string, timeout time.Duration) error {
+type atomicByteCounter struct {
+	total atomic.Int64
+}
+
+func (c *atomicByteCounter) Write(p []byte) (int, error) {
+	c.total.Add(int64(len(p)))
+	return len(p), nil
+}
+
+func simpleDownloadTest(
+	ctx context.Context,
+	dialer func(context.Context, string, string) (net.Conn, error),
+	res *SpeedTestResult,
+	testURL string,
+	timeout time.Duration,
+) error {
 	if timeout <= 0 {
 		timeout = URLTestTimeout
 	}
+
+	transport := &http.Transport{
+		DialContext:       dialer,
+		DisableKeepAlives: true,
+	}
+	defer transport.CloseIdleConnections()
+
 	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
-				return dialer(ctx, network, addr)
-			},
-		},
-		Timeout: timeout,
+		Transport: transport,
+		Timeout:   timeout,
 	}
 
 	res.ServerName = "N/A"
 	res.ServerCountry = "N/A"
 
-	buf := bytes.NewBuffer(make([]byte, 0, 8*(1<<20)))
-	req, err := http.NewRequestWithContext(ctx, "GET", testURL, nil)
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, testURL, nil,
+	)
 	if err != nil {
 		return err
 	}
 
-	done := make(chan struct{})
-	var start time.Time
-	var latency int32
+	var counter atomicByteCounter
+	var latencyMs atomic.Int64
+	var downloadStarted atomic.Pointer[time.Time]
 
-	go func() {
-		defer close(done)
-		reqStart := time.Now()
-		resp, err := client.Do(req)
-		if err != nil {
-			res.Error = err
-			return
-		}
-		latency = int32(time.Since(reqStart).Milliseconds())
-		start = time.Now()
-		_, _ = io.Copy(buf, resp.Body)
-	}()
-
-	ticker := time.NewTicker(time.Millisecond * 50)
-	defer ticker.Stop()
+	done := make(chan error, 1)
 
 	SpTQuerier.beginTest()
 	defer SpTQuerier.endTest()
 
+	requestStarted := time.Now()
+
+	go func() {
+		resp, err := client.Do(req)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer resp.Body.Close()
+
+		latencyMs.Store(
+			time.Since(requestStarted).Milliseconds(),
+		)
+
+		started := time.Now()
+		downloadStarted.Store(&started)
+
+		_, err = io.Copy(&counter, resp.Body)
+		done <- err
+	}()
+
+	publish := func() {
+		res.Latency = int32(latencyMs.Load())
+
+		if started := downloadStarted.Load(); started != nil {
+			elapsed := time.Since(*started).Seconds()
+
+			if elapsed > 0 {
+				bytesPerSecond :=
+					float64(counter.total.Load()) / elapsed
+
+				res.DlSpeed = internal.BrateToStr(
+					bytesPerSecond,
+				)
+			}
+		}
+
+		SpTQuerier.storeResult(res)
+	}
+
+	finish := func(workerErr error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			res.Cancelled = true
+			workerErr = ctxErr
+		}
+
+		res.Error = workerErr
+		publish()
+
+		return workerErr
+	}
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
 	for {
 		select {
-		case <-done:
-			res.DlSpeed = internal.BrateToStr(internal.CalculateBRate(float64(buf.Len()), start))
-			res.Latency = latency
-			SpTQuerier.storeResult(res)
-			return nil
+		case workerErr := <-done:
+			return finish(workerErr)
+
 		case <-ctx.Done():
-			res.Cancelled = true
-			return ctx.Err()
+			// Wait until the HTTP worker has stopped.
+			// The caller must not release its core reference
+			// while the worker is still using the dialer.
+			workerErr := <-done
+			return finish(workerErr)
+
 		case <-ticker.C:
-			res.DlSpeed = internal.BrateToStr(internal.CalculateBRate(float64(buf.Len()), start))
-			res.Latency = latency
-			SpTQuerier.storeResult(res)
+			publish()
 		}
 	}
 }
