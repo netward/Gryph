@@ -382,25 +382,24 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 	return &gen.TestResp{Results: res}, nil
 }
 
-
 func (s *server) StopTest(
-    ctx context.Context,
-    in *gen.EmptyReq,
+	ctx context.Context,
+	in *gen.EmptyReq,
 ) (*gen.EmptyResp, error) {
-    waitCtx, cancel := context.WithTimeout(
-        ctx,
-        10*time.Second,
-    )
-    defer cancel()
+	waitCtx, cancel := context.WithTimeout(
+		ctx,
+		10*time.Second,
+	)
+	defer cancel()
 
-    if err := temporaryTests.cancelAndWait(waitCtx); err != nil {
-        return nil, fmt.Errorf(
-            "temporary tests did not finish: %w",
-            err,
-        )
-    }
+	if err := temporaryTests.cancelAndWait(waitCtx); err != nil {
+		return nil, fmt.Errorf(
+			"temporary tests did not finish: %w",
+			err,
+		)
+	}
 
-    return &gen.EmptyResp{}, nil
+	return &gen.EmptyResp{}, nil
 }
 
 func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.QueryURLTestResponse, _ error) {
@@ -421,27 +420,27 @@ func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.Q
 }
 
 func (s *server) IPTest(
-    ctx context.Context,
-    in *gen.IPTestRequest,
+	ctx context.Context,
+	in *gen.IPTestRequest,
 ) (*gen.IPTestResp, error) {
 	testCtx, releaseTemp := temporaryTests.begin()
 	defer releaseTemp()
-    runtime, err := newTemporaryTestRuntime(
-        in.GetConfig(),
-        in.GetNeedXray(),
-        in.GetXrayConfig(),
-    )
-    if err != nil {
-        return nil, err
-    }
+	runtime, err := newTemporaryTestRuntime(
+		in.GetConfig(),
+		in.GetNeedXray(),
+		in.GetXrayConfig(),
+	)
+	if err != nil {
+		return nil, err
+	}
 
-    testInstance := runtime.box
+	testInstance := runtime.box
 
-    defer func() {
-        if err := runtime.Close(); err != nil {
-            log.Printf("IPTest cleanup failed: %v", err)
-        }
-    }()
+	defer func() {
+		if err := runtime.Close(); err != nil {
+			log.Printf("IPTest cleanup failed: %v", err)
+		}
+	}()
 
 	outboundTags := in.OutboundTags
 	if in.GetUseDefaultOutbound() {
