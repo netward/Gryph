@@ -312,7 +312,6 @@ func (s *server) CheckConfig(ctx context.Context, in *gen.LoadConfigReq) (out *g
 
 func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, error) {
 	var testInstance *boxbox.Box
-	var err error
 	var twice = true
 	testCtx := test_utils.TestContext()
 
@@ -334,24 +333,23 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 		defer release()
 		twice = false
 	} else {
-	    runtime, err := newTemporaryTestRuntime(
-	        in.GetConfig(),
-	        in.GetNeedXray(),
-	        in.GetXrayConfig(),
-	    )
-	    if err != nil {
-	        return nil, err
-	    }
-	
-	    testInstance = runtime.box
-	
-	    defer func() {
-	        if err := runtime.Close(); err != nil {
-	            log.Printf("Test cleanup failed: %v", err)
-	        }
-	    }()
-	}
+		runtime, err := newTemporaryTestRuntime(
+			in.GetConfig(),
+			in.GetNeedXray(),
+			in.GetXrayConfig(),
+		)
+		if err != nil {
+			return nil, err
+		}
 
+		testInstance = runtime.box
+
+		defer func() {
+			if err := runtime.Close(); err != nil {
+				log.Printf("Test cleanup failed: %v", err)
+			}
+		}()
+	}
 
 	outboundTags := in.OutboundTags
 	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
@@ -407,28 +405,27 @@ func (s *server) QueryURLTest(ctx context.Context, in *gen.EmptyReq) (out *gen.Q
 	return
 }
 
-func (s *server) IPTest(ctx context.Context, in *gen.IPTestRequest) (*gen.IPTestResp, error) {
-	var testInstance *boxbox.Box
-	var xrayTestInstance *core.Instance
-	var cancel context.CancelFunc
-	var err error
-	
-	runtime, err := newTemporaryTestRuntime(
-	    in.GetConfig(),
-	    in.GetNeedXray(),
-	    in.GetXrayConfig(),
-	)
-	if err != nil {
-	    return nil, err
-	}
-	
-	testInstance := runtime.box
-	
-	defer func() {
-	    if err := runtime.Close(); err != nil {
-	        log.Printf("IPTest cleanup failed: %v", err)
-	    }
-	}()
+func (s *server) IPTest(
+    ctx context.Context,
+    in *gen.IPTestRequest,
+) (*gen.IPTestResp, error) {
+
+    runtime, err := newTemporaryTestRuntime(
+        in.GetConfig(),
+        in.GetNeedXray(),
+        in.GetXrayConfig(),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    testInstance := runtime.box
+
+    defer func() {
+        if err := runtime.Close(); err != nil {
+            log.Printf("IPTest cleanup failed: %v", err)
+        }
+    }()
 
 	outboundTags := in.OutboundTags
 	if in.GetUseDefaultOutbound() {
@@ -586,7 +583,6 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 	}
 	var testInstance *boxbox.Box
 	outboundTags := in.OutboundTags
-	var err error
 	testCtx := test_utils.TestContext()
 
 	if in.GetTestCurrent() {
@@ -602,26 +598,25 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 				}},
 			}, nil
 		}
-		defer release()	
-		} else {
-		    runtime, err := newTemporaryTestRuntime(
-		        in.GetConfig(),
-		        in.GetNeedXray(),
-		        in.GetXrayConfig(),
-		    )
-		    if err != nil {
-		        return nil, err
-		    }
-		
-		    testInstance = runtime.box
-		
-		    defer func() {
-		        if err := runtime.Close(); err != nil {
-		            log.Printf("SpeedTest cleanup failed: %v", err)
-		        }
-		    }()
+		defer release()
+	} else {
+		runtime, err := newTemporaryTestRuntime(
+			in.GetConfig(),
+			in.GetNeedXray(),
+			in.GetXrayConfig(),
+		)
+		if err != nil {
+			return nil, err
 		}
-		
+
+		testInstance = runtime.box
+
+		defer func() {
+			if err := runtime.Close(); err != nil {
+				log.Printf("SpeedTest cleanup failed: %v", err)
+			}
+		}()
+	}
 
 	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
 		outbound := testInstance.Outbound().Default()
