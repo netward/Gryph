@@ -9,7 +9,7 @@ require (
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/sagernet/sing v0.8.10
 	github.com/sagernet/sing-box v1.13.13-0.20260603083344-78b2e12fbdd8
-	github.com/sagernet/sing-tun v0.8.10
+	github.com/sagernet/sing-tun v0.8.14
 	github.com/spf13/cobra v1.10.2
 	github.com/tailscale/go-winio v0.0.0-20231025203758-c4f33415bf55
 	github.com/xtls/xray-core v1.260327.1-0.20261029083850-0afec66085a8
