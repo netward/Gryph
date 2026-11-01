@@ -10,6 +10,7 @@
 #include <QMutex>
 #include <QObject>
 #include <QThread>
+#include <QDebug>
 
 #include <mutex>
 #include <condition_variable>
@@ -71,13 +72,47 @@ namespace API {
         std::atomic<quint64> connectionEpoch_{ 0 };
 
         static constexpr int kIOTimeoutMs = 30000;
+        static constexpr qsizetype kMaxRPCPayloadBytes = 16 * 1024 * 1024;
+        static constexpr qsizetype kMaxRPCMethodBytes = 128;
+        static constexpr qint64 kRPCReadChunkBytes = 64 * 1024;
 
-        // Called on io_thread via readyRead
-        void onReadyRead() 
+        void failProtocol(const QString& reason)
         {
-            if (sock == nullptr) return;
-            read_buf += sock->readAll();
-            processBuffer();
+            qWarning().noquote() << "[RPC] Protocol violation:" << reason;
+            read_buf.clear();
+            // Invalidate the current connection generationand wake all pending RPC callers.
+            wakeAllWithError();
+
+            if (sock)
+            {
+                sock->abort();
+            }
+        }
+        // Called on io_thread via readyRead
+
+        void onReadyRead()
+        {
+            if (!sock)
+            {
+                return;
+            }
+
+            while (sock->bytesAvailable() > 0)
+            {
+                const QByteArray chunk = sock->read(kRPCReadChunkBytes);
+
+                if (chunk.isEmpty())
+                {
+                    break;
+                }
+
+                read_buf.append(chunk);
+
+                if (!processBuffer())
+                {
+                    return;
+                }
+            }
         }
 
         void wakeAllWithError()
@@ -97,7 +132,7 @@ namespace API {
         }
 
         // io_thread only
-        void processBuffer() 
+        bool processBuffer() 
         {
             // Parse as many complete response frames as possible.
             // Response header: 4 (reqId) + 1 (status) + 4 (dataLen) = 9 bytes
@@ -105,6 +140,22 @@ namespace API {
             {
                 quint32 reqId, dataLen;
                 quint8  status;
+
+                if (dataLen > kMaxRPCPayloadBytes)
+                {
+                    failProtocol(QString("response payload too large: %1 bytes").arg(dataLen)
+                    );
+
+                    return false;
+                }
+
+                if (status > 1)
+                {
+                    failProtocol( QString("invalid response status: %1").arg(status)
+                    );
+
+                    return false;
+                }
 
                 {
                     QDataStream ds(read_buf);
@@ -134,6 +185,7 @@ namespace API {
                     call->cv.notify_one();
                 }
             }
+            return true;
         }
 
     public:
@@ -258,11 +310,20 @@ namespace API {
             }
 
             const int ms = (timeout_ms > 0) ? timeout_ms : kIOTimeoutMs;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
             quint32 reqId = static_cast<quint32>(next_id.fetchAndAddOrdered(1));
 
             // Build request frame
-            auto methodBytes = methodName.toUtf8();
-            auto reqBytes    = QByteArray::fromStdString(req);
+
+            const QByteArray methodBytes = methodName.toUtf8();
+
+            if (methodBytes.isEmpty() ||methodBytes.size() > kMaxRPCMethodBytes || req.size() > static_cast<std::size_t>(kMaxRPCPayloadBytes))
+            {
+                qWarning() << "[RPC] Outgoing request exceeds protocol limits";
+                return 2;
+            }
+
+            const QByteArray reqBytes = QByteArray::fromStdString(req);
 
             QByteArray frame;
             {
@@ -321,46 +382,36 @@ namespace API {
                 return 1;
             }
 
-            // Wait for response
+            // Wait until the original deadline.
             std::unique_lock<std::mutex> lock(call->mu);
-            bool ok = call->cv.wait_for(lock, std::chrono::milliseconds(ms), 
-                [&call] 
-                { 
-                    return call->done; 
+
+            const bool completed = call->cv.wait_until(lock, deadline,
+                [&call]()
+                {
+                    return call->done;
                 }
             );
-            lock.unlock();   // never hold call->mu while taking pending_mu
 
-            if (!ok) 
+            lock.unlock();
+
+            if (!completed)
             {
-                // Timed out — reclaim our slot unless processBuffer took it.
-                bool claimedByReader = false;
-                {
-                    std::lock_guard<std::mutex> plock(pending_mu);
-                    if (pending.remove(reqId) == 0) claimedByReader = true;
-                }
-                if (claimedByReader) 
-                {
-                    // A response is inbound; give it a brief bounded chance.
-                    lock.lock();
-                    ok = call->cv.wait_for(lock, std::chrono::milliseconds(ms),
-                        [&call] 
-                        { 
-                            return call->done; 
-                        }
-                    );
-                    lock.unlock();
-                }
-            }
-
-            std::lock_guard<std::mutex> g(call->mu);
-            if (!ok || call->status != 0) {
-                if (ok && call->status != 0)
-                {
-                    MW_show_log("[Core error] " + QString::fromUtf8(call->data));
-                }
+                // Remove our pending slot if still registered.
+                // If the reader already owns the shared_ptr,
+                // it may finish safely after this caller exits.
+                std::lock_guard<std::mutex> pendingLock(pending_mu);
+                pending.remove(reqId);
                 return 1;
             }
+
+            std::lock_guard<std::mutex> resultLock(call->mu);
+
+            if (call->status != 0)
+            {
+                MW_show_log("[Core error] " + QString::fromUtf8(call->data));
+                return 1;
+            }
+
             rsp.assign(call->data.begin(), call->data.end());
             return 0;
         }

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -76,5 +78,52 @@ func TestDispatchQueryStatsWhileStopped(t *testing.T) {
 			response.GetUps(),
 			response.GetDowns(),
 		)
+	}
+}
+
+func TestIPCRejectsOversizedPayload(t *testing.T) {
+	var buf bytes.Buffer
+
+	_ = binary.Write(
+		&buf, binary.LittleEndian, uint32(1),
+	)
+	_ = binary.Write(
+		&buf, binary.LittleEndian, uint16(4),
+	)
+	_, _ = buf.WriteString("Test")
+	_ = binary.Write(
+		&buf,
+		binary.LittleEndian,
+		maxRPCPayloadBytes+1,
+	)
+
+	_, _, _, err := readIPCRequest(&buf)
+
+	if err == nil {
+		t.Fatal("oversized IPC payload was accepted")
+	}
+}
+
+func TestIPCRejectsTruncatedPayload(t *testing.T) {
+	var buf bytes.Buffer
+
+	_ = binary.Write(
+		&buf, binary.LittleEndian, uint32(2),
+	)
+	_ = binary.Write(
+		&buf, binary.LittleEndian, uint16(4),
+	)
+	_, _ = buf.WriteString("Test")
+	_ = binary.Write(
+		&buf, binary.LittleEndian, uint32(10),
+	)
+
+	// Advertise 10 bytes, but send only 3.
+	_, _ = buf.Write([]byte{1, 2, 3})
+
+	_, _, _, err := readIPCRequest(&buf)
+
+	if err == nil {
+		t.Fatal("truncated IPC payload was accepted")
 	}
 }

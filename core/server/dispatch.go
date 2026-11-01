@@ -15,6 +15,81 @@ import (
 
 var globalServer = &server{}
 
+const (
+	maxRPCPayloadBytes uint32 = 16 << 20
+	maxRPCMethodBytes  uint16 = 128
+)
+
+// readIPCRequest validates lengths before allocating memory.
+func readIPCRequest(r io.Reader) (
+	uint32, string, []byte, error,
+) {
+	var requestID uint32
+	if err := binary.Read(
+		r, binary.LittleEndian, &requestID,
+	); err != nil {
+		return 0, "", nil, err
+	}
+
+	var methodLen uint16
+	if err := binary.Read(
+		r, binary.LittleEndian, &methodLen,
+	); err != nil {
+		return 0, "", nil, err
+	}
+
+	if methodLen == 0 || methodLen > maxRPCMethodBytes {
+		return 0, "", nil, fmt.Errorf(
+			"invalid IPC method length: %d", methodLen,
+		)
+	}
+
+	methodBytes := make([]byte, int(methodLen))
+	if _, err := io.ReadFull(r, methodBytes); err != nil {
+		return 0, "", nil, err
+	}
+
+	var payloadLen uint32
+	if err := binary.Read(
+		r, binary.LittleEndian, &payloadLen,
+	); err != nil {
+		return 0, "", nil, err
+	}
+
+	if payloadLen > maxRPCPayloadBytes {
+		return 0, "", nil, fmt.Errorf(
+			"IPC payload too large: %d bytes", payloadLen,
+		)
+	}
+
+	payload := make([]byte, int(payloadLen))
+	if _, err := io.ReadFull(r, payload); err != nil {
+		return 0, "", nil, err
+	}
+
+	return requestID, string(methodBytes), payload, nil
+}
+
+func writeIPCAll(w io.Writer, data []byte) error {
+	for len(data) > 0 {
+		n, err := w.Write(data)
+
+		if n > 0 {
+			data = data[n:]
+		}
+
+		if err != nil {
+			return err
+		}
+
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+
+	return nil
+}
+
 // runDispatch reads request frames and dispatches each one to its own goroutine.
 // Responses are written back with the matching reqId so the GUI can demultiplex.
 //
@@ -33,62 +108,56 @@ func runDispatch(conn net.Conn) {
 
 	var writeMu sync.Mutex
 
-	writeResponse := func(reqId uint32, status uint8, data []byte) {
+	writeResponse := func(reqID uint32, status uint8, data []byte) {
+		if len(data) > int(maxRPCPayloadBytes) {
+			status = 1
+			data = []byte("RPC response exceeds payload limit")
+		}
+
 		var header [9]byte
-		binary.LittleEndian.PutUint32(header[0:], reqId)
+		binary.LittleEndian.PutUint32(header[0:], reqID)
 		header[4] = status
-		binary.LittleEndian.PutUint32(header[5:], uint32(len(data)))
+		binary.LittleEndian.PutUint32(
+			header[5:], uint32(len(data)),
+		)
 
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		if _, err := conn.Write(header[:]); err != nil {
+
+		if err := writeIPCAll(conn, header[:]); err != nil {
+			log.Printf("[IPC] response header write failed: %v", err)
+			_ = conn.Close()
 			return
 		}
-		if len(data) > 0 {
-			conn.Write(data) //nolint:errcheck — connection error caught on next read
+
+		if err := writeIPCAll(conn, data); err != nil {
+			log.Printf("[IPC] response body write failed: %v", err)
+			_ = conn.Close()
 		}
 	}
 
 	for {
-		// Read reqId (uint32 LE)
-		var reqId uint32
-		if err := binary.Read(conn, binary.LittleEndian, &reqId); err != nil {
+		requestID, method, payload, err := readIPCRequest(conn)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("[IPC] request read failed: %v", err)
+			}
 			return
 		}
 
-		// Read method name length (uint16 LE)
-		var methodLen uint16
-		if err := binary.Read(conn, binary.LittleEndian, &methodLen); err != nil {
-			return
-		}
-
-		// Read method name
-		methodBytes := make([]byte, methodLen)
-		if _, err := io.ReadFull(conn, methodBytes); err != nil {
-			return
-		}
-
-		// Read payload length (uint32 LE)
-		var payloadLen uint32
-		if err := binary.Read(conn, binary.LittleEndian, &payloadLen); err != nil {
-			return
-		}
-
-		// Read payload
-		payload := make([]byte, payloadLen)
-		if _, err := io.ReadFull(conn, payload); err != nil {
-			return
-		}
-
-		// Dispatch concurrently so long-running calls don't block the reader.
+		// Existing concurrent dispatch behavior.
+		// This is intentionally unchanged in PR-4.9A.
 		go func(id uint32, method string, pl []byte) {
 			respData, dispatchErr := dispatch(method, pl)
+
 			if dispatchErr != nil {
-				writeResponse(id, 1, []byte(dispatchErr.Error()))
+				writeResponse(
+					id, 1, []byte(dispatchErr.Error()),
+				)
 			} else {
 				writeResponse(id, 0, respData)
 			}
-		}(reqId, string(methodBytes), payload)
+		}(requestID, method, payload)
 	}
 }
 
