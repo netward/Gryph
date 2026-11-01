@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,16 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 			w http.ResponseWriter,
 			r *http.Request,
 		) {
+			// Capture the time at which the HTTP
+			// handler receives the request.
+			w.Header().Set(
+				"X-Handler-Time",
+				strconv.FormatInt(
+					time.Now().UnixNano(),
+					10,
+				),
+			)
+
 			w.Header().Set("Content-Length", "2")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("OK"))
@@ -24,33 +35,32 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 	)
 	defer srv.Close()
 
-	cases := []struct {
+	for _, tc := range []struct {
 		name  string
 		reuse bool
 	}{
 		{"Fresh", false},
 		{"KeepAlive", true},
-	}
-
-	for _, tc := range cases {
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var sharedTransport *http.Transport
+			var shared *http.Transport
 
 			if tc.reuse {
-				sharedTransport = &http.Transport{}
-				defer sharedTransport.CloseIdleConnections()
+				shared = &http.Transport{}
+				defer shared.CloseIdleConnections()
 			}
 
 			for i := 0; i < 8; i++ {
-				transport := sharedTransport
-				if !tc.reuse {
+				transport := shared
+				if transport == nil {
 					transport = &http.Transport{}
 				}
 
 				var mu sync.Mutex
 				var connectStart time.Time
 				var connectDone time.Time
-				var firstByte time.Time
+				var wroteAt time.Time
+				var firstByteAt time.Time
 				var reused bool
 
 				trace := &httptrace.ClientTrace{
@@ -77,9 +87,17 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 						mu.Unlock()
 					},
 
+					WroteRequest: func(
+						info httptrace.WroteRequestInfo,
+					) {
+						mu.Lock()
+						wroteAt = time.Now()
+						mu.Unlock()
+					},
+
 					GotFirstResponseByte: func() {
 						mu.Lock()
-						firstByte = time.Now()
+						firstByteAt = time.Now()
 						mu.Unlock()
 					},
 				}
@@ -111,60 +129,67 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				responseReceived := time.Now()
-
 				_, readErr := io.Copy(
 					io.Discard,
 					resp.Body,
 				)
 				closeErr := resp.Body.Close()
 
-				if readErr != nil {
-					t.Fatal(readErr)
-				}
-				if closeErr != nil {
-					t.Fatal(closeErr)
+				if readErr != nil || closeErr != nil {
+					t.Fatalf(
+						"read=%v close=%v",
+						readErr, closeErr,
+					)
 				}
 
-				bodyDone := time.Now()
+				finished := time.Now()
+
+				raw := resp.Header.Get("X-Handler-Time")
+				serverNano, err := strconv.ParseInt(
+					raw, 10, 64,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				serverAt := time.Unix(0, serverNano)
+
+				mu.Lock()
+				dialStart := connectStart
+				dialEnd := connectDone
+				wrote := wroteAt
+				first := firstByteAt
+				wasReused := reused
+				mu.Unlock()
+
+				if wrote.IsZero() || first.IsZero() {
+					t.Fatal("missing HTTP trace event")
+				}
+
+				var dial time.Duration
+				if !dialStart.IsZero() &&
+					!dialEnd.IsZero() {
+					dial = dialEnd.Sub(dialStart)
+				}
+
+				t.Logf(
+					"%s #%d reused=%t "+
+						"tcp=%v send=%v "+
+						"writeToHandler=%v "+
+						"handlerToFirstByte=%v "+
+						"total=%v",
+					tc.name,
+					i+1,
+					wasReused,
+					dial,
+					wrote.Sub(start),
+					serverAt.Sub(wrote),
+					first.Sub(serverAt),
+					finished.Sub(start),
+				)
 
 				if !tc.reuse {
 					transport.CloseIdleConnections()
 				}
-
-				cleanupDone := time.Now()
-
-				mu.Lock()
-
-				var dialDuration time.Duration
-				if !connectStart.IsZero() &&
-					!connectDone.IsZero() {
-					dialDuration = connectDone.Sub(
-						connectStart,
-					)
-				}
-
-				var firstByteDuration time.Duration
-				if !firstByte.IsZero() {
-					firstByteDuration = firstByte.Sub(start)
-				}
-
-				wasReused := reused
-				mu.Unlock()
-
-				t.Logf(
-					"request=%d reused=%t "+
-						"dial=%v firstByte=%v "+
-						"headers=%v body=%v cleanup=%v total=%v",
-					i+1,
-					wasReused,
-					dialDuration,
-					firstByteDuration,
-					responseReceived.Sub(start),
-					bodyDone.Sub(responseReceived),
-					cleanupDone.Sub(bodyDone),
-					cleanupDone.Sub(start),
-				)
 			}
 		})
 	}
