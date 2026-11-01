@@ -79,6 +79,10 @@ func BatchIPTestWithEndpoint(
 		endpoint = ipInfoAPI
 	}
 
+	if timeout <= 0 {
+		timeout = IPTestTimeout
+	}
+
 	if maxConcurrency <= 0 || maxConcurrency >= 500 {
 		maxConcurrency = MaxConcurrentTests
 	}
