@@ -191,6 +191,11 @@ namespace Stats {
         while (!stopRequested_.load(std::memory_order_acquire))
         {
             QThread::msleep(1000);
+            
+            if (stopRequested_.load(std::memory_order_acquire))
+            {
+                break;
+            }
 
             if (!loop_enabled.load(std::memory_order_acquire))
             {
