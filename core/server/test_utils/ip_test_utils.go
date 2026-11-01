@@ -57,8 +57,26 @@ func BatchIPTest(
 	maxConcurrency int,
 	timeout time.Duration,
 ) []*IPTestResult {
-	if timeout <= 0 {
-		timeout = IPTestTimeout
+	return BatchIPTestWithEndpoint(
+		ctx,
+		i,
+		outboundTags,
+		maxConcurrency,
+		timeout,
+		"",
+	)
+}
+
+func BatchIPTestWithEndpoint(
+	ctx context.Context,
+	i *boxbox.Box,
+	outboundTags []string,
+	maxConcurrency int,
+	timeout time.Duration,
+	endpoint string,
+) []*IPTestResult {
+	if endpoint == "" {
+		endpoint = ipInfoAPI
 	}
 
 	if maxConcurrency <= 0 || maxConcurrency >= 500 {
@@ -126,7 +144,7 @@ func BatchIPTest(
 			}
 
 			result.Result, result.Error = ipTest(
-				ctx, client,
+				ctx, client, endpoint,
 			)
 
 			if err := ctx.Err(); err != nil {
@@ -141,24 +159,34 @@ func BatchIPTest(
 	return results
 }
 
-func ipTest(ctx context.Context, client *http.Client) (IPInfo, error) {
+func ipTest(
+	ctx context.Context,
+	client *http.Client,
+	endpoint string,
+) (IPInfo, error) {
 	var res IPInfo
-	req, err := http.NewRequestWithContext(ctx, "GET", ipInfoAPI, nil)
+
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodGet, endpoint, nil,
+	)
 	if err != nil {
 		return res, err
 	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return res, err
 	}
 	defer resp.Body.Close()
+
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return res, err
 	}
-	err = json.Unmarshal(data, &res)
-	if err != nil {
+
+	if err := json.Unmarshal(data, &res); err != nil {
 		return res, err
 	}
+
 	return res, nil
 }

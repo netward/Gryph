@@ -42,6 +42,10 @@ var coreLifecycleMu sync.RWMutex
 
 type server struct {
 	gen.UnimplementedLibcoreServiceServer
+
+	// Optional endpoint override for local integration tests.
+	// Empty means the production IP information service.
+	ipTestEndpoint string
 }
 
 // To returns a pointer to the given value.
@@ -463,7 +467,14 @@ func (s *server) IPTest(
 		maxConcurrency = test_utils.MaxConcurrentTests
 	}
 	timeout := time.Duration(in.GetTestTimeoutMs()) * time.Millisecond
-	results := test_utils.BatchIPTest(testCtx, testInstance, outboundTags, int(maxConcurrency), timeout)
+	results := test_utils.BatchIPTestWithEndpoint(
+		testCtx,
+		testInstance,
+		outboundTags,
+		int(maxConcurrency),
+		timeout,
+		s.ipTestEndpoint,
+	)
 
 	res := make([]*gen.IPTestRes, 0, len(results))
 	for idx, data := range results {
