@@ -54,3 +54,19 @@ func BenchmarkPR4WindowsInterfaceAddresses(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkPR4WindowsAllInterfaceAddresses(b *testing.B) {
+	if runtime.GOOS != "windows" {
+		b.Skip("Windows only")
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := net.InterfaceAddrs()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
