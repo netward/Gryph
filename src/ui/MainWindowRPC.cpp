@@ -33,78 +33,45 @@ namespace
     class AtomicFlagResetGuard final
     {
     public:
-        explicit AtomicFlagResetGuard(
-            std::atomic_bool& flag)
-            :
-            flag_(flag)
+        explicit AtomicFlagResetGuard(std::atomic_bool& flag):flag_(flag)
         {}
-
 
         ~AtomicFlagResetGuard()
         {
-            flag_.store(
-                false,
-                std::memory_order_release
-            );
+            flag_.store(false, std::memory_order_release);
         }
 
-
-        AtomicFlagResetGuard(
-            const AtomicFlagResetGuard&) = delete;
-
-        AtomicFlagResetGuard&
-            operator=(
-                const AtomicFlagResetGuard&) = delete;
-
+        AtomicFlagResetGuard(const AtomicFlagResetGuard&) = delete;
+        AtomicFlagResetGuard&operator=(const AtomicFlagResetGuard&) = delete;
 
     private:
         std::atomic_bool& flag_;
     };
 
-
     [[nodiscard]]
-    QString profileDisplayTypeAndName(
-        const std::shared_ptr<Configs::Profile>& profile)
+    QString profileDisplayTypeAndName(const std::shared_ptr<Configs::Profile>& profile)
     {
         if (!profile)
         {
             return {};
         }
-
-        const auto config =
-            profile->ConfigSnapshot();
-
-        return QStringLiteral("[%1] %2")
-            .arg(
-                config.displayType,
-                config.displayName
-            );
+        const auto config = profile->ConfigSnapshot();
+        return QStringLiteral("[%1] %2").arg(config.displayType, config.displayName);
     }
-
 
     class SemaphoreReleaseGuard final
     {
     public:
-        explicit SemaphoreReleaseGuard(
-            QSemaphore& semaphore)
-            :
-            semaphore_(semaphore)
+        explicit SemaphoreReleaseGuard(QSemaphore& semaphore):semaphore_(semaphore)
         {}
-
 
         ~SemaphoreReleaseGuard()
         {
             semaphore_.release();
         }
-
-
-        SemaphoreReleaseGuard(
-            const SemaphoreReleaseGuard&) = delete;
-
-        SemaphoreReleaseGuard&
-            operator=(
-                const SemaphoreReleaseGuard&) = delete;
-
+        
+        SemaphoreReleaseGuard(const SemaphoreReleaseGuard&) = delete;
+        SemaphoreReleaseGuard&operator=(const SemaphoreReleaseGuard&) = delete;
 
     private:
         QSemaphore& semaphore_;
@@ -112,9 +79,7 @@ namespace
 }
 
 void MainWindow::setup_rpc(QLocalSocket* socket) {
-    // The Client is long-lived and never recreated; on core restart we only
-    // swap the underlying connection so worker threads holding `defaultClient`
-    // never touch freed memory.
+    // The Client is long-lived and never recreated; on core restart we only swap the underlying connection so worker threads holding `defaultClient` never touch freed memory.
     QMutexLocker lock(&defaultClientMutex);
     if (defaultClient == nullptr) {
         defaultClient = new Client();
@@ -126,7 +91,6 @@ void MainWindow::setup_rpc(QLocalSocket* socket) {
     {
         rpc_started = true;
 
-
         Async::runDedicated(
             []
             {
@@ -134,7 +98,6 @@ void MainWindow::setup_rpc(QLocalSocket* socket) {
             },
             "TrafficLooper"
         );
-
 
         Async::runDedicated(
             []
@@ -588,24 +551,34 @@ void MainWindow::urltest_current_group(
                             profileSlice
                         );
 
-                    if (!buildObject ||
-                        !buildObject
-                        ->error
-                        .isEmpty())
+                    if (!buildObject || !buildObject->error.isEmpty())
                     {
                         if (buildObject) {
-
                             MW_show_log(
-                                tr(
-                                    "Failed to build "
-                                    "test config for batch: "
-                                )
-                                +
-                                buildObject->error
+                                tr("Failed to build test config for batch: ")
+                                + buildObject->error
                             );
                         }
                         return;
                     }
+
+                    // PR-4-S5D: Temporary runtime diagnostics
+                    const int standaloneCount = buildObject->fullConfigs.size();
+                    const int sharedCount = buildObject->outboundTags.size();
+                    const int runtimeCount = standaloneCount + (sharedCount > 0 ? 1 : 0);
+
+                    MW_show_log(
+                        QString(
+                            "[PR-4.5D] Profiles: %1 | "
+                            "Standalone: %2 | "
+                            "Shared outbounds: %3 | "
+                            "Temporary runtimes: %4"
+                        )
+                        .arg(ids.size())
+                        .arg(standaloneCount)
+                        .arg(sharedCount)
+                        .arg(runtimeCount)
+                    );
 
                     // ---------------------------------
                     // Completion semaphore for THIS

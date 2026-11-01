@@ -50,6 +50,14 @@
           "checksum": "YkRQlz1U8GaOMkC1rLKRECUU2JM="
         }
       }
+    },
+    {
+      "name": "Qt-RelWithDebInfo",
+      "inherits": "Qt-Default",
+      "binaryDir": "${sourceDir}/out/build/relwithdebinfo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
     }
   ],
   "vendor": {

@@ -3042,22 +3042,39 @@ namespace Configs {
             }
         );
 
-        const auto resp =
-            API::defaultClient
-            ->CheckConfig(
+        if (!API::defaultClient || !Configs::dataManager->settingsRepo->core_running)
+        {
+            MW_show_log("Cannot validate profile: GryphCore is not connected");
+            return false;
+        }
+        auto* client = API::defaultClient;
+
+        if (client == nullptr)
+        {
+            MW_show_log(
+                "[RPC] Cannot validate profile: "
+                "GryphCore RPC client is not initialized"
+            );
+
+            return false;
+        }
+
+        if (API::defaultClient == nullptr)
+        {
+            MW_show_log(
+                "[RPC] Cannot validate configuration: "
+                "RPC client is not initialized"
+            );
+            return false;
+        }
+        const auto resp = client->CheckConfig(
                 &ok,
-                QJsonObject2QString(
-                    conf,
-                    true
-                )
+                QJsonObject2QString(conf, true)
             );
 
         if (!ok)
         {
-            MW_show_log(
-                "Failed to Call the Core: "
-                + resp
-            );
+            MW_show_log("Failed to Call the Core: " + resp);
             return false;
         }
 
@@ -3066,13 +3083,7 @@ namespace Configs {
             return true;
         }
 
-        MW_show_log(
-            "Invalid ent "
-            + ent->Name()
-            + ": "
-            + resp
-        );
-
+        MW_show_log("Invalid ent " + ent->Name() + ": " + resp);
         return false;
     }
 
