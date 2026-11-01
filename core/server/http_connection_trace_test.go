@@ -3,36 +3,71 @@ package main
 import (
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
 
+type pr4ConnTimes struct {
+	accepted time.Time
+	active   time.Time
+	handler  time.Time
+}
+
 func TestPR4HTTPConnectionTrace(t *testing.T) {
-	srv := httptest.NewServer(
+	var mu sync.Mutex
+	records := make(map[string]*pr4ConnTimes)
+
+	getRecord := func(key string) *pr4ConnTimes {
+		r := records[key]
+		if r == nil {
+			r = &pr4ConnTimes{}
+			records[key] = r
+		}
+		return r
+	}
+
+	srv := httptest.NewUnstartedServer(
 		http.HandlerFunc(func(
 			w http.ResponseWriter,
 			r *http.Request,
 		) {
-			// Capture the time at which the HTTP
-			// handler receives the request.
-			w.Header().Set(
-				"X-Handler-Time",
-				strconv.FormatInt(
-					time.Now().UnixNano(),
-					10,
-				),
-			)
+			mu.Lock()
+			getRecord(r.RemoteAddr).handler = time.Now()
+			mu.Unlock()
 
 			w.Header().Set("Content-Length", "2")
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("OK"))
 		}),
 	)
+
+	srv.Config.ConnState = func(
+		conn net.Conn,
+		state http.ConnState,
+	) {
+		now := time.Now()
+		key := conn.RemoteAddr().String()
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		record := getRecord(key)
+
+		switch state {
+		case http.StateNew:
+			record.accepted = now
+
+		case http.StateActive:
+			record.active = now
+		}
+	}
+
+	srv.Start()
 	defer srv.Close()
 
 	for _, tc := range []struct {
@@ -43,62 +78,37 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 		{"KeepAlive", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var shared *http.Transport
+			var transport *http.Transport
 
 			if tc.reuse {
-				shared = &http.Transport{}
-				defer shared.CloseIdleConnections()
+				transport = &http.Transport{}
+				defer transport.CloseIdleConnections()
 			}
 
 			for i := 0; i < 8; i++ {
-				transport := shared
-				if transport == nil {
+				if !tc.reuse {
 					transport = &http.Transport{}
 				}
 
-				var mu sync.Mutex
-				var connectStart time.Time
-				var connectDone time.Time
+				var traceMu sync.Mutex
 				var wroteAt time.Time
-				var firstByteAt time.Time
+				var localAddr string
 				var reused bool
 
 				trace := &httptrace.ClientTrace{
-					ConnectStart: func(_, _ string) {
-						mu.Lock()
-						connectStart = time.Now()
-						mu.Unlock()
-					},
-
-					ConnectDone: func(
-						_, _ string,
-						_ error,
-					) {
-						mu.Lock()
-						connectDone = time.Now()
-						mu.Unlock()
-					},
-
-					GotConn: func(
-						info httptrace.GotConnInfo,
-					) {
-						mu.Lock()
+					GotConn: func(info httptrace.GotConnInfo) {
+						traceMu.Lock()
+						localAddr = info.Conn.LocalAddr().String()
 						reused = info.Reused
-						mu.Unlock()
+						traceMu.Unlock()
 					},
 
 					WroteRequest: func(
 						info httptrace.WroteRequestInfo,
 					) {
-						mu.Lock()
+						traceMu.Lock()
 						wroteAt = time.Now()
-						mu.Unlock()
-					},
-
-					GotFirstResponseByte: func() {
-						mu.Lock()
-						firstByteAt = time.Now()
-						mu.Unlock()
+						traceMu.Unlock()
 					},
 				}
 
@@ -129,11 +139,9 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				_, readErr := io.Copy(
-					io.Discard,
-					resp.Body,
-				)
+				_, readErr := io.Copy(io.Discard, resp.Body)
 				closeErr := resp.Body.Close()
+				finished := time.Now()
 
 				if readErr != nil || closeErr != nil {
 					t.Fatalf(
@@ -142,48 +150,55 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 					)
 				}
 
-				finished := time.Now()
-
-				raw := resp.Header.Get("X-Handler-Time")
-				serverNano, err := strconv.ParseInt(
-					raw, 10, 64,
-				)
-				if err != nil {
-					t.Fatal(err)
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("status=%d", resp.StatusCode)
 				}
-				serverAt := time.Unix(0, serverNano)
+
+				traceMu.Lock()
+				addr := localAddr
+				wrote := wroteAt
+				wasReused := reused
+				traceMu.Unlock()
 
 				mu.Lock()
-				dialStart := connectStart
-				dialEnd := connectDone
-				wrote := wroteAt
-				first := firstByteAt
-				wasReused := reused
+				record, ok := records[addr]
+				var times pr4ConnTimes
+				if ok {
+					times = *record
+				}
 				mu.Unlock()
 
-				if wrote.IsZero() || first.IsZero() {
-					t.Fatal("missing HTTP trace event")
+				if !ok ||
+					wrote.IsZero() ||
+					times.active.IsZero() ||
+					times.handler.IsZero() {
+					t.Fatalf(
+						"missing trace events for %q",
+						addr,
+					)
 				}
 
-				var dial time.Duration
-				if !dialStart.IsZero() &&
-					!dialEnd.IsZero() {
-					dial = dialEnd.Sub(dialStart)
+				var acceptToActive time.Duration
+				if !wasReused && !times.accepted.IsZero() {
+					acceptToActive = times.active.Sub(
+						times.accepted,
+					)
 				}
 
 				t.Logf(
 					"%s #%d reused=%t "+
-						"tcp=%v send=%v "+
-						"writeToHandler=%v "+
-						"handlerToFirstByte=%v "+
+						"acceptAt=%v "+
+						"acceptToActive=%v "+
+						"writeToActive=%v "+
+						"activeToHandler=%v "+
 						"total=%v",
 					tc.name,
 					i+1,
 					wasReused,
-					dial,
-					wrote.Sub(start),
-					serverAt.Sub(wrote),
-					first.Sub(serverAt),
+					times.accepted.Sub(start),
+					acceptToActive,
+					times.active.Sub(wrote),
+					times.handler.Sub(times.active),
 					finished.Sub(start),
 				)
 
@@ -194,3 +209,4 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 		})
 	}
 }
+
