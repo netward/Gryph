@@ -1,4 +1,5 @@
 #include <QThread>
+
 #include <core/server/gen/libcore.pb.h>
 #include <include/api/RPC.h>
 #include "include/ui/MainWindowAPI.h"
@@ -22,26 +23,30 @@ namespace Stats
         mu.unlock();
     }
 
-
     void ConnectionLister::Loop()
     {
-        while (true)
+        while (!stop.load(std::memory_order_acquire))
         {
-            if (stop) return;
             QThread::msleep(1000);
 
-            if (suspend || !Configs::dataManager->settingsRepo->enable_stats) continue;
+            if (stop.load(std::memory_order_acquire))
+            {
+                break;
+            }
 
-            mu.lock();
+            if (suspend.load(std::memory_order_acquire) || !Configs::dataManager->settingsRepo->enable_stats)
+            {
+                continue;
+            }
+
+            QMutexLocker locker(&mu);
             update();
-            mu.unlock();
         }
     }
 
     void ConnectionLister::update()
     {
         libcore::ListConnectionsResp resp = API::defaultClient->ListConnections();
-
         QMap<QString, ConnectionMetadata> toUpdate;
         QMap<QString, ConnectionMetadata> toAdd;
         QSet<QString> newState;
@@ -60,6 +65,7 @@ namespace Stats
             c.outbound = QString(conn.outbound.value().c_str());
             c.process = QString(conn.process.value().c_str());
             c.protocol = QString(conn.protocol.value().c_str());
+
             if (sort == Default)
             {
                 if (state->contains(c.id))
@@ -137,7 +143,7 @@ namespace Stats
 
     void ConnectionLister::stopLoop()
     {
-        stop = true;
+        stop.store(true, std::memory_order_release);
     }
 
     void ConnectionLister::setSort(const ConnectionSort newSort)
@@ -177,5 +183,4 @@ namespace Stats
             asc = false;
         }
     }
-
 }

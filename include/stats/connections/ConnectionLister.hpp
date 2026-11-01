@@ -1,4 +1,7 @@
 #pragma once
+
+#include <atomic>
+
 #include <QMutex>
 #include <QString>
 
@@ -36,28 +39,18 @@ namespace Stats
     {
     public:
         ConnectionLister();
-
-        bool suspend = true;
-
+        std::atomic_bool suspend{ true };
         void Loop();
-
         void ForceUpdate();
-
         void stopLoop();
-
         void setSort(ConnectionSort newSort);
 
     private:
         void update();
-
         QMutex mu;
-
-        bool stop = false;
-
+        std::atomic_bool stop{ false };
         std::shared_ptr<QSet<QString>> state;
-
         ConnectionSort sort = Default;
-
         bool asc = false;
     };
 
