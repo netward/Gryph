@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <string_view>
+#include <atomic>
 
 namespace {
     // Single binary search over the sorted ruleSetList — replaces the
@@ -3042,31 +3043,22 @@ namespace Configs {
             }
         );
 
-        if (!API::defaultClient || !Configs::dataManager->settingsRepo->core_running)
-        {
-            MW_show_log("Cannot validate profile: GryphCore is not connected");
-            return false;
-        }
-        auto* client = API::defaultClient;
+        auto* const client = API::defaultClient;
 
-        if (client == nullptr)
+        const bool coreRunning =
+            Configs::dataManager->settingsRepo->core_running.load(
+                std::memory_order_acquire
+            );
+
+        if (client == nullptr || !coreRunning)
         {
             MW_show_log(
                 "[RPC] Cannot validate profile: "
-                "GryphCore RPC client is not initialized"
-            );
-
-            return false;
-        }
-
-        if (API::defaultClient == nullptr)
-        {
-            MW_show_log(
-                "[RPC] Cannot validate configuration: "
-                "RPC client is not initialized"
+                "GryphCore is not connected"
             );
             return false;
         }
+
         const auto resp = client->CheckConfig(
                 &ok,
                 QJsonObject2QString(conf, true)

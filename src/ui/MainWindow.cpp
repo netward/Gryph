@@ -378,7 +378,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         }
         // Создание RPC-канала поверх сокета после проверки клиента.
         setup_rpc(socket);
-        Configs::dataManager->settingsRepo->core_running = true;
+        Configs::dataManager->settingsRepo->core_running.store(
+            true,
+            std::memory_order_release
+        );
         // Уведомление главного окна о готовности ядра.
         // Обработчик CoreStarted восстановит нужные режимы и при необходимости запустит profileId.
         MW_dialog_message(MwMessage::CoreStarted, { Int2String(profileId) });

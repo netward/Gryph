@@ -59,7 +59,7 @@ namespace Configs {
         // Running (not saved to DB, runtime state only)
         QString core_socket_name = "";
         int started_id = -1919;
-        bool core_running = false;
+        std::atomic_bool core_running{ false };
         bool prepare_exit = false;
         bool spmode_vpn = false;
         bool spmode_system_proxy = false;

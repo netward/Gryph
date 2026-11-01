@@ -5,7 +5,7 @@
 #include <QDir>
 #include <QApplication>
 
-
+#include <atomic>
 
 #include "include/ui/MainWindowAPI.h"
 
@@ -42,36 +42,45 @@ namespace Configs_sys {
                 MW_show_log("start core error occurred: " + errorString() + "\n");
             }
         });
-        connect(this, &QProcess::stateChanged, this, [&](ProcessState state) {
-            if (state == NotRunning) {
-                Configs::dataManager->settingsRepo->core_running = false;
-                qDebug() << "Core stated changed to not running";
-            }
 
-            if (!Configs::dataManager->settingsRepo->prepare_exit && state == NotRunning) {
-                if (failed_to_start) return; // no retry
-                if (restarting) return;
+        connect(this, &QProcess::stateChanged, this,
+            [this](QProcess::ProcessState state)
+            {
+                if (state == QProcess::NotRunning)
+                {
+                    Configs::dataManager->settingsRepo->core_running.store(
+                        false,
+                        std::memory_order_release
+                    );
 
-                MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
-
-                MainWindowApi::StopProfile(true, true);
-
-                // Retry rate limit
-                if (coreRestartTimer.isValid()) {
-                    if (coreRestartTimer.restart() < 10 * 1000) {
-                        coreRestartTimer = QElapsedTimer();
-                        MW_show_log("[ERROR] " + QObject::tr("Core exits too frequently, stop automatic restart this profile."));
-                        return;
-                    }
-                } else {
-                    coreRestartTimer.start();
+                    qDebug()
+                        << "Core state changed to not running";
                 }
 
-                // Restart
-                start_profile_when_core_is_up = Configs::dataManager->settingsRepo->started_id;
-                MW_show_log("[Warn] " + QObject::tr("Restarting the core ..."));
-                setTimeout([=,this] { Restart(); }, this, 200);
-            }
+                if (!Configs::dataManager->settingsRepo->prepare_exit && state == NotRunning) {
+                    if (failed_to_start) return; // no retry
+                    if (restarting) return;
+
+                    MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
+
+                    MainWindowApi::StopProfile(true, true);
+
+                    // Retry rate limit
+                    if (coreRestartTimer.isValid()) {
+                        if (coreRestartTimer.restart() < 10 * 1000) {
+                            coreRestartTimer = QElapsedTimer();
+                            MW_show_log("[ERROR] " + QObject::tr("Core exits too frequently, stop automatic restart this profile."));
+                            return;
+                        }
+                    } else {
+                        coreRestartTimer.start();
+                    }
+
+                    // Restart
+                    start_profile_when_core_is_up = Configs::dataManager->settingsRepo->started_id;
+                    MW_show_log("[Warn] " + QObject::tr("Restarting the core ..."));
+                    setTimeout([=,this] { Restart(); }, this, 200);
+                }
         });
     }
 

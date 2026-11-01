@@ -486,12 +486,7 @@ private:
         core_server =
         nullptr;
     
-    bool rpc_started =
-        false;
-    
-    QMutex defaultClientMutex;
-
-
+    bool rpc_started = false;
     qint64 vpn_pid =
         0;
 

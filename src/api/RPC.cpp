@@ -66,6 +66,8 @@ namespace API {
         QAtomicInt    next_id{1};         // monotonic across reconnects
         std::mutex    pending_mu;
         QMap<quint32, std::shared_ptr<PendingCall>> pending;
+        std::atomic_bool connected_{ false };
+        std::atomic<quint64> connectionEpoch_{ 0 };
 
         static constexpr int kIOTimeoutMs = 30000;
 
@@ -76,9 +78,22 @@ namespace API {
             processBuffer();
         }
 
-        void wakeAllWithError() {
+        void wakeAllWithError()
+        {
             std::lock_guard<std::mutex> lock(pending_mu);
-            for (auto &call : pending) {
+
+            connected_.store(
+                false,
+                std::memory_order_release
+            );
+
+            connectionEpoch_.fetch_add(
+                1,
+                std::memory_order_acq_rel
+            );
+
+            for (auto& call : pending)
+            {
                 std::lock_guard<std::mutex> cg(call->mu);
                 call->done = true;
                 call->cv.notify_one();
@@ -149,39 +164,88 @@ namespace API {
             delete io_thread;
         }
 
-        // Replace the underlying connection. Must be called on the thread that
-        // currently owns `newSock` (the UI thread, same as before).
-        void Reconnect(QLocalSocket *newSock) {
-            // Fail every in-flight call so blocked Call()s return an error.
+        // Replace the underlying connection. Must be called on the thread that currently owns `newSock` (the UI thread, same as before).
+
+        void Reconnect(QLocalSocket* newSock)
+        {
+            Q_ASSERT(newSock != nullptr);
+            Q_ASSERT(QThread::currentThread() != io_thread);
+
+            // Invalidate requests belonging to the old connection.
             wakeAllWithError();
 
-            // Hand the socket over to the io_thread.
+            // Called from the socket's owning UI thread.
             newSock->setParent(nullptr);
             newSock->moveToThread(io_thread);
 
-            // Swap on the io_thread. This is queued before any later write
-            // dispatch (FIFO), so a write that arrives after Reconnect always
-            // targets the new socket.
-            QMetaObject::invokeMethod(io_anchor, [this, newSock]() {
-                if (sock) {
-                    sock->disconnect(io_anchor);   // drop old readyRead/disconnected
-                    sock->close();
-                    sock->deleteLater();
-                }
-                sock = newSock;
-                read_buf.clear();
-                QObject::connect(sock, &QLocalSocket::readyRead, io_anchor,
-                    [this]() { onReadyRead(); });
-                QObject::connect(sock, &QLocalSocket::disconnected, io_anchor,
-                    [this]() { wakeAllWithError(); });
-                if (sock->bytesAvailable() > 0) onReadyRead();
-            }, Qt::QueuedConnection);
+            // Wait until the IO thread has adopted the socket.
+            // Do not announce CoreStarted before this completes.
+            const bool invoked = QMetaObject::invokeMethod(
+                io_anchor,
+                [this, newSock]()
+                {
+                    if (sock)
+                    {
+                        sock->disconnect(io_anchor);
+                        sock->close();
+                        sock->deleteLater();
+                    }
+
+                    sock = newSock;
+                    read_buf.clear();
+
+                    QObject::connect(
+                        sock,
+                        &QLocalSocket::readyRead,
+                        io_anchor,
+                        [this]()
+                        {
+                            onReadyRead();
+                        }
+                    );
+
+                    QObject::connect(
+                        sock,
+                        &QLocalSocket::disconnected,
+                        io_anchor,
+                        [this]()
+                        {
+                            wakeAllWithError();
+                        }
+                    );
+
+                    connected_.store(
+                        sock->state() == QLocalSocket::ConnectedState,
+                        std::memory_order_release
+                    );
+
+                    if (sock->bytesAvailable() > 0)
+                    {
+                        onReadyRead();
+                    }
+                },
+                Qt::BlockingQueuedConnection
+            );
+
+            if (!invoked)
+            {
+                connected_.store(
+                    false,
+                    std::memory_order_release
+                );
+
+                qWarning() << "[RPC] Failed to adopt IPC socket";
+            }
         }
 
         // Returns 0 on success, non-zero on failure.
         int Call(const QString &methodName, const std::string &req,
                  std::vector<uint8_t> &rsp, int timeout_ms = 0) {
-            if (!Configs::dataManager->settingsRepo->core_running) return -1919;
+            if (!Configs::dataManager->settingsRepo->core_running.load(
+                std::memory_order_acquire))
+            {
+                return -1919;
+            }
 
             const int ms = (timeout_ms > 0) ? timeout_ms : kIOTimeoutMs;
 
@@ -204,16 +268,56 @@ namespace API {
 
             // Register before sending (never miss the response)
             auto call = std::make_shared<PendingCall>();
+            quint64 expectedEpoch = 0;
+
             {
                 std::lock_guard<std::mutex> lock(pending_mu);
+
+                if (!connected_.load(std::memory_order_acquire))
+                {
+                    return -1919;
+                }
+
+                expectedEpoch = connectionEpoch_.load(
+                    std::memory_order_acquire
+                );
+
                 pending[reqId] = call;
             }
 
-            // Dispatch write through the stable io anchor (FIFO, never
-            // touches `sock` on this thread).
-            QMetaObject::invokeMethod(io_anchor, [this, frame]() {
-                if (sock) sock->write(frame);
-            }, Qt::QueuedConnection);
+            // A queued write must never be delivered to a socket
+            // belonging to a different connection generation.
+            const bool queued = QMetaObject::invokeMethod(
+                io_anchor,
+                [this, frame, expectedEpoch]()
+                {
+                    if (!connected_.load(std::memory_order_acquire))
+                    {
+                        return;
+                    }
+
+                    if (connectionEpoch_.load(
+                        std::memory_order_acquire) != expectedEpoch)
+                    {
+                        return;
+                    }
+
+                    if (!sock ||
+                        sock->state() != QLocalSocket::ConnectedState)
+                    {
+                        return;
+                    }
+
+                    sock->write(frame);
+                },
+                Qt::QueuedConnection
+            );
+
+            if (!queued)
+            {
+                wakeAllWithError();
+                return 1;
+            }
 
             // Wait for response
             std::unique_lock<std::mutex> lock(call->mu);
