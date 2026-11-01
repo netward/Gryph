@@ -493,22 +493,11 @@ func (s *server) IPTest(
 	return &gen.IPTestResp{Results: res}, nil
 }
 
-func (s *server) QueryIPTest(ctx context.Context, in *gen.EmptyReq) (out *gen.QueryIPTestResponse, _ error) {
-	results := test_utils.IPReporter.Results()
-	out = &gen.QueryIPTestResponse{}
-	for _, r := range results {
-		errStr := ""
-		if r.Error != nil {
-			errStr = r.Error.Error()
-		}
-		out.Results = append(out.Results, &gen.IPTestRes{
-			OutboundTag: To(r.Tag),
-			Ip:          To(r.Result.IP),
-			CountryCode: To(r.Result.CountryCode),
-			Error:       To(errStr),
-		})
-	}
-	return
+func (s *server) QueryIPTest(
+    ctx context.Context,
+    in *gen.EmptyReq,
+) (*gen.QueryIPTestResponse, error) {
+    return &gen.QueryIPTestResponse{}, nil
 }
 
 func (s *server) QueryStats(

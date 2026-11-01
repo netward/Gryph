@@ -217,7 +217,6 @@ func TestPR35TemporaryTestsNoGoroutineGrowth(t *testing.T) {
 
 		// Clear accumulated test reporter records.
 		_ = test_utils.URLReporter.Results()
-		_ = test_utils.IPReporter.Results()
 
 		return nil
 	}

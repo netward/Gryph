@@ -20,8 +20,6 @@ type IPInfo struct {
 	CountryCode string `json:"country_code"`
 }
 
-var IPReporter IPTestReporter
-
 const IPTestTimeout = 3 * time.Second
 const ipInfoAPI = "https://api.ip2location.io/"
 
@@ -102,13 +100,11 @@ func BatchIPTestWithEndpoint(
 
 		if err := ctx.Err(); err != nil {
 			result.Error = err
-			IPReporter.AddResult(result)
 			continue
 		}
 
 		if !acquireTestSlot(ctx, slots) {
 			result.Error = ctx.Err()
-			IPReporter.AddResult(result)
 			continue
 		}
 
@@ -123,7 +119,6 @@ func BatchIPTestWithEndpoint(
 				result.Error = fmt.Errorf(
 					"outbound %q not found", tag,
 				)
-				IPReporter.AddResult(result)
 				return
 			}
 
@@ -154,8 +149,6 @@ func BatchIPTestWithEndpoint(
 			if err := ctx.Err(); err != nil {
 				result.Error = err
 			}
-
-			IPReporter.AddResult(result)
 		}()
 	}
 

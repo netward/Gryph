@@ -256,149 +256,130 @@ void MainWindow::runURLTest(
     // The parent batch already refreshes the profile list after its completion semaphore is released.
 }
 
-void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, bool useDefault, const QStringList& outboundTags, const QMap<QString, int>& tag2entID, int entID) {
-    if (stopSpeedtest.load()) {
+void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, bool useDefault, const QStringList& outboundTags, const QMap<QString, int>& tag2entID, int entID)
+{
+    if (stopSpeedtest.load(std::memory_order_acquire))
+    {
         MW_show_log(tr("Profile test aborted"));
         return;
     }
 
-    libcore::IPTestRequest req;
-    for (const auto& item : outboundTags) {
-        req.outbound_tags.push_back(item.toStdString());
+    auto* const client = API::defaultClient;
+
+    if (!client)
+    {
+        MW_show_log("[IPTest] RPC client is not initialized");
+        return;
     }
+
+    // Build the request.
+    libcore::IPTestRequest req;
+
+    for (const auto& tag : outboundTags)
+    {
+        req.outbound_tags.push_back(tag.toStdString());
+    }
+
     req.config = config.toStdString();
     req.use_default_outbound = useDefault;
     req.max_concurrency = Configs::dataManager->settingsRepo->test_concurrent;
     req.test_timeout_ms = Configs::dataManager->settingsRepo->url_test_timeout_ms;
     req.xray_config = xrayConfig.toStdString();
     req.need_xray = !xrayConfig.isEmpty();
+    // Only the final RPC response updates profiles.
+    bool rpcOK = false;
+    const auto result = client->IPTest(&rpcOK, req);
 
-    auto done = new QMutex;
-    done->lock();
-    Async::run([=, this]
-        {
-            bool ok;
-            while (true)
-            {
-                QThread::msleep(200);
-                if (done->try_lock()) break;
-                auto resp = defaultClient->QueryIPTest(&ok);
-                if (!ok || resp.results.empty())
-                {
-                    continue;
-                }
-
-                bool needRefresh = false;
-                QList<int> profileIDs;
-                for (const auto& res : resp.results)
-                {
-                    dataViewHtmlGenerator_.addTestProgress();
-                    UpdateDataView();
-                    int entid = -1;
-                    if (!tag2entID.empty()) {
-                        entid = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
-                    }
-                    if (entid == -1) {
-                        continue;
-                    }
-                    profileIDs << entid;
-                    auto ent = Configs::dataManager->profilesRepo->GetProfile(entid);
-                    if (ent == nullptr) {
-                        continue;
-                    }
-                    if (res.error.value().empty()) {
-                        ent->SetIpTestResult(
-                            QString::fromStdString(
-                                res.ip.value()
-                            ),
-
-                            QString::fromStdString(
-                                res.country_code.value()
-                            )
-                        );
-                    }
-                    else {
-                        if (!QString::fromStdString(res.error.value()).contains("test aborted") &&
-                            !QString::fromStdString(res.error.value()).contains("context canceled")) {
-                            MW_show_log(tr("[%1] IP test error: %2").arg(profileDisplayTypeAndName(ent), QString::fromStdString(res.error.value())));
-                        }
-                        ent->ClearIpTestResult();
-                    }
-                    Configs::dataManager->profilesRepo->Save(ent);
-                    needRefresh = true;
-                }
-                if (needRefresh)
-                {
-                    UpdateDataView(true);
-                    runOnUiThread([=, this] {
-                        refresh_proxy_list(profileIDs);
-                        });
-                }
-            }
-            done->unlock();
-            delete done;
-        });
-    bool rpcOK;
-    auto result = defaultClient->IPTest(&rpcOK, req);
-    done->unlock();
-    //
-    if (!rpcOK || result.results.empty()) return;
-
-    for (const auto& res : result.results) {
-        if (!tag2entID.empty()) {
-            entID = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
-        }
-        if (entID == -1) {
-            MW_show_log(tr("Something is very wrong, the subject ent cannot be found!"));
-            continue;
-        }
-
-        auto ent = Configs::dataManager->profilesRepo->GetProfile(entID);
-        if (ent == nullptr) {
-            MW_show_log(tr("Profile manager data is corrupted, try again."));
-            continue;
-        }
-
-        if (res.error.value().empty()) {
-
-            ent->SetIpTestResult(
-                QString::fromStdString(
-                    res.ip.value()
-                ),
-
-                QString::fromStdString(
-                    res.country_code.value()
-                )
-            );
-
-        }
-        else {
-
-            const QString error =
-                QString::fromStdString(
-                    res.error.value()
-                );
-
-
-            if (!error.contains("test aborted") &&
-                !error.contains("context canceled"))
-            {
-                MW_show_log(
-                    tr("[%1] IP test error: %2")
-                    .arg(
-                        profileDisplayTypeAndName(
-                            ent
-                        ),
-                        error
-                    )
-                );
-            }
-
-
-            ent->ClearIpTestResult();
-        }
-        Configs::dataManager->profilesRepo->Save(ent);
+    if (!rpcOK)
+    {
+        MW_show_log("[IPTest] RPC call failed");
+        return;
     }
+
+    QSet<int> processedIDs;
+    int completed = 0;
+    int saved = 0;
+
+    for (const auto& res : result.results)
+    {
+        ++completed;
+
+        const QString tag = QString::fromStdString(res.outbound_tag.value_or(""));
+        int profileID = entID;
+
+        // Resolve outbound tag to profile ID.
+        if (!tag2entID.isEmpty())
+        {
+            const auto it = tag2entID.constFind(tag);
+
+            if (it == tag2entID.constEnd())
+            {
+                MW_show_log("[IPTest] Unknown outbound tag: " + tag);
+                continue;
+            }
+
+            profileID = it.value();
+        }
+
+        if (profileID < 0)
+        {
+            MW_show_log("[IPTest] Missing profile ID for: " + tag);
+            continue;
+        }
+
+        // Prevent duplicate final writes for this RPC response.
+        if (processedIDs.contains(profileID))
+        {
+            MW_show_log(QString("[IPTest] Duplicate result ignored: %1").arg(profileID));
+            continue;
+        }
+
+        processedIDs.insert(profileID);
+        auto profile = Configs::dataManager->profilesRepo->GetProfile(profileID);
+
+        if (!profile)
+        {
+            MW_show_log(QString("[IPTest] Profile not found: %1").arg(profileID));
+            continue;
+        }
+
+        const QString error = QString::fromStdString(res.error.value_or(""));
+
+        if (error.isEmpty())
+        {
+            profile->SetIpTestResult(QString::fromStdString(res.ip.value_or("")), QString::fromStdString(res.country_code.value_or("")));
+        }
+        else
+        {
+            if (!error.contains("test aborted") && !error.contains("context canceled"))
+            {
+                MW_show_log(tr("[%1] IP test error: %2").arg(profileDisplayTypeAndName(profile), error));
+            }
+
+            // Preserve the existing failure semantics.
+            profile->ClearIpTestResult();
+        }
+
+        // At most one final save per profile ID.
+        if (Configs::dataManager->profilesRepo->Save(profile))
+        {
+            ++saved;
+        }
+        else
+        {
+            MW_show_log(QString("[IPTest] Failed to save profile: %1").arg(profileID));
+        }
+    }
+
+    // Completed results, not streaming progress.
+    if (completed > 0)
+    {
+        dataViewHtmlGenerator_.addTestProgress(completed);
+        UpdateDataView(true);
+    }
+
+    MW_show_log(QString("[IPTest] Final results: %1, profiles updated: %2").arg(completed).arg(saved));
+    // The parent batch refreshes the profile list after all parallel RPC tasks have completed.
 }
 
 void MainWindow::urltest_current_group(
@@ -434,8 +415,7 @@ void MainWindow::urltest_current_group(
     Async::run(
         [this, profileIDs]()
         {
-            // Whatever exit path is taken below,
-            // speedtestRunning becomes false.
+            // Whatever exit path is taken below, speedtestRunning becomes false.
             AtomicFlagResetGuard runningGuard(
                 speedtestRunning
             );
@@ -455,9 +435,7 @@ void MainWindow::urltest_current_group(
                 );
             UpdateDataView(true);
 
-            // =========================================
             // Execute one batch
-            // =========================================
             auto speedTestFunc =
                 [this](
                     const QList<
@@ -489,8 +467,7 @@ void MainWindow::urltest_current_group(
                     const int sharedCount = buildObject->outboundTags.size();
                     const int runtimeCount = standaloneCount + (sharedCount > 0 ? 1 : 0);
 
-                    MW_show_log(
-                        QString(
+                    MW_show_log(QString(
                             "[PR-4.5D] Profiles: %1 | "
                             "Standalone: %2 | "
                             "Shared outbounds: %3 | "
