@@ -169,4 +169,3 @@ func BenchmarkPR4HTTPPath(b *testing.B) {
 		})
 	}
 }
-
