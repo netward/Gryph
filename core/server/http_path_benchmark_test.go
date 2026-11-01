@@ -20,7 +20,17 @@ func BenchmarkPR4HTTPPath(b *testing.B) {
 			w http.ResponseWriter,
 			r *http.Request,
 		) {
-			w.WriteHeader(http.StatusNoContent)
+			w.Header().Set(
+				"Content-Type",
+				"text/plain",
+			)
+			w.Header().Set(
+				"Content-Length",
+				"2",
+			)
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("OK"))
 		}),
 	)
 	b.Cleanup(srv.Close)
@@ -62,63 +72,101 @@ func BenchmarkPR4HTTPPath(b *testing.B) {
 
 	for _, tc := range cases {
 		b.Run(tc.name, func(b *testing.B) {
-			transport := &http.Transport{
-				DisableKeepAlives: !tc.keepAlive,
-			}
-
-			if tc.singbox {
-				transport.DialContext = func(
-					ctx context.Context,
-					network string,
-					address string,
-				) (net.Conn, error) {
-					return outbound.DialContext(
-						ctx,
-						network,
-						metadata.ParseSocksaddr(address),
-					)
+			newTransport := func() *http.Transport {
+				transport := &http.Transport{
+					// Leave HTTP keep-alive enabled.
+					// Fresh cases use a new transport
+					// for each request instead.
+					DisableKeepAlives: false,
 				}
+
+				if tc.singbox {
+					transport.DialContext = func(
+						ctx context.Context,
+						network string,
+						address string,
+					) (net.Conn, error) {
+						return outbound.DialContext(
+							ctx,
+							network,
+							metadata.ParseSocksaddr(address),
+						)
+					}
+				}
+
+				return transport
 			}
 
-			client := &http.Client{
-				Transport: transport,
-				Timeout:   5 * time.Second,
+			var transport *http.Transport
+			var client *http.Client
+
+			if tc.keepAlive {
+				transport = newTransport()
+
+				client = &http.Client{
+					Transport: transport,
+					Timeout:   5 * time.Second,
+				}
 			}
 
 			b.ReportAllocs()
 			b.ResetTimer()
 
 			for i := 0; i < b.N; i++ {
-				resp, err := client.Get(srv.URL)
-				if err != nil {
-					b.Fatal(err)
+				if !tc.keepAlive {
+					transport = newTransport()
+
+					client = &http.Client{
+						Transport: transport,
+						Timeout:   5 * time.Second,
+					}
 				}
 
-				_, readErr := io.Copy(
-					io.Discard,
-					resp.Body,
-				)
+				resp, err := client.Get(srv.URL)
+				if err != nil {
+					b.Fatalf(
+						"%s request %d: %v",
+						tc.name,
+						i,
+						err,
+					)
+				}
 
+				data, readErr := io.ReadAll(resp.Body)
 				closeErr := resp.Body.Close()
 
 				if readErr != nil {
 					b.Fatal(readErr)
 				}
-
 				if closeErr != nil {
 					b.Fatal(closeErr)
 				}
 
-				if resp.StatusCode != http.StatusNoContent {
+				if resp.StatusCode != http.StatusOK {
 					b.Fatalf(
 						"unexpected status: %d",
 						resp.StatusCode,
 					)
 				}
+
+				if string(data) != "OK" {
+					b.Fatalf(
+						"unexpected body: %q",
+						data,
+					)
+				}
+
+				if !tc.keepAlive {
+					transport.CloseIdleConnections()
+				}
 			}
 
 			b.StopTimer()
-			transport.CloseIdleConnections()
+
+			if transport != nil {
+				transport.CloseIdleConnections()
+			}
 		})
 	}
 }
+
