@@ -48,9 +48,11 @@ namespace API {
     // the `pending` map, so a timed-out / spuriously-woken Call() can never
     // destroy it while the io_thread is still writing to it or notifying.
     // -----------------------------------------------------------------------
-    class Client::LocalSocketChannel {
+    class Client::LocalSocketChannel 
+    {
 
-        struct PendingCall {
+        struct PendingCall 
+        {
             std::mutex          mu;
             std::condition_variable cv;
             bool                done   = false;
@@ -62,7 +64,6 @@ namespace API {
         QObject      *io_anchor;          // stable dispatch target on io_thread
         QLocalSocket *sock = nullptr;     // io_thread only
         QByteArray    read_buf;           // io_thread only
-
         QAtomicInt    next_id{1};         // monotonic across reconnects
         std::mutex    pending_mu;
         QMap<quint32, std::shared_ptr<PendingCall>> pending;
@@ -72,7 +73,8 @@ namespace API {
         static constexpr int kIOTimeoutMs = 30000;
 
         // Called on io_thread via readyRead
-        void onReadyRead() {
+        void onReadyRead() 
+        {
             if (sock == nullptr) return;
             read_buf += sock->readAll();
             processBuffer();
@@ -81,16 +83,8 @@ namespace API {
         void wakeAllWithError()
         {
             std::lock_guard<std::mutex> lock(pending_mu);
-
-            connected_.store(
-                false,
-                std::memory_order_release
-            );
-
-            connectionEpoch_.fetch_add(
-                1,
-                std::memory_order_acq_rel
-            );
+            connected_.store(false, std::memory_order_release);
+            connectionEpoch_.fetch_add(1, std::memory_order_acq_rel);
 
             for (auto& call : pending)
             {
@@ -98,16 +92,20 @@ namespace API {
                 call->done = true;
                 call->cv.notify_one();
             }
+
             pending.clear();
         }
 
         // io_thread only
-        void processBuffer() {
+        void processBuffer() 
+        {
             // Parse as many complete response frames as possible.
             // Response header: 4 (reqId) + 1 (status) + 4 (dataLen) = 9 bytes
-            while (read_buf.size() >= 9) {
+            while (read_buf.size() >= 9) 
+            {
                 quint32 reqId, dataLen;
                 quint8  status;
+
                 {
                     QDataStream ds(read_buf);
                     ds.setByteOrder(QDataStream::LittleEndian);
@@ -116,19 +114,19 @@ namespace API {
 
                 qint64 totalSize = qint64(9) + dataLen;
                 if (read_buf.size() < totalSize) break;  // frame not yet complete
-
                 QByteArray data = read_buf.mid(9, static_cast<int>(dataLen));
                 read_buf.remove(0, totalSize);
-
                 std::shared_ptr<PendingCall> call;
+
                 {
                     std::lock_guard<std::mutex> lock(pending_mu);
                     call = pending.value(reqId, nullptr);
                     if (call) pending.remove(reqId);
                 }
-                if (call) {
-                    // Hold call->mu across the notify so the cv/mutex cannot
-                    // be destroyed by a waking Call() mid-notification.
+
+                if (call) 
+                {
+                    // Hold call->mu across the notify so the cv/mutex cannot be destroyed by a waking Call() mid-notification.
                     std::lock_guard<std::mutex> cg(call->mu);
                     call->status = status;
                     call->data   = std::move(data);
@@ -139,30 +137,54 @@ namespace API {
         }
 
     public:
-        LocalSocketChannel() {
+        LocalSocketChannel()
+        {
             io_thread = new QThread;
             io_anchor = new QObject;
             io_anchor->moveToThread(io_thread);
+            QObject::connect(io_thread, &QThread::finished, io_anchor, &QObject::deleteLater);
             io_thread->start();
         }
 
-        ~LocalSocketChannel() {
+
+        ~LocalSocketChannel()
+        {
+            // No new RPC calls may enter during destruction.
+            // All external RPC users must have been stopped first.
+            Q_ASSERT(QThread::currentThread() != io_thread);
             wakeAllWithError();
 
-            // Close socket and stop event loop on io_thread
-            QMetaObject::invokeMethod(io_anchor, [this]() {
-                if (sock) {
-                    sock->close();
-                    delete sock;
-                    sock = nullptr;
-                }
+            const bool queued = QMetaObject::invokeMethod(io_anchor,
+                [this]()
+                {
+                    if (sock)
+                    {
+                        sock->disconnect(io_anchor);
+                        sock->close();
+                        delete sock;
+                        sock = nullptr;
+                    }
+
+                    read_buf.clear();
+                    io_thread->quit();
+                },
+                Qt::QueuedConnection
+            );
+
+            if (!queued)
+            {
+                qCritical() << "[RPC] Failed to queue channel shutdown";
                 io_thread->quit();
-            }, Qt::QueuedConnection);
+            }
 
             io_thread->wait();
-            delete io_anchor;   // safe: io_thread has finished
+            // io_anchor is destroyed through:
+            // QThread::finished -> QObject::deleteLater.
+            io_anchor = nullptr;
             delete io_thread;
+            io_thread = nullptr;
         }
+
 
         // Replace the underlying connection. Must be called on the thread that currently owns `newSock` (the UI thread, same as before).
 
@@ -180,8 +202,7 @@ namespace API {
 
             // Wait until the IO thread has adopted the socket.
             // Do not announce CoreStarted before this completes.
-            const bool invoked = QMetaObject::invokeMethod(
-                io_anchor,
+            const bool invoked = QMetaObject::invokeMethod(io_anchor,
                 [this, newSock]()
                 {
                     if (sock)
@@ -204,20 +225,14 @@ namespace API {
                         }
                     );
 
-                    QObject::connect(
-                        sock,
-                        &QLocalSocket::disconnected,
-                        io_anchor,
+                    QObject::connect(sock, &QLocalSocket::disconnected, io_anchor,
                         [this]()
                         {
                             wakeAllWithError();
                         }
                     );
 
-                    connected_.store(
-                        sock->state() == QLocalSocket::ConnectedState,
-                        std::memory_order_release
-                    );
+                    connected_.store(sock->state() == QLocalSocket::ConnectedState, std::memory_order_release);
 
                     if (sock->bytesAvailable() > 0)
                     {
@@ -229,26 +244,20 @@ namespace API {
 
             if (!invoked)
             {
-                connected_.store(
-                    false,
-                    std::memory_order_release
-                );
-
+                connected_.store(false, std::memory_order_release);
                 qWarning() << "[RPC] Failed to adopt IPC socket";
             }
         }
 
         // Returns 0 on success, non-zero on failure.
-        int Call(const QString &methodName, const std::string &req,
-                 std::vector<uint8_t> &rsp, int timeout_ms = 0) {
-            if (!Configs::dataManager->settingsRepo->core_running.load(
-                std::memory_order_acquire))
+        int Call(const QString &methodName, const std::string &req, std::vector<uint8_t> &rsp, int timeout_ms = 0) 
+        {
+            if (!Configs::dataManager->settingsRepo->core_running.load(std::memory_order_acquire))
             {
                 return -1919;
             }
 
             const int ms = (timeout_ms > 0) ? timeout_ms : kIOTimeoutMs;
-
             quint32 reqId = static_cast<quint32>(next_id.fetchAndAddOrdered(1));
 
             // Build request frame
@@ -278,17 +287,12 @@ namespace API {
                     return -1919;
                 }
 
-                expectedEpoch = connectionEpoch_.load(
-                    std::memory_order_acquire
-                );
-
+                expectedEpoch = connectionEpoch_.load(std::memory_order_acquire);
                 pending[reqId] = call;
             }
 
-            // A queued write must never be delivered to a socket
-            // belonging to a different connection generation.
-            const bool queued = QMetaObject::invokeMethod(
-                io_anchor,
+            // A queued write must never be delivered to a socket belonging to a different connection generation.
+            const bool queued = QMetaObject::invokeMethod(io_anchor,
                 [this, frame, expectedEpoch]()
                 {
                     if (!connected_.load(std::memory_order_acquire))
@@ -296,14 +300,12 @@ namespace API {
                         return;
                     }
 
-                    if (connectionEpoch_.load(
-                        std::memory_order_acquire) != expectedEpoch)
+                    if (connectionEpoch_.load(std::memory_order_acquire) != expectedEpoch)
                     {
                         return;
                     }
 
-                    if (!sock ||
-                        sock->state() != QLocalSocket::ConnectedState)
+                    if (!sock || sock->state() != QLocalSocket::ConnectedState)
                     {
                         return;
                     }
@@ -321,24 +323,32 @@ namespace API {
 
             // Wait for response
             std::unique_lock<std::mutex> lock(call->mu);
-            bool ok = call->cv.wait_for(lock,
-                std::chrono::milliseconds(ms),
-                [&call] { return call->done; });
+            bool ok = call->cv.wait_for(lock, std::chrono::milliseconds(ms), 
+                [&call] 
+                { 
+                    return call->done; 
+                }
+            );
             lock.unlock();   // never hold call->mu while taking pending_mu
 
-            if (!ok) {
+            if (!ok) 
+            {
                 // Timed out — reclaim our slot unless processBuffer took it.
                 bool claimedByReader = false;
                 {
                     std::lock_guard<std::mutex> plock(pending_mu);
                     if (pending.remove(reqId) == 0) claimedByReader = true;
                 }
-                if (claimedByReader) {
+                if (claimedByReader) 
+                {
                     // A response is inbound; give it a brief bounded chance.
                     lock.lock();
-                    ok = call->cv.wait_for(lock,
-                        std::chrono::milliseconds(ms),
-                        [&call] { return call->done; });
+                    ok = call->cv.wait_for(lock, std::chrono::milliseconds(ms),
+                        [&call] 
+                        { 
+                            return call->done; 
+                        }
+                    );
                     lock.unlock();
                 }
             }
@@ -346,7 +356,9 @@ namespace API {
             std::lock_guard<std::mutex> g(call->mu);
             if (!ok || call->status != 0) {
                 if (ok && call->status != 0)
+                {
                     MW_show_log("[Core error] " + QString::fromUtf8(call->data));
+                }
                 return 1;
             }
             rsp.assign(call->data.begin(), call->data.end());
@@ -354,23 +366,25 @@ namespace API {
         }
     };
 
-    // -----------------------------------------------------------------------
     // Client
-    // -----------------------------------------------------------------------
-
-    namespace {
-        // spb throws std::runtime_error on any malformed/torn input. These
-        // calls run on worker QThreads, so an uncaught throw would terminate
-        // the whole process. Turn a bad frame into a failed RPC instead.
+    namespace 
+    {
+        // spb throws std::runtime_error on any malformed/torn input. These calls run on worker QThreads, so an uncaught throw would terminate the whole process. Turn a bad frame into a failed RPC instead.
         template <typename T>
-        bool tryDeserialize(const std::vector<uint8_t> &resp, T &out) {
-            try {
+        bool tryDeserialize(const std::vector<uint8_t> &resp, T &out) 
+        {
+            try 
+            {
                 out = spb::pb::deserialize<T>(resp);
                 return true;
-            } catch (const std::exception &e) {
+            } 
+            catch (const std::exception &e) 
+            {
                 MW_show_log(QString("[RPC] dropped malformed response: ") + e.what());
                 return false;
-            } catch (...) {
+            } 
+            catch (...) 
+            {
                 MW_show_log("[RPC] dropped malformed response");
                 return false;
             }
@@ -378,12 +392,13 @@ namespace API {
     }
 
     Client::~Client() = default;
-
-    Client::Client() {
+    Client::Client() 
+    {
         this->channel = std::make_unique<LocalSocketChannel>();
     }
 
-    void Client::Reconnect(QLocalSocket *socket) {
+    void Client::Reconnect(QLocalSocket *socket) 
+    {
         channel->Reconnect(socket);
     }
 
@@ -393,48 +408,59 @@ namespace API {
     *rpcOK = false; \
     MW_show_log(QString("IPC call failed (code %1)\n").arg(status));
 
-    QString Client::Start(bool *rpcOK, const libcore::LoadConfigReq &request) {
+    QString Client::Start(bool *rpcOK, const libcore::LoadConfigReq &request) 
+    {
         libcore::ErrorResp reply;
         std::vector<uint8_t> resp;
         auto status = channel->Call("Start", spb::pb::serialize<std::string>(request), resp);
 
-        if (status == CALL_OK && tryDeserialize(resp, reply)) {
+        if (status == CALL_OK && tryDeserialize(resp, reply)) 
+        {
             *rpcOK = true;
             return QString::fromStdString(reply.error.value());
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return "";
         }
     }
 
-    QString Client::Stop(bool *rpcOK) {
+    QString Client::Stop(bool *rpcOK) 
+    {
         libcore::EmptyReq request;
         libcore::ErrorResp reply;
         std::vector<uint8_t> resp;
         auto status = channel->Call("Stop", spb::pb::serialize<std::string>(request), resp);
 
-        if (status == CALL_OK && tryDeserialize(resp, reply)) {
+        if (status == CALL_OK && tryDeserialize(resp, reply)) 
+        {
             *rpcOK = true;
             return QString::fromStdString(reply.error.value());
-        } else {
+        }
+        else 
+        {
             NOT_OK
             return "";
         }
     }
 
-    libcore::QueryStatsResp Client::QueryStats() {
+    libcore::QueryStatsResp Client::QueryStats() 
+    {
         libcore::EmptyReq request;
         libcore::QueryStatsResp reply;
         std::vector<uint8_t> resp;
         auto status = channel->Call("QueryStats", spb::pb::serialize<std::string>(request), resp, 500);
 
-        if (status == CALL_OK && tryDeserialize(resp, reply)) {
+        if (status == CALL_OK && tryDeserialize(resp, reply)) 
+        {
             return reply;
         }
         return {};
     }
 
-    libcore::TestResp Client::Test(bool *rpcOK, const libcore::TestReq &request) {
+    libcore::TestResp Client::Test(bool *rpcOK, const libcore::TestReq &request) 
+    {
         libcore::TestResp reply;
         std::vector<uint8_t> resp;
         auto status = channel->Call("Test", spb::pb::serialize<std::string>(request), resp);
@@ -442,20 +468,26 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        }
+        else 
+        {
             NOT_OK
             return {};
         }
     }
 
-    void Client::StopTests(bool *rpcOK) {
+    void Client::StopTests(bool *rpcOK) 
+    {
         const libcore::EmptyReq request;
         std::vector<uint8_t> resp;
         auto status = channel->Call("StopTest", spb::pb::serialize<std::string>(request), resp);
 
-        if (status == CALL_OK) {
+        if (status == CALL_OK) 
+        {
             *rpcOK = true;
-        } else {
+        } 
+        else 
+        {
             NOT_OK
         }
     }
@@ -470,13 +502,16 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return {};
         }
     }
 
-    libcore::IPTestResp Client::IPTest(bool *rpcOK, const libcore::IPTestRequest &request) {
+    libcore::IPTestResp Client::IPTest(bool *rpcOK, const libcore::IPTestRequest &request) 
+    {
         libcore::IPTestResp reply;
         std::vector<uint8_t> resp;
         auto status = channel->Call("IPTest", spb::pb::serialize<std::string>(request), resp);
@@ -484,13 +519,16 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        } 
+        else
+        {
             NOT_OK
             return {};
         }
     }
 
-    libcore::QueryIPTestResponse Client::QueryIPTest(bool *rpcOK) {
+    libcore::QueryIPTestResponse Client::QueryIPTest(bool *rpcOK) 
+    {
         libcore::EmptyReq request;
         libcore::QueryIPTestResponse reply;
         std::vector<uint8_t> resp;
@@ -499,21 +537,27 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return {};
         }
     }
 
-    QString Client::SetSystemDNS(bool *rpcOK, const bool clear) const {
+    QString Client::SetSystemDNS(bool *rpcOK, const bool clear) const 
+    {
         libcore::SetSystemDNSRequest request{clear};
         std::vector<uint8_t> resp;
         auto status = channel->Call("SetSystemDNS", spb::pb::serialize<std::string>(request), resp);
 
-        if (status == CALL_OK) {
+        if (status == CALL_OK) 
+        {
             *rpcOK = true;
             return "";
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return "IPC error";
         }
@@ -526,10 +570,14 @@ namespace API {
         std::vector<uint8_t> resp;
         auto status = channel->Call("ListConnections", spb::pb::serialize<std::string>(request), resp);
 
-        if (status == CALL_OK && tryDeserialize(resp, reply)) {
+        if (status == CALL_OK && tryDeserialize(resp, reply)) 
+        {
             return reply;
         }
-        if (status != CALL_OK) MW_show_log("Failed to list connections: IPC error");
+        if (status != CALL_OK)
+        {
+            MW_show_log("Failed to list connections: IPC error");
+        }
         return {};
     }
 
@@ -544,7 +592,8 @@ namespace API {
         {
             *rpcOK = true;
             return QString::fromStdString(reply.error.value());
-        } else
+        }
+        else
         {
             NOT_OK
             return "IPC error";
@@ -562,7 +611,8 @@ namespace API {
         {
             *rpcOK = true;
             return reply.has_privilege.value();
-        } else
+        }
+        else
         {
             NOT_OK
             return false;
@@ -578,7 +628,9 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        }
+        else 
+        {
             NOT_OK
             return {};
         }
@@ -594,7 +646,9 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return {};
         }
@@ -610,7 +664,9 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return {};
         }
@@ -626,7 +682,9 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) {
             *rpcOK = true;
             return reply;
-        } else {
+        } 
+        else 
+        {
             NOT_OK
             return {};
         }

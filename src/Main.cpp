@@ -367,5 +367,9 @@ int main(int argc, char* argv[])
     Stats::trafficLooper->RequestStop();
     Stats::connection_lister->stopLoop();
     Async::shutdown();
+    // All RPC users must be stopped before this point.
+    delete API::defaultClient;
+    API::defaultClient = nullptr;
+    qInfo() << "[RPC] Client destroyed";
     return exitCode;
 }

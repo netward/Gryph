@@ -56,6 +56,7 @@ namespace
         {
             return {};
         }
+
         const auto config = profile->ConfigSnapshot();
         return QStringLiteral("[%1] %2").arg(config.displayType, config.displayName);
     }
