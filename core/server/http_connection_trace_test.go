@@ -209,4 +209,3 @@ func TestPR4HTTPConnectionTrace(t *testing.T) {
 		})
 	}
 }
-
