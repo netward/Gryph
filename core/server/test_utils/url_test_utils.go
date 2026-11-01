@@ -74,13 +74,11 @@ func BatchURLTest(
 
 		if err := ctx.Err(); err != nil {
 			result.Error = err
-			URLReporter.AddResult(result)
 			continue
 		}
 
 		if !acquireTestSlot(ctx, slots) {
 			result.Error = ctx.Err()
-			URLReporter.AddResult(result)
 			continue
 		}
 
@@ -95,7 +93,6 @@ func BatchURLTest(
 				result.Error = fmt.Errorf(
 					"outbound %q not found", tag,
 				)
-				URLReporter.AddResult(result)
 				return
 			}
 
@@ -134,8 +131,6 @@ func BatchURLTest(
 			if err := ctx.Err(); err != nil {
 				result.Error = err
 			}
-
-			URLReporter.AddResult(result)
 		}()
 	}
 

@@ -1,16 +1,3 @@
-// main.cpp — точка входа приложения Gryph.
-// Задачи:
-//  1. Установка обработчика аварийного завершения. 
-//  2. Создаёт QApplication и настраивает поведение приложения.
-//  3. Выбор рабочего каталога и каталога конфигурации.
-//  4. Открытие базы данных Gryph.db.
-//  5. Обработка аргументов командной строки. 
-//  6. Запуск рабочих потоков.
-//  7. Загрузка локализации и шрифтов emoji.
-//  8. Защита от запуска второго экземпляра приложения.
-//  9. Прием deeplink-ссылки Gryph://.
-//  10. Создание главного окна и запуск цикла событий Qt.
-
 #include <csignal>
 
 #include <QApplication>
@@ -27,6 +14,7 @@
 #include "include/global/TaskExecutor.hpp"
 #include "include/global/Configs.hpp"
 #include "include/ui/MainWindowAPI.h"
+#include "include/api/RPC.h"
 
 #ifdef Q_OS_WIN
 #include "include/sys/windows/MiniDump.h"
@@ -43,19 +31,14 @@
 #ifdef Q_OS_MACOS
 #include <QFileOpenEvent>
 
-// В macOS повторный запуск приложения обычно не создаёт новый процесс.
-// Система передаёт ссылку Gryph:// уже работающему приложению в виде QFileOpenEvent, а не через argv.
-// Этот фильтр перехватывает событие и передаёт URL в общий обработчик deeplink.
 class MacDeeplinkFilter : public QObject {
 public:
     using QObject::QObject;
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override {
-        // Проверяем, что система передала приложению файл или URL.
         if (event->type() == QEvent::FileOpen) {
             const QString url = static_cast<QFileOpenEvent *>(event)->url().toString();
-            // Обрабатываем только собственную схему приложения.
             if (url.startsWith("Gryph://")) {
                 Deeplink_Submit(url);
                 return true;
@@ -65,10 +48,6 @@ protected:
     }
 };
 #endif
-
-// Общий обработчик запроса на завершение приложения.
-// Просит главное окно сохранить состояние и корректно остановить подсистемы, после чего завершает цикл событий Qt.
-// Параметр signum сейчас не используется.
 void signal_handler(int signum)
 {
     Q_UNUSED(signum);
@@ -77,25 +56,16 @@ void signal_handler(int signum)
     qApp->quit();
 }
 
-// Переводчик строк самого приложения.
 QTranslator* trans = nullptr;
-// Объект предназначен для перевода стандартных элементов Qt, но в текущей реализации он не загружается и не устанавливается.
 QTranslator* trans_qt = nullptr;
 
-// Загрузка перевода приложения для указанной локали.
-// Значения:
-//  ru_RU — русский;
-//  zh_CN — китайский;
-//  fa_IR — персидский.
 void loadTranslate(const QString& locale) {
-    // Помечаем стандартные подписи диалогов для системы переводов Qt.
     QT_TRANSLATE_NOOP("QPlatformTheme", "Cancel");
     QT_TRANSLATE_NOOP("QPlatformTheme", "Apply");
     QT_TRANSLATE_NOOP("QPlatformTheme", "Yes");
     QT_TRANSLATE_NOOP("QPlatformTheme", "No");
     QT_TRANSLATE_NOOP("QPlatformTheme", "OK");
     
-    // При повторной смене языка удаляем старые переводчики.
     if (trans != nullptr) {
         trans->deleteLater();
     }
@@ -106,22 +76,16 @@ void loadTranslate(const QString& locale) {
     trans = new QTranslator;
     trans_qt = new QTranslator;
 
-    // Локаль влияет на форматирование дат, времени и чисел.
     QLocale::setDefault(QLocale(locale));
     
-    // Загружаем перевод самого Gryph из ресурсов приложения.
     if (trans->load(":/translations/" + locale + ".qm")) {
         QCoreApplication::installTranslator(trans);
     }
 }
 
-// Префикс имени локального IPC-сервера.
-// Полное имя дополнительно содержит хеш каталога данных.
 #define LOCAL_SERVER_PREFIX "Gryph-"
 
 int main(int argc, char* argv[]) {
-    // 1. Обработчики аварийного завершения.
-    //    Windows создаёт minidump, Linux разрешает создание core dump.
 #ifdef Q_OS_WIN
     Windows_SetCrashHandler();
 #endif
@@ -130,20 +94,15 @@ int main(int argc, char* argv[]) {
     enable_core_dumps();
 #endif
 
-    // 2. Создание QApplication. 
-    //    Отключаем системные диалоги, чтобы Qt использовал собственные диалоги с единым оформлением. Этот атрибут нужно установить до создания QApplication.
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs);
-    // Закрытие последнего окна не завершает процесс: приложение может продолжать работать в системном трее.
     QApplication::setQuitOnLastWindowClosed(false);
     QApplication a(argc, argv);
 
 #ifdef Q_OS_MACOS
-    // Устанавливаем фильтр до запуска цикла событий, чтобы не потерять ранний deeplink.
     a.installEventFilter(new MacDeeplinkFilter(&a));
 #endif
 
 #if !defined(Q_OS_MACOS) && (QT_VERSION >= QT_VERSION_CHECK(6,9,0))
-    // 3. Загрузка шрифта emoji
 #ifdef Q_OS_WIN
     int fontId = QFontDatabase::addApplicationFont(WinVersion::IsBuildNumGreaterOrEqual(BuildNumber::Windows_11_22H2) ? ":/font/notoEmoji" : ":/font/Twemoji");
 #else
@@ -384,17 +343,14 @@ int main(int argc, char* argv[]) {
     });
 #endif
 
-    // 14. Пользовательский интерфейс.
-    //     Создаём и инициализируем главное окно.
+    // Create the long-lived client before MainWindow can launch any asynchronous RPC users.
+    API::defaultClient = new API::Client();
+    
     MainWindowApi::Initialize();
 
-    // Передаём deeplink, полученный при холодном запуске через argv.
-    // После этого обрабатываем ссылки, которые могли прийти во время запуска до готовности главного окна.
     if (!launchDeeplink.isEmpty()) Deeplink_Submit(launchDeeplink);
     Deeplink_FlushPending();
 
-    // 15. Главный цикл событий.
-    //     exec() обрабатывает окна, таймеры, сокеты и события до вызова quit(). Возвращаемое значение становится кодом завершения процесса.
     const int exitCode =
         QApplication::exec();
 

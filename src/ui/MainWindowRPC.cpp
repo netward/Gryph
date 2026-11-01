@@ -17,6 +17,7 @@
 #include <QDesktopServices>
 #include <QMessageBox>
 #include <QJsonDocument>
+#include <QSet>
 
 #include "include/configs/Generate.h"
 #include "include/database/GroupsRepo.h"
@@ -109,229 +110,154 @@ void MainWindow::setup_rpc(QLocalSocket* socket) {
     }
 }
 
-void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bool useDefault, const QStringList& outboundTags, const QMap<QString, int>& tag2entID, int entID) {
-    if (stopSpeedtest.load()) {
+void MainWindow::runURLTest(
+    const QString& config,
+    const QString& xrayConfig,
+    bool useDefault,
+    const QStringList& outboundTags,
+    const QMap<QString, int>& tag2entID,
+    int entID)
+{
+    if (stopSpeedtest.load(std::memory_order_acquire)) {
         MW_show_log(tr("Profile test aborted"));
         return;
     }
 
-    libcore::TestReq req;
-    for (const auto& item : outboundTags) {
-        req.outbound_tags.push_back(item.toStdString());
+    // Snapshot of the long-lived RPC client.
+    auto* const client = API::defaultClient;
+
+    if (client == nullptr) {
+        MW_show_log("[URLTest] RPC client is not initialized");
+        return;
     }
+
+    libcore::TestReq req;
+
+    for (const auto& tag : outboundTags) {
+        req.outbound_tags.push_back(tag.toStdString());
+    }
+
     req.config = config.toStdString();
-    req.url = Configs::dataManager->settingsRepo->test_latency_url.toStdString();
+    req.url =
+        Configs::dataManager->settingsRepo
+        ->test_latency_url.toStdString();
+
     req.use_default_outbound = useDefault;
-    req.max_concurrency = Configs::dataManager->settingsRepo->test_concurrent;
-    req.test_timeout_ms = Configs::dataManager->settingsRepo->url_test_timeout_ms;
+    req.max_concurrency =
+        Configs::dataManager->settingsRepo->test_concurrent;
+
+    req.test_timeout_ms =
+        Configs::dataManager->settingsRepo->url_test_timeout_ms;
+
     req.xray_config = xrayConfig.toStdString();
     req.need_xray = !xrayConfig.isEmpty();
 
-    auto done = new QMutex;
-    done->lock();
-    Async::run(
-        [=, this]
-        {
-            bool ok;
-            while (true)
-            {
-                QThread::msleep(200);
-                if (done->try_lock()) break;
-                auto resp = defaultClient->QueryURLTest(&ok);
-                if (!ok || resp.results.empty())
-                {
-                    continue;
-                }
+    // Only Test() owns final profile results.
+    bool rpcOK = false;
+    const auto result = client->Test(&rpcOK, req);
 
-                bool needRefresh = false;
-                QList<int> profileIDs;
-                for (const auto& res : resp.results)
-                {
-                    dataViewHtmlGenerator_.addTestProgress();
-                    UpdateDataView();
-                    int entid = -1;
+    if (!rpcOK) {
+        MW_show_log("[URLTest] RPC Test call failed");
+        return;
+    }
 
-
-                    if (!tag2entID.empty())
-                    {
-                        const QString outboundTag =
-                            QString::fromStdString(
-                                res.outbound_tag.value()
-                            );
-
-
-                        const auto it =
-                            tag2entID.constFind(
-                                outboundTag
-                            );
-
-
-                        if (it != tag2entID.constEnd())
-                        {
-                            entid =
-                                it.value();
-                        }
-                    }
-
-
-                    if (entid == -1)
-                    {
-                        continue;
-                    }
-
-
-                    // IMPORTANT:
-                    // refresh exactly the profile whose result
-                    // was returned by QueryURLTest().
-                    profileIDs << entid;
-
-
-                    auto ent =
-                        Configs::dataManager
-                        ->profilesRepo
-                        ->GetProfile(
-                            entid
-                        );
-
-
-                    if (!ent)
-                    {
-                        continue;
-                    }
-
-
-                    if (res.error.value().empty())
-                    {
-                        ent->SetLatency(
-                            res.latency_ms.value()
-                        );
-                    }
-                    else
-                    {
-                        const QString error =
-                            QString::fromStdString(
-                                res.error.value()
-                            );
-
-
-                        if (error.contains(
-                            "test aborted")
-                            ||
-                            error.contains(
-                                "context canceled"))
-                        {
-                            ent->SetLatency(0);
-                        }
-                        else
-                        {
-                            ent->SetLatency(-1);
-
-
-                            MW_show_log(
-                                tr("[%1] test error: %2")
-                                .arg(
-                                    profileDisplayTypeAndName(
-                                        ent
-                                    ),
-                                    error
-                                )
-                            );
-                        }
-                    }
-
-
-                    Configs::dataManager
-                        ->profilesRepo
-                        ->Save(ent);
-
-
-                    needRefresh = true;
-                }
-
-                if (needRefresh)
-                {
-                    UpdateDataView(true);
-                    runOnUiThread(
-                        this,
-
-                        [
-                            this,
-                            profileIDs
-                        ]()
-                        {
-                            refresh_proxy_list(
-                                profileIDs
-                            );
-                        }
-                    );
-                }
-            }
-            done->unlock();
-            delete done;
-        });
-    bool rpcOK;
-    auto result = defaultClient->Test(&rpcOK, req);
-    done->unlock();
-    //
-    if (!rpcOK || result.results.empty()) return;
+    QSet<int> processedIDs;
+    int completed = 0;
 
     for (const auto& res : result.results) {
-        if (!tag2entID.empty()) {
-            entID = tag2entID.count(QString::fromStdString(res.outbound_tag.value())) == 0 ? -1 : tag2entID[QString::fromStdString(res.outbound_tag.value())];
+        ++completed;
+
+        const QString tag =
+            QString::fromStdString(
+                res.outbound_tag.value()
+            );
+
+        int profileID = entID;
+
+        if (!tag2entID.isEmpty()) {
+            const auto it = tag2entID.constFind(tag);
+
+            if (it == tag2entID.constEnd()) {
+                MW_show_log(
+                    "[URLTest] Unknown outbound tag: " + tag
+                );
+                continue;
+            }
+
+            profileID = it.value();
         }
-        if (entID == -1) {
-            MW_show_log(tr("Something is very wrong, the subject ent cannot be found!"));
+
+        if (profileID < 0) {
+            MW_show_log(
+                "[URLTest] Missing profile ID for: " + tag
+            );
             continue;
         }
 
-        auto ent = Configs::dataManager->profilesRepo->GetProfile(entID);
-        if (ent == nullptr) {
-            MW_show_log(tr("Profile manager data is corrupted, try again."));
+        // Protect against duplicate final results.
+        if (processedIDs.contains(profileID)) {
+            MW_show_log(
+                QString("[URLTest] Duplicate result ignored: %1")
+                .arg(profileID)
+            );
             continue;
         }
 
-        if (res.error.value().empty()) {
+        processedIDs.insert(profileID);
 
-            ent->SetLatency(
-                res.latency_ms.value()
+        auto profile =
+            Configs::dataManager->profilesRepo
+            ->GetProfile(profileID);
+
+        if (!profile) {
+            MW_show_log(
+                QString("[URLTest] Profile not found: %1")
+                .arg(profileID)
+            );
+            continue;
+        }
+
+        const QString error =
+            QString::fromStdString(res.error.value());
+
+        if (error.isEmpty()) {
+            profile->SetLatency(res.latency_ms.value());
+        }
+        else if (
+            error.contains("test aborted") ||
+            error.contains("context canceled"))
+        {
+            profile->SetLatency(0);
+        }
+        else {
+            profile->SetLatency(-1);
+
+            MW_show_log(
+                tr("[%1] test error: %2")
+                .arg(
+                    profileDisplayTypeAndName(profile),
+                    error
+                )
             );
         }
 
-        else {
-
-            const QString error =
-                QString::fromStdString(
-                    res.error.value()
-                );
-
-
-            if (error.contains(
-                "test aborted")
-                ||
-                error.contains(
-                    "context canceled"))
-            {
-                ent->SetLatency(0);
-            }
-
-            else {
-
-                ent->SetLatency(-1);
-
-
-                MW_show_log(
-                    tr("[%1] test error: %2")
-                    .arg(
-                        profileDisplayTypeAndName(
-                            ent
-                        ),
-                        error
-                    )
-                );
-            }
-        }
-        Configs::dataManager->profilesRepo->Save(ent);
+        // Exactly one final write per profile ID.
+        Configs::dataManager->profilesRepo->Save(profile);
     }
+
+    // This reflects completed results, not streaming progress.
+    if (completed > 0) {
+        dataViewHtmlGenerator_.addTestProgress(completed);
+        UpdateDataView(true);
+    }
+
+    MW_show_log(
+        QString("[URLTest] Final results: %1, profiles updated: %2")
+        .arg(completed)
+        .arg(processedIDs.size())
+    );
+
+    // The parent batch already refreshes the profile list after its completion semaphore is released.
 }
 
 void MainWindow::runIPTest(const QString& config, const QString& xrayConfig, bool useDefault, const QStringList& outboundTags, const QMap<QString, int>& tag2entID, int entID) {
