@@ -252,4 +252,4 @@ replace github.com/sagernet/cronet-go/lib/windows_amd64 => github.com/parhelia51
 
 replace github.com/sagernet/cronet-go/lib/windows_arm64 => github.com/parhelia512/cronet-go/lib/windows_arm64 v0.0.0-20260515230114-6df543aa5cbc
 
-replace github.com/sagernet/sing => ../../../sing
+replace github.com/sagernet/sing => github.com/netward/sing v0.8.10-gryph.1
