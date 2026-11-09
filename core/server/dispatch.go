@@ -120,6 +120,13 @@ func runDispatch(conn net.Conn) {
 		binary.LittleEndian.PutUint32(
 			header[5:], uint32(len(data)),
 		)
+		log.Printf(
+		    "[IPC][TX] requestId=%d status=%d payloadLen=%d header=%x",
+		    reqID,
+		    status,
+		    len(data),
+		    header,
+		)
 
 		writeMu.Lock()
 		defer writeMu.Unlock()

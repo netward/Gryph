@@ -80,6 +80,7 @@ namespace API {
         {
             qWarning().noquote() << "[RPC] Protocol violation:" << reason;
             read_buf.clear();
+            qWarning() << "[RPC][WAKE] Cause: protocol violation";
             // Invalidate the current connection generationand wake all pending RPC callers.
             wakeAllWithError();
 
@@ -117,6 +118,7 @@ namespace API {
 
         void wakeAllWithError()
         {
+            qWarning() << "[RPC][WAKE] Pending RPC calls interrupted";
             std::lock_guard<std::mutex> lock(pending_mu);
             connected_.store(false, std::memory_order_release);
             connectionEpoch_.fetch_add(1, std::memory_order_acq_rel);
@@ -141,24 +143,49 @@ namespace API {
                 quint32 reqId, dataLen;
                 quint8  status;
 
+                if (dataLen > kMaxRPCPayloadBytes || status > 1)
+                {
+                    qWarning().noquote()
+                        << QString(
+                            "[RPC][RX] Invalid header: "
+                            "requestId=%1 status=%2 payloadLen=%3 "
+                            "bufferSize=%4 rawHeader=%5"
+                        )
+                        .arg(reqId)
+                        .arg(status)
+                        .arg(dataLen)
+                        .arg(read_buf.size())
+                        .arg(QString::fromLatin1(
+                            read_buf.left(9).toHex(' ')
+                        ));
+                }
+
                 if (dataLen > kMaxRPCPayloadBytes)
                 {
-                    failProtocol(QString("response payload too large: %1 bytes").arg(dataLen)
-                    );
-
+                    failProtocol(QString("response payload too large: %1 bytes").arg(dataLen));
                     return false;
                 }
 
                 if (status > 1)
                 {
-                    failProtocol( QString("invalid response status: %1").arg(status)
-                    );
-
+                    failProtocol(QString("invalid response status: %1").arg(status));
                     return false;
                 }
 
                 {
                     QDataStream ds(read_buf);
+                    qWarning().noquote()
+                        << QString(
+                            "[RPC][RX] reqId=%1 status=%2 len=%3 "
+                            "buffer=%4 hex=%5"
+                        )
+                        .arg(reqId)
+                        .arg(status)
+                        .arg(dataLen)
+                        .arg(read_buf.size())
+                        .arg(QString::fromLatin1(
+                            read_buf.left(9).toHex(' ')
+                        ));
                     ds.setByteOrder(QDataStream::LittleEndian);
                     ds >> reqId >> status >> dataLen;
                 }
@@ -277,9 +304,16 @@ namespace API {
                         }
                     );
 
-                    QObject::connect(sock, &QLocalSocket::disconnected, io_anchor,
+                    QObject::connect(
+                        sock,
+                        &QLocalSocket::disconnected,
+                        io_anchor,
                         [this]()
                         {
+                            qWarning()
+                                << "[RPC][SOCKET] Disconnected"
+                                << "error:" << sock->errorString();
+
                             wakeAllWithError();
                         }
                     );
@@ -468,7 +502,7 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) 
         {
             *rpcOK = true;
-            return QString::fromStdString(reply.error.value());
+            return QString::fromStdString(reply.error.value_or(""));
         } 
         else 
         {
@@ -487,7 +521,7 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply)) 
         {
             *rpcOK = true;
-            return QString::fromStdString(reply.error.value());
+            return QString::fromStdString(reply.error.value_or(""));
         }
         else 
         {
@@ -642,7 +676,7 @@ namespace API {
         if (status == CALL_OK && tryDeserialize(resp, reply))
         {
             *rpcOK = true;
-            return QString::fromStdString(reply.error.value());
+            return QString::fromStdString(reply.error.value_or(""));
         }
         else
         {
