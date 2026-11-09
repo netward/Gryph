@@ -134,32 +134,38 @@ namespace API {
         }
 
         // io_thread only
-        bool processBuffer() 
+        bool processBuffer()
         {
-            // Parse as many complete response frames as possible.
-            // Response header: 4 (reqId) + 1 (status) + 4 (dataLen) = 9 bytes
-            while (read_buf.size() >= 9) 
-            {
-                quint32 reqId, dataLen;
-                quint8  status;
+            constexpr qsizetype kHeaderSize = 9;
 
-                if (dataLen > kMaxRPCPayloadBytes || status > 1)
+            while (read_buf.size() >= kHeaderSize)
+            {
+                quint32 reqId = 0;
+                quint32 dataLen = 0;
+                quint8 status = 0;
+
+                // 1. Decode the header FIRST.
                 {
-                    qWarning().noquote()
-                        << QString(
-                            "[RPC][RX] Invalid header: "
-                            "requestId=%1 status=%2 payloadLen=%3 "
-                            "bufferSize=%4 rawHeader=%5"
-                        )
-                        .arg(reqId)
-                        .arg(status)
-                        .arg(dataLen)
-                        .arg(read_buf.size())
-                        .arg(QString::fromLatin1(
-                            read_buf.left(9).toHex(' ')
-                        ));
+                    QDataStream ds(read_buf);
+                    ds.setByteOrder(QDataStream::LittleEndian);
+
+                    ds >> reqId >> status >> dataLen;
+
+                    if (ds.status() != QDataStream::Ok)
+                    {
+                        failProtocol("Failed to decode response header");
+                        return false;
+                    }
                 }
 
+                // 2. Log decoded values, not uninitialized memory.
+                qDebug().noquote() << QString("[RPC][RX] reqId=%1 status=%2 payloadLen=%3 bufferSize=%4")
+                    .arg(reqId)
+                    .arg(status)
+                    .arg(dataLen)
+                    .arg(read_buf.size());
+
+                // 3. Validate the decoded header.
                 if (dataLen > kMaxRPCPayloadBytes)
                 {
                     failProtocol(QString("response payload too large: %1 bytes").arg(dataLen));
@@ -172,48 +178,49 @@ namespace API {
                     return false;
                 }
 
+                // 4. Wait for the complete frame.
+                const qint64 totalSize = kHeaderSize + static_cast<qint64>(dataLen);
+
+                if (read_buf.size() < totalSize)
                 {
-                    QDataStream ds(read_buf);
-                    qWarning().noquote()
-                        << QString(
-                            "[RPC][RX] reqId=%1 status=%2 len=%3 "
-                            "buffer=%4 hex=%5"
-                        )
-                        .arg(reqId)
-                        .arg(status)
-                        .arg(dataLen)
-                        .arg(read_buf.size())
-                        .arg(QString::fromLatin1(
-                            read_buf.left(9).toHex(' ')
-                        ));
-                    ds.setByteOrder(QDataStream::LittleEndian);
-                    ds >> reqId >> status >> dataLen;
+                    break;
                 }
 
-                qint64 totalSize = qint64(9) + dataLen;
-                if (read_buf.size() < totalSize) break;  // frame not yet complete
-                QByteArray data = read_buf.mid(9, static_cast<int>(dataLen));
-                read_buf.remove(0, totalSize);
+                // 5. Extract the response.
+                QByteArray data = read_buf.mid(kHeaderSize, static_cast<qsizetype>(dataLen));
+                read_buf.remove(0, static_cast<qsizetype>(totalSize));
+
+                // 6. Find the matching pending RPC.
                 std::shared_ptr<PendingCall> call;
 
                 {
                     std::lock_guard<std::mutex> lock(pending_mu);
-                    call = pending.value(reqId, nullptr);
-                    if (call) pending.remove(reqId);
+
+                    auto it = pending.find(reqId);
+
+                    if (it != pending.end())
+                    {
+                        call = it.value();
+                        pending.erase(it);
+                    }
                 }
 
-                if (call) 
+                // 7. Complete the request.
+                if (call)
                 {
-                    // Hold call->mu across the notify so the cv/mutex cannot be destroyed by a waking Call() mid-notification.
-                    std::lock_guard<std::mutex> cg(call->mu);
+                    std::lock_guard<std::mutex> lock(call->mu);
+
                     call->status = status;
-                    call->data   = std::move(data);
-                    call->done   = true;
+                    call->data = std::move(data);
+                    call->done = true;
+
                     call->cv.notify_one();
                 }
             }
+
             return true;
         }
+
 
     public:
         LocalSocketChannel()
