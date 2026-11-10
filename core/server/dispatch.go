@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -118,6 +119,13 @@ func serveIPC(
 	var writeMu sync.Mutex
 	admission := newRPCAdmission()
 
+	// Limits concurrent overload responses.
+	// Prevents one goroutine per rejected request.
+	const maxBusyResponses = 8
+	busySlots := make(chan struct{}, maxBusyResponses)
+
+	const ipcWriteTimeout = 15 * time.Second
+
 	writeResponse := func(reqID uint32, status uint8, data []byte) {
 		if len(data) > int(maxRPCPayloadBytes) {
 			status = 1
@@ -140,6 +148,18 @@ func serveIPC(
 
 		writeMu.Lock()
 		defer writeMu.Unlock()
+		// A client that stops reading must not block
+		// the IPC writer indefinitely.
+		if err := conn.SetWriteDeadline(
+			time.Now().Add(ipcWriteTimeout),
+		); err != nil {
+			log.Printf(
+				"[IPC] failed to set write deadline: %v",
+				err,
+			)
+			_ = conn.Close()
+			return
+		}
 
 		if err := writeIPCAll(conn, header[:]); err != nil {
 			log.Printf("[IPC] response header write failed: %v", err)
@@ -170,20 +190,35 @@ func serveIPC(
 		}
 
 		// Reserve capacity before creating a goroutine.
-		//
 		// This operation does not wait for free slots.
 		release, accepted := admission.tryAcquire(method)
 
 		if !accepted {
-			// Keep the connection alive.
-			// Reject only this RPC request.
-			writeResponse(
-				requestID,
-				1,
-				[]byte(
-					"RPC_BUSY: concurrency limit reached",
-				),
-			)
+			// Do not write directly from the reader loop.
+			// A slow client could otherwise block StopTest.
+			select {
+			case busySlots <- struct{}{}:
+				go func(id uint32) {
+					defer func() {
+						<-busySlots
+					}()
+
+					writeResponse(
+						id,
+						1,
+						[]byte(
+							"RPC_BUSY: concurrency limit reached",
+						),
+					)
+				}(requestID)
+
+			default:
+				// Backpressure limit reached.
+				// Close the connection instead of creating an unlimited number of blocked goroutines.
+				return fmt.Errorf(
+					"IPC overloaded: too many pending busy responses",
+				)
+			}
 
 			continue
 		}

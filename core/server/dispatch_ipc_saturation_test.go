@@ -312,3 +312,109 @@ func TestIPCStopTestUnderRegularSaturation(
 		t.Fatal("serveIPC did not exit")
 	}
 }
+
+func TestIPCControlDispatchWhileClientNotReading(
+	t *testing.T,
+) {
+	client, server := net.Pipe()
+
+	entered := make(
+		chan struct{},
+		maxRegularRPC,
+	)
+
+	releaseRegular := make(chan struct{})
+	controlEntered := make(chan struct{}, 1)
+	done := make(chan error, 1)
+
+	go func() {
+		done <- serveIPC(
+			server,
+			func(method string, _ []byte) ([]byte, error) {
+				switch method {
+				case "Test":
+					entered <- struct{}{}
+					<-releaseRegular
+					return []byte("ok"), nil
+
+				case "StopTest":
+					controlEntered <- struct{}{}
+					return []byte("ok"), nil
+
+				default:
+					return nil, fmt.Errorf(
+						"unexpected method %q",
+						method,
+					)
+				}
+			},
+		)
+	}()
+
+	defer func() {
+		_ = client.Close()
+		close(releaseRegular)
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("IPC server did not exit")
+		}
+	}()
+
+	if err := client.SetDeadline(
+		time.Now().Add(5 * time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Occupy all regular RPC slots.
+	for i := 1; i <= maxRegularRPC; i++ {
+		if err := writeIPCStressRequest(
+			client,
+			uint32(i),
+			"Test",
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("regular handler did not start")
+		}
+	}
+
+	// Request 17 receives RPC_BUSY.
+	// Deliberately do not read that response.
+	if err := writeIPCStressRequest(
+		client,
+		17,
+		"Test",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Send StopTest while the writer is blocked.
+	sent := make(chan error, 1)
+
+	go func() {
+		sent <- writeIPCStressRequest(
+			client,
+			18,
+			"StopTest",
+		)
+	}()
+
+	// The reader must continue dispatching commands,
+	// even though the client is not reading responses.
+	select {
+	case <-controlEntered:
+		// StopTest reached its handler.
+
+	case <-time.After(2 * time.Second):
+		t.Fatal(
+			"StopTest was blocked by an unread RPC_BUSY response",
+		)
+	}
+}
