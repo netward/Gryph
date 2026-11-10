@@ -142,9 +142,37 @@ func serveIPCWithContext(
 	sessionCtx, cancel := context.WithCancel(
 		context.Background(),
 	)
+	var activeRPC sync.WaitGroup
 
-	defer cancel()
-	defer conn.Close()
+	// Cancel the session and allow RPC handlers to
+	// release their resources before returning.
+	// Never wait indefinitely for a misbehaving handler.
+	defer func() {
+		cancel()
+
+		// Unblock goroutines currently writing IPC responses.
+		_ = conn.Close()
+
+		drained := make(chan struct{})
+
+		go func() {
+			activeRPC.Wait()
+			close(drained)
+		}()
+
+		const drainTimeout = 5 * time.Second
+
+		select {
+		case <-drained:
+			log.Printf("[IPC] All RPC handlers stopped")
+
+		case <-time.After(drainTimeout):
+			log.Printf(
+				"[IPC] RPC drain timeout after %s",
+				drainTimeout,
+			)
+		}
+	}()
 
 	var writeMu sync.Mutex
 	admission := newRPCAdmission()
@@ -227,7 +255,11 @@ func serveIPCWithContext(
 			// A slow client could otherwise block StopTest.
 			select {
 			case busySlots <- struct{}{}:
+				activeRPC.Add(1)
+
 				go func(id uint32) {
+					defer activeRPC.Done()
+
 					defer func() {
 						<-busySlots
 					}()
@@ -251,7 +283,7 @@ func serveIPCWithContext(
 
 			continue
 		}
-
+		activeRPC.Add(1)
 		// The request has been admitted.
 		go func(
 			id uint32,
@@ -259,6 +291,7 @@ func serveIPCWithContext(
 			pl []byte,
 			release func(),
 		) {
+			defer activeRPC.Done()
 			// Release the slot when this handler finishes.
 			defer release()
 
