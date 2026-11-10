@@ -102,18 +102,48 @@ func writeIPCAll(w io.Writer, data []byte) error {
 //
 //	[uint32 reqId][uint8 status][uint32 dataLen][data]
 func runDispatch(conn net.Conn) {
-	err := serveIPC(conn, dispatch)
-	log.Fatalf("IPC connection dropped, exiting: %v", err)
+	err := serveIPCWithContext(conn, dispatchWithContext)
+
+	log.Fatalf(
+		"IPC connection dropped, exiting: %v",
+		err,
+	)
 }
 
-// serveIPC implements the IPC protocol without
-// terminating the process when the connection closes.
+// serveIPC implements the IPC protocol without terminating the process when the connection closes.
 //
 // The handler can be replaced by a test implementation.
 func serveIPC(
 	conn net.Conn,
 	handler func(string, []byte) ([]byte, error),
 ) error {
+	// Compatibility with existing integration tests.
+	return serveIPCWithContext(
+		conn,
+		func(
+			_ context.Context,
+			method string,
+			payload []byte,
+		) ([]byte, error) {
+			return handler(method, payload)
+		},
+	)
+}
+
+// serveIPCWithContext associates RPC handlers with the lifetime of the IPC connection.
+func serveIPCWithContext(
+	conn net.Conn,
+	handler func(
+		context.Context,
+		string,
+		[]byte,
+	) ([]byte, error),
+) error {
+	sessionCtx, cancel := context.WithCancel(
+		context.Background(),
+	)
+
+	defer cancel()
 	defer conn.Close()
 
 	var writeMu sync.Mutex
@@ -148,8 +178,7 @@ func serveIPC(
 
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		// A client that stops reading must not block
-		// the IPC writer indefinitely.
+		// A client that stops reading must not block the IPC writer indefinitely.
 		if err := conn.SetWriteDeadline(
 			time.Now().Add(ipcWriteTimeout),
 		); err != nil {
@@ -234,9 +263,15 @@ func serveIPC(
 			defer release()
 
 			respData, dispatchErr := handler(
+				sessionCtx,
 				method,
 				pl,
 			)
+
+			// Do not attempt to send a response after the IPC session has been cancelled.
+			if sessionCtx.Err() != nil {
+				return
+			}
 
 			if dispatchErr != nil {
 				writeResponse(
@@ -262,8 +297,22 @@ func serveIPC(
 	}
 }
 
-func dispatch(methodName string, payload []byte) ([]byte, error) {
-	ctx := context.Background()
+func dispatch(
+	methodName string,
+	payload []byte,
+) ([]byte, error) {
+	return dispatchWithContext(
+		context.Background(),
+		methodName,
+		payload,
+	)
+}
+
+func dispatchWithContext(
+	ctx context.Context,
+	methodName string,
+	payload []byte,
+) ([]byte, error) {
 	s := globalServer
 
 	switch methodName {

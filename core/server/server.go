@@ -362,6 +362,8 @@ func (s *server) Test(ctx context.Context, in *gen.TestReq) (*gen.TestResp, erro
 		}()
 	}
 
+	testCtx, releaseRPC := bindRPCContext(testCtx, ctx)
+	defer releaseRPC()
 	outboundTags := in.OutboundTags
 	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
 		outbound := testInstance.Outbound().Default()
@@ -443,6 +445,8 @@ func (s *server) IPTest(
 ) (*gen.IPTestResp, error) {
 	testCtx, releaseTemp := temporaryTests.begin()
 	defer releaseTemp()
+	testCtx, releaseRPC := bindRPCContext(testCtx, ctx)
+	defer releaseRPC()
 	runtime, err := newTemporaryTestRuntime(
 		in.GetConfig(),
 		in.GetNeedXray(),
@@ -649,7 +653,8 @@ func (s *server) SpeedTest(ctx context.Context, in *gen.SpeedTestRequest) (*gen.
 			}
 		}()
 	}
-
+	testCtx, releaseRPC := bindRPCContext(testCtx, ctx)
+	defer releaseRPC()
 	if in.GetUseDefaultOutbound() || in.GetTestCurrent() {
 		outbound := testInstance.Outbound().Default()
 		outboundTags = []string{outbound.Tag()}
