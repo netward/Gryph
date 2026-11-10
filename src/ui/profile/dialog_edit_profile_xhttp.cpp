@@ -1,4 +1,5 @@
 #include "include/ui/profile/dialog_edit_profile.h"
+#include "ui_dialog_edit_profile.h"
 
 #include "include/configs/common/xrayStreamSetting.h"
 #include "include/global/GuiUtils.hpp"

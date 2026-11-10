@@ -39,9 +39,8 @@
 #include "include/ui/utils/DataViewHtmlGenerator.h"
 #include "include/ui/utils/ProfilesTableModel.h"
 
-
 namespace Configs_sys {
-    class CoreProcess;
+    class CoreSupervisor;
 }
 
 QT_BEGIN_NAMESPACE
@@ -109,20 +108,11 @@ public:
     // lifetime handling.
     // =============================================================
 
-    void dispatchGlobalMessage(
-        MwMessage cmd,
-        const QStringList& args
-    );
+    void dispatchGlobalMessage(MwMessage cmd, const QStringList& args);
 
+    void dispatchGlobalDeeplink(const QString& url);
 
-    void dispatchGlobalDeeplink(
-        const QString& url
-    );
-
-
-    void enqueueGlobalLog(
-        const QString& log
-    );
+    void enqueueGlobalLog(const QString& log);
 
 signals:
 
@@ -193,15 +183,10 @@ private slots:
     void on_tabWidget_customContextMenuRequested(const QPoint& p);
 
 private:
-    Ui::MainWindow* ui =
-        nullptr;
-    
-    // =============================================================
+    Ui::MainWindow* ui = nullptr;
+   
     // Running profile
-    // =============================================================
-
-    std::atomic<
-        std::shared_ptr<Configs::Profile>
+    std::atomic<std::shared_ptr<Configs::Profile>
     > runningProfile_{
         nullptr
     };
@@ -236,62 +221,33 @@ private:
         [[nodiscard]]
         quint64 beginSession()
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
-
+            std::lock_guard<std::mutex> locker(mutex);
 
             if (!alive)
             {
                 return 0;
             }
 
-
             ++generation;
-
 
             return generation;
         }
 
 
-        // ---------------------------------------------------------
         // Get the current generation.
-        // ---------------------------------------------------------
-
         [[nodiscard]]
         quint64 currentGeneration() const
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
-
-
+            std::lock_guard<std::mutex> locker(mutex);
             return generation;
         }
 
-
-        // ---------------------------------------------------------
-        // Check whether an async result still belongs to the
-        // currently active runtime session.
-        // ---------------------------------------------------------
-
+        // Check whether an async result still belongs to thecurrently active runtime session.
         [[nodiscard]]
-        bool isCurrent(
-            quint64 expectedGeneration
-        ) const
+        bool isCurrent(quint64 expectedGeneration) const
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
-
-
-            return
-                alive
-                &&
-                generation == expectedGeneration;
+            std::lock_guard<std::mutex> locker(mutex);
+            return alive && generation == expectedGeneration;
         }
 
 
@@ -302,27 +258,16 @@ private:
         // This prevents an old stop worker from invalidating a
         // newly-started Profile session.
         // ---------------------------------------------------------
-
-        bool invalidateIfCurrent(
-            quint64 expectedGeneration
-        )
+        bool invalidateIfCurrent(quint64 expectedGeneration)
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
+            std::lock_guard<std::mutex> locker(mutex);
 
-
-            if (!alive ||
-                generation != expectedGeneration)
+            if (!alive || generation != expectedGeneration)
             {
                 return false;
             }
 
-
             ++generation;
-
-
             return true;
         }
 
@@ -336,28 +281,16 @@ private:
         // ---------------------------------------------------------
 
         template<typename CommitFunction>
-        bool commitIfCurrent(
-            quint64 expectedGeneration,
-            CommitFunction&& commitFunction
-        )
+        bool commitIfCurrent(quint64 expectedGeneration, CommitFunction&& commitFunction)
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
+            std::lock_guard<std::mutex> locker(mutex);
 
-
-            if (!alive ||
-                generation != expectedGeneration)
+            if (!alive || generation != expectedGeneration)
             {
                 return false;
             }
 
-
-            std::forward<CommitFunction>(
-                commitFunction
-            )();
-
+            std::forward<CommitFunction>(commitFunction)();
 
             return true;
         }
@@ -371,222 +304,118 @@ private:
 
         void shutdown()
         {
-            std::lock_guard<std::mutex>
-                locker(
-                    mutex
-                );
-
+            std::lock_guard<std::mutex> locker(mutex);
 
             if (!alive)
             {
                 return;
             }
 
-
             alive = false;
-
             ++generation;
         }
     };
 
 
-    std::shared_ptr<RuntimeSessionState>
-        runtimeSessionState_ =
-        std::make_shared<
-        RuntimeSessionState
-        >();
+    std::shared_ptr<RuntimeSessionState> runtimeSessionState_ = std::make_shared<RuntimeSessionState>();
         
     [[nodiscard]]
-    std::shared_ptr<Configs::Profile>
-        runningProfileSnapshot() const noexcept;
+    std::shared_ptr<Configs::Profile> runningProfileSnapshot() const noexcept;
 
 
-    void publishRunningProfile(
-        const std::shared_ptr<Configs::Profile>& profile
-    ) noexcept;
+    void publishRunningProfile(const std::shared_ptr<Configs::Profile>& profile) noexcept;
 
+    bool clearRunningProfileIf(const std::shared_ptr<Configs::Profile>& expected) noexcept;
 
-    bool clearRunningProfileIf(
-        const std::shared_ptr<Configs::Profile>& expected
-    ) noexcept;
-
-    // -----------------------------------------------------
     // Asynchronous public IP/country lookup
-    // -----------------------------------------------------
-    void resolveRunningProfileCountryAsync(
-        const std::shared_ptr<Configs::Profile>& profile,
-        quint64 sessionGeneration
-    );
+    void resolveRunningProfileCountryAsync(const std::shared_ptr<Configs::Profile>& profile, quint64 sessionGeneration);
 
+    ProfilesTableModel* profilesTableModel = nullptr;
 
-    ProfilesTableModel*
-        profilesTableModel =
-        nullptr;
-
-    // =============================================================
     // Tray
-    // =============================================================
+    QSystemTrayIcon* tray = nullptr;
+    QMenu* trayServerMenu = nullptr;
 
-    QSystemTrayIcon*
-        tray =
-        nullptr;
+    int trayServerPage = 0;
 
-
-    QMenu*
-        trayServerMenu =
-        nullptr;
-
-
-    int trayServerPage =
-        0;
-
-
-    // =============================================================
     // Shortcuts
-    // =============================================================
+    QShortcut* shortcut_esc = new QShortcut(QKeySequence::Cancel, this);
 
-    QShortcut*
-        shortcut_esc =
-        new QShortcut(
-            QKeySequence::Cancel,
-            this
-        );
-
-    // =============================================================
     // Core calls
-    // =============================================================
-
-    QThreadPool*
-        parallelCoreCallPool =
-        new QThreadPool(
-            this
-        );
+    QThreadPool* parallelCoreCallPool = new QThreadPool(this);
 
     std::atomic_bool stopSpeedtest{
         false
     };
 
-
     std::atomic_bool speedtestRunning{
         false
     };
-
 
     std::atomic_bool currentUnderTest{
         false
     };
 
-    Configs_sys::CoreProcess*
-        core_process =
-        nullptr;
+    Configs_sys::CoreSupervisor* core_process = nullptr;
 
     QMutex coreProcessMutex;
 
-    QLocalServer*
-        core_server =
-        nullptr;
+    QLocalServer* core_server = nullptr;
     
     bool rpc_started = false;
-    qint64 vpn_pid =
-        0;
+    qint64 vpn_pid = 0;
 
-    // =============================================================
     // Log document / highlighter
-    // =============================================================
+    QTextDocument* qvLogDocument = new QTextDocument(this);
 
-    QTextDocument*
-        qvLogDocument =
-        new QTextDocument(
-            this
-        );
-
-    QSyntaxHighlighter*
-        logHighlighter_ =
-        nullptr;
-
+    QSyntaxHighlighter* logHighlighter_ = nullptr;
 
     QString title_error;
 
-
-    int icon_status =
-        -1;
+    int icon_status = -1;
 
     QString traffic_update_cache;
 
+    qint64 last_test_time = 0;
 
-    qint64 last_test_time =
-        0;
+    int proxy_last_order = -1;
 
-
-    int proxy_last_order =
-        -1;
-
-    bool select_mode =
-        false;
-
+    bool select_mode = false;
 
     QMutex mu_starting;
     QMutex mu_stopping;
     QMutex mu_exit;
 
-    int exit_reason =
-        0;
+    int exit_reason = 0;
 
     QMutex connectionListMu;
 
     // IMPORTANT:
-     // Was previously uninitialized.
-    int toolTipID =
-        0;
+    // Was previously uninitialized.
+    int toolTipID = 0;
 
+    SpeedWidget* speedChartWidget = nullptr;
 
-    SpeedWidget*
-        speedChartWidget =
-        nullptr;
+    QDateTime lastUpdated = QDateTime::currentDateTime();
 
+    DataViewHtmlGenerator dataViewHtmlGenerator_;
 
-    QDateTime lastUpdated =
-        QDateTime::currentDateTime();
-
-    DataViewHtmlGenerator
-        dataViewHtmlGenerator_;
-
-    QList<QShortcut*>
-        hiddenMenuShortcuts;
+    QList<QShortcut*> hiddenMenuShortcuts;
     
-    // =============================================================
     // Remote route profiles
-    //
-    // All access after the refactor happens in UI thread.
-    // Therefore the old mu_remoteRouteProfiles is unnecessary.
-    // =============================================================
+    QStringList remoteRouteProfiles;
 
-    QStringList
-        remoteRouteProfiles;
+    bool remoteRouteProfilesLoading_ = false;
 
-
-    bool remoteRouteProfilesLoading_ =
-        false;
-
-
-    // =============================================================
     // Search
-    // =============================================================
-
-    bool searchEnabled =
-        false;
-
+    bool searchEnabled = false;
 
     QString addressFilterString;
     QString nameFilterString;
     QString typeFilterString;
     QString countryFilterString;
 
-
-    // =============================================================
     // Log worker
-    // =============================================================
-
     QStringList includeKeywords;
     QStringList excludeKeywords;
 
@@ -595,21 +424,13 @@ private:
 
     QMutex logMutex;
 
-    QQueue<QString>
-        logQueue;
+    QQueue<QString> logQueue;
 
-    QWaitCondition
-        logWaiter;
+    QWaitCondition logWaiter;
 
-    QThread*
-        logWorkerThread_ =
-        nullptr;
+    QThread* logWorkerThread_ = nullptr;
 
-
-    std::atomic_bool
-        logStopRequested_{
-            false
-    };
+    std::atomic_bool logStopRequested_{false};
 
     void append_log(const QString &log);
 
@@ -641,13 +462,10 @@ private:
 
     void handle_import_route(const QString &url);
 
-    // Routes user-supplied text: Gryph:// links go to the deeplink handler, the
-    // rest to the subscription/profile importer.
+    // Routes user-supplied text: Gryph:// links go to the deeplink handler, the rest to the subscription/profile importer.
     void import_or_handle_deeplink(const QString &text);
 
-    void rebuildLogHighlighter(
-        bool dark
-    );
+    void rebuildLogHighlighter(bool dark);
 
     void refresh_proxy_list_column_size();
 
@@ -673,9 +491,8 @@ private:
 
     // Debounced refresh_proxy_list trigger for font/theme/resize events.
     QTimer *m_proxyListRefreshDebounce = nullptr;
+    
     void scheduleProxyListRefresh();
-
-    //
 
     void HotkeyEvent(const QString &key);
 
@@ -688,7 +505,6 @@ private:
     void loadShortcuts();
 
     // rpc
-
     void setup_rpc(QLocalSocket *socket);
 
     bool verify_core_pid(QLocalSocket *socket);
@@ -732,10 +548,12 @@ class OrgFreedesktopPortalRequestInterface : public QDBusAbstractInterface
 {
     Q_OBJECT
 public:
-    OrgFreedesktopPortalRequestInterface(const QString& service,
-                                         const QString& path,
-                                         const QDBusConnection& connection,
-                                         QObject* parent = nullptr);
+    OrgFreedesktopPortalRequestInterface(
+        const QString& service,
+        const QString& path,
+        const QDBusConnection& connection,
+        QObject* parent = nullptr
+    );
 
     ~OrgFreedesktopPortalRequestInterface();
 
@@ -751,10 +569,10 @@ Q_SIGNALS: // SIGNALS
 };
 
 namespace org {
-namespace freedesktop {
-namespace portal {
-typedef ::OrgFreedesktopPortalRequestInterface Request;
-}
-}
+    namespace freedesktop {
+        namespace portal {
+            typedef ::OrgFreedesktopPortalRequestInterface Request;
+        }
+    }
 }
 #endif

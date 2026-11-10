@@ -23,7 +23,7 @@
 #include "include/database/GroupsRepo.h"
 #include "include/database/ProfilesRepo.h"
 
-#include "include/sys/Process.hpp"
+#include "include/sys/CoreSupervisor.hpp"
 
 // rpc
 
@@ -2232,42 +2232,47 @@ void MainWindow::resolveRunningProfileCountryAsync(
     );
 }
 
-void MainWindow::profile_start(int _id) {
+void MainWindow::profile_start(int _id) 
+{
     if (Configs::dataManager->settingsRepo->prepare_exit) return;
+
 #ifdef Q_OS_LINUX
-    if (Configs::dataManager->settingsRepo->enable_dns_server && Configs::dataManager->settingsRepo->dns_server_listen_port <= 1024) {
-        if (!get_elevated_permissions()) {
+
+    if (Configs::dataManager->settingsRepo->enable_dns_server && Configs::dataManager->settingsRepo->dns_server_listen_port <= 1024) 
+    {
+        if (!get_elevated_permissions()) 
+        {
             MW_show_log(QString("Failed to get admin access, cannot listen on port %1 without it").arg(Configs::dataManager->settingsRepo->dns_server_listen_port));
             return;
         }
     }
+
 #endif
 
     auto ents = get_now_selected_list();
     auto ent = (_id < 0 && !ents.isEmpty()) ? Configs::dataManager->profilesRepo->GetProfile(ents.first()) : Configs::dataManager->profilesRepo->GetProfile(_id);
-    if (ent == nullptr) return;
+    
+    if (ent == nullptr) 
+    {
+        return;
+    }
 
-    if (select_mode) {
+    if (select_mode) 
+    {
         emit profile_selected(ent->Id());
         select_mode = false;
         refresh_status();
         return;
     }
 
-    auto group =
-        Configs::dataManager
-        ->groupsRepo
-        ->GetGroup(
-            ent->GroupId()
-        );
+    auto group = Configs::dataManager->groupsRepo->GetGroup(ent->GroupId());
 
     if (!group)
     {
         return;
     }
 
-    const auto groupSnapshot =
-        group->Snapshot();
+    const auto groupSnapshot = group->Snapshot();
 
     if (groupSnapshot.archive)
     {
@@ -2275,216 +2280,63 @@ void MainWindow::profile_start(int _id) {
     }
 
     auto result = Configs::BuildSingBoxConfig(ent);
-    if (!result->error.isEmpty()) {
+
+    if (!result->error.isEmpty()) 
+    {
         MessageBoxWarning(tr("BuildConfig return error"), result->error);
         return;
     }
 
-    auto profile_start_stage2 =
-        [
-            this,
-            ent,
-            result
-        ]() -> bool
+    auto profile_start_stage2 = [this, ent, result]() -> bool
         {
-            if (!ent ||
-                !result)
+            if (!ent || !result)
             {
                 return false;
             }
-
-
-            // =====================================================
-            // Build Core request
-            // =====================================================
 
             libcore::LoadConfigReq req;
 
+            req.core_config = QJsonObject2QString(result->coreConfig, true).toStdString();
+            req.tun_ipv4_cidr = result->tunIPv4CIDR.toStdString();
+            req.disable_stats = Configs::dataManager->settingsRepo->disable_traffic_stats;
+            req.xray_config = QJsonObject2QString(result->xrayConfig, true).toStdString();
+            req.need_xray = !result->xrayConfig.isEmpty();
 
-            req.core_config =
-                QJsonObject2QString(
-                    result->coreConfig,
-                    true
-                )
-                .toStdString();
-
-
-            req.tun_ipv4_cidr =
-                result
-                ->tunIPv4CIDR
-                .toStdString();
-
-
-            req.disable_stats =
-                Configs::dataManager
-                ->settingsRepo
-                ->disable_traffic_stats;
-
-
-            req.xray_config =
-                QJsonObject2QString(
-                    result->xrayConfig,
-                    true
-                )
-                .toStdString();
-
-
-            req.need_xray =
-                !result
-                ->xrayConfig
-                .isEmpty();
-
-
-            // =====================================================
-            // Extra Core
-            // =====================================================
-
-            if (result->extraCoreData &&
-                !result
-                ->extraCoreData
-                ->path
-                .isEmpty())
+            if (result->extraCoreData && !result->extraCoreData->path.isEmpty())
             {
-                req.need_extra_process =
-                    true;
-
-
-                req.extra_process_path =
-                    result
-                    ->extraCoreData
-                    ->path
-                    .toStdString();
-
-
-                req.extra_process_args =
-                    result
-                    ->extraCoreData
-                    ->args
-                    .toStdString();
-
-
-                req.extra_process_conf =
-                    result
-                    ->extraCoreData
-                    ->config
-                    .toStdString();
-
-
-                req.extra_no_out =
-                    result
-                    ->extraCoreData
-                    ->noLog;
+                req.need_extra_process = true;
+                req.extra_process_path = result->extraCoreData->path.toStdString();
+                req.extra_process_args = result->extraCoreData->args.toStdString();
+                req.extra_process_conf = result->extraCoreData->config.toStdString();
+                req.extra_no_out = result->extraCoreData->noLog;
             }
 
+            bool rpcOK = false;
 
-            // =====================================================
-            // Start Core
-            //
-            // This is blocking RPC, but profile_start_stage2 itself
-            // is executed by profile_start() on a worker thread.
-            // =====================================================
-
-            bool rpcOK =
-                false;
-
-
-            const QString error =
-                defaultClient
-                ->Start(
-                    &rpcOK,
-                    req
-                );
-
-
-            // =====================================================
-            // RPC transport failure
-            //
-            // IMPORTANT:
-            //
-            // Do not publish ANY running state before this check.
-            // =====================================================
+            const QString error = defaultClient->Start(& rpcOK, req);
 
             if (!rpcOK)
             {
-                MW_show_log(
-                    "Failed to start profile: "
-                    "RPC request failed."
-                );
-
+                MW_show_log("Failed to start profile: RPC request failed.");
                 return false;
             }
 
-
-            // =====================================================
-            // Core returned configuration error
-            // =====================================================
-
             if (!error.isEmpty())
             {
-                // -------------------------------------------------
-                // Special TUN error
-                // -------------------------------------------------
-
-                if (error.contains(
-                    "configure tun interface"))
+                if (error.contains("configure tun interface"))
                 {
-                    runOnUiThread(
-                        [
-                            this,
-                            error
-                        ]()
+                    runOnUiThread([this, error]()
                         {
-                            QMessageBox msg(
-                                QMessageBox::Information,
+                            QMessageBox msg(QMessageBox::Information, tr("Tun device misbehaving"), tr("If you have trouble starting VPN, you can force reset Core process here and then try starting the profile again. The error is %1").arg(error), QMessageBox::NoButton, this);
 
-                                tr(
-                                    "Tun device misbehaving"
-                                ),
+                            msg.addButton(tr("Reset"), QMessageBox::ActionRole);
 
-                                tr(
-                                    "If you have trouble starting VPN, "
-                                    "you can force reset Core process "
-                                    "here and then try starting the "
-                                    "profile again. The error is %1"
-                                )
-                                .arg(
-                                    error
-                                ),
+                            auto* cancel = msg.addButton(tr("Cancel"), QMessageBox::ActionRole);
 
-                                QMessageBox::NoButton,
+                            msg.setDefaultButton(cancel);
+                            msg.setEscapeButton(cancel);
 
-                                this
-                            );
-
-
-                            msg.addButton(
-                                tr("Reset"),
-                                QMessageBox::ActionRole
-                            );
-
-
-                            auto* cancel =
-                                msg.addButton(
-                                    tr("Cancel"),
-                                    QMessageBox::ActionRole
-                                );
-
-
-                            msg.setDefaultButton(
-                                cancel
-                            );
-
-
-                            msg.setEscapeButton(
-                                cancel
-                            );
-
-
-                            const int result =
-                                msg.exec()
-                                -
-                                2;
-
+                            const int result = msg.exec() - 2;
 
                             if (result == 0)
                             {
@@ -2492,123 +2344,36 @@ void MainWindow::profile_start(int _id) {
                             }
                         }
                     );
-
-
                     return false;
                 }
 
-
-                // -------------------------------------------------
-                // Generic Core configuration error
-                // -------------------------------------------------
-
-                runOnUiThread(
-                    [
-                        error
-                    ]()
+                runOnUiThread([error]()
                     {
-                        MessageBoxWarning(
-                            "LoadConfig return error",
-                            error
-                        );
+                        MessageBoxWarning("LoadConfig return error", error);
                     }
-                            );
-
-
+                );
                 return false;
             }
 
+            Stats::trafficLooper->SetChainGroups(result->chainGroups);
+            Stats::trafficLooper->loop_enabled.store(true, std::memory_order_release);
+            Stats::connection_lister->suspend = false;
 
-            // =====================================================
-            // From this point Core profile is really running.
-            //
-            // Only NOW publish application runtime state.
-            // =====================================================
-
-
-            // -----------------------------------------------------
-            // Traffic groups
-            // -----------------------------------------------------
-
-            Stats::trafficLooper
-                ->SetChainGroups(
-                    result->chainGroups
-                );
-
-
-            Stats::trafficLooper
-                ->loop_enabled
-                .store(
-                    true,
-                    std::memory_order_release
-                );
-
-
-            // -----------------------------------------------------
-            // Connection lister
-            // -----------------------------------------------------
-
-            Stats::connection_lister
-                ->suspend =
-                false;
-
-
-            // -----------------------------------------------------
-            // Persist running ID
-            // -----------------------------------------------------
-
-            // -----------------------------------------------------
-            // Publish runtime Profile ID and persist remember_id.
-            //
-            // IMPORTANT:
-            // A failure here does NOT mean that the Profile failed
-            // to start. The runtime state has already changed.
-            //
-            // It only means that Gryph could not persist the
-            // remembered Profile ID for the next application start.
-            // -----------------------------------------------------
-
-            const bool remembered =
-                Configs::dataManager
-                ->settingsRepo
-                ->UpdateStartedId(
-                    ent->Id()
-                );
-
+            const bool remembered = Configs::dataManager->settingsRepo->UpdateStartedId(ent->Id());
 
             if (!remembered)
             {
-                MW_show_log(
-                    tr(
-                        "The profile was started successfully, "
-                        "but Gryph could not save it as the "
-                        "remembered profile."
-                    )
-                );
+                MW_show_log(tr("The profile was started successfully, but Gryph could not save it as the remembered profile."));
             }
 
-            // =========================================================
-            // Create a new runtime session
-            //
-            // RuntimeSessionState is also captured by asynchronous
-            // operations, so the generation remains accessible even if
-            // MainWindow later gets destroyed.
-            // =========================================================
-
-            const auto runtimeState =
-                runtimeSessionState_;
-
+            const auto runtimeState = runtimeSessionState_;
 
             if (!runtimeState)
             {
                 return false;
             }
 
-
-            const quint64 sessionGeneration =
-                runtimeState
-                ->beginSession();
-
+            const quint64 sessionGeneration = runtimeState->beginSession();
 
             if (sessionGeneration == 0)
             {
@@ -2616,59 +2381,23 @@ void MainWindow::profile_start(int _id) {
                 return false;
             }
 
-
-            // -----------------------------------------------------
-            // Runtime country data belongs to this connection
-            // session, not permanently to Profile configuration.
-            // -----------------------------------------------------
-
             ent->ClearRunningCountryInfo();
 
+            publishRunningProfile(ent);
 
-            // -----------------------------------------------------
-            // Atomically publish running Profile
-            // -----------------------------------------------------
-
-            publishRunningProfile(
-                ent
-            );
-
-
-            // -----------------------------------------------------
-            // System proxy
-            // -----------------------------------------------------
-
-            if (Configs::dataManager
-                ->settingsRepo
-                ->spmode_system_proxy)
+            if (Configs::dataManager->settingsRepo->spmode_system_proxy)
             {
-                set_system_proxy(
-                    true
-                );
+                set_system_proxy(true);
             }
 
-
-            // =====================================================
-            // Initial UI update
-            // =====================================================
-
-            runOnUiThread(
-                [
-                    this,
-                    ent,
-                    sessionGeneration,
-                    runtimeState
-                ]()
+            runOnUiThread([this, ent, sessionGeneration, runtimeState]()
                 {
-                    if (!runtimeState ||
-                        !runtimeState->isCurrent(
-                            sessionGeneration))
+                    if (!runtimeState || !runtimeState->isCurrent(sessionGeneration))
                     {
                         return;
                     }
 
-                    if (runningProfileSnapshot() !=
-                        ent)
+                    if (runningProfileSnapshot() != ent)
                     {
                         return;
                     }
@@ -2682,20 +2411,7 @@ void MainWindow::profile_start(int _id) {
                 }
             );
 
-            // =====================================================
-            // Public IP/country lookup
-            //
-            // Fire-and-forget.
-            //
-            // profile_start_stage2 DOES NOT wait for HTTP.
-            // =====================================================
-
-            resolveRunningProfileCountryAsync(
-                ent,
-                sessionGeneration
-            );
-
-
+            resolveRunningProfileCountryAsync(ent, sessionGeneration);
             return true;
         };
 
@@ -2711,75 +2427,89 @@ void MainWindow::profile_start(int _id) {
     mu_stopping.unlock();
 
     // check core state
-    if (!Configs::dataManager->settingsRepo->core_running) {
-        runOnThread(
-            [=, this] {
-                MW_show_log(tr("Try to start the config, but the core has not listened to the RPC port, so restart it..."));
-                core_process->start_profile_when_core_is_up = ent->Id();
-                core_process->Restart();
-            },
-            DS_cores);
+    if (!Configs::dataManager->settingsRepo->core_running.load(std::memory_order_acquire))
+    {
+        const int requestedProfileId = ent->Id();
+
+        runOnThread([this, requestedProfileId]()
+            {
+                auto* supervisor = core_process;
+
+                if (!supervisor)
+                {
+                    MW_show_log("[CoreSupervisor] Core instance is not initialized");
+                    return;
+                }
+
+                // The last explicit user request wins.
+                supervisor->start_profile_when_core_is_up.store(requestedProfileId, std::memory_order_release);
+
+                const auto state = supervisor->lifecycleState();
+
+                // Do not kill a process that is already starting or establishing its IPC session.
+                if (state == Configs_sys::CoreSupervisor::State::Starting || state == Configs_sys::CoreSupervisor::State::AwaitingIPC || state == Configs_sys::CoreSupervisor::State::Recovering || state == Configs_sys::CoreSupervisor::State::Stopping)
+                {
+                    MW_show_log("[CoreSupervisor] Waiting for core readiness");
+                    return;
+                }
+
+                MW_show_log("[CoreSupervisor] Core is unavailable, requesting restart");
+
+                supervisor->Restart();
+            }, DS_cores
+        );
+
         mu_starting.unlock();
-        return; // let CoreProcess call profile_start when core is up
+        return;
     }
 
     // timeout message
-    auto restartMsgbox = new QMessageBox(QMessageBox::Question, software_name, tr("If there is no response for a long time, it is recommended to restart the software."),
-        QMessageBox::Yes | QMessageBox::No, this);
+    auto restartMsgbox = new QMessageBox(QMessageBox::Question, software_name, tr("If there is no response for a long time, it is recommended to restart the software."), QMessageBox::Yes | QMessageBox::No, this);
     connect(restartMsgbox, &QMessageBox::accepted, this, [=, this] { MW_dialog_message(MwMessage::RestartProgram, {}); });
     auto restartMsgboxTimer = new MessageBoxTimer(this, restartMsgbox, 10000);
 
-    Async::run([=, this] {
-        // stop current running
-        const auto runningSnapshot =
-            runningProfileSnapshot();
-        if (runningSnapshot)
+    Async::run([=, this] 
         {
-            profile_stop(
-                false,
-                false,
-                true
+            // stop current running
+            const auto runningSnapshot = runningProfileSnapshot();
+
+            if (runningSnapshot)
+            {
+                profile_stop(false, false, true);
+                mu_stopping.lock();
+                mu_stopping.unlock();
+            }
+            // do start
+            MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(profileDisplayTypeAndName(ent)));
+
+            if (!profile_start_stage2()) 
+            {
+                MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(profileDisplayTypeAndName(ent)));
+            }
+
+            mu_starting.unlock();
+            // cancel timeout
+            runOnUiThread([=] 
+                {
+                    restartMsgboxTimer->cancel();
+                    restartMsgboxTimer->deleteLater();
+                    restartMsgbox->deleteLater();
+                }
             );
-            mu_stopping.lock();
-            mu_stopping.unlock();
         }
-        // do start
-        MW_show_log(">>>>>>>> " + tr("Starting profile %1").arg(profileDisplayTypeAndName(ent)));
-        if (!profile_start_stage2()) {
-            MW_show_log("<<<<<<<< " + tr("Failed to start profile %1").arg(profileDisplayTypeAndName(ent)));
-        }
-        mu_starting.unlock();
-        // cancel timeout
-        runOnUiThread([=] {
-            restartMsgboxTimer->cancel();
-            restartMsgboxTimer->deleteLater();
-            restartMsgbox->deleteLater();
-            });
-        });
+    );
 }
 
-void MainWindow::profile_stop(
-    bool crash,
-    bool block,
-    bool manual)
+void MainWindow::profile_stop(bool crash, bool block, bool manual)
 {
-    // =====================================================
-    // Freeze the exact Profile being stopped
-    //
-    // Keep one strong shared_ptr for the whole operation.
-    // Never read global running-profile state from the
-    // worker again.
-    // =====================================================
-    const auto stoppingProfile =
-        runningProfileSnapshot();
+    const auto stoppingProfile = runningProfileSnapshot();
+
     if (!stoppingProfile)
     {
         return;
     }
 
-    const auto runtimeState =
-        runtimeSessionState_;
-
+    const auto runtimeState = runtimeSessionState_;
 
     const quint64 stoppingSessionGeneration =
         runtimeState

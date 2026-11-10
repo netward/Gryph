@@ -13,9 +13,10 @@
 #include <QMutexLocker>
 #include <QAbstractItemView>
 #include <QMenu>
+#include <QMetaObject>
 
 #include "include/configs/sub/GroupUpdater.hpp"
-#include "include/sys/Process.hpp"
+#include "include/sys/CoreSupervisor.hpp"
 #include "include/sys/AutoRun.hpp"
 #include "include/sys/UrlScheme.hpp"
 
@@ -87,54 +88,79 @@
 
 #include "include/sys/macos/MacOS.h"
 
-// Создание единственного экземпляра главного окна.
-// Вызывается из main.cpp после подготовки приложения, БД и рабочих потоков.
+bool MainWindow::verify_core_pid(QLocalSocket* socket) 
+{
+    if (!core_process)
+    {
+        return false;
+    }
 
-// Проверяет, что подключившийся к IPC-серверу процесс действительно является запущенным GryphCore.
-// PID извлекается платформенным способом и сравнивается с PID объекта core_process. 
-// Вызывающий код обязан удерживать coreProcessMutex.
-bool MainWindow::verify_core_pid(QLocalSocket* socket) {
-    if (!core_process) return false;
     qint64 expectedPid = core_process->processId();
-    if (expectedPid <= 0) return false;
+
+    if (expectedPid <= 0)
+    {
+        return false;
+    }
 
 #if defined(Q_OS_LINUX)
     struct ucred cred = {};
+
     socklen_t credLen = sizeof(cred);
-    if (getsockopt(static_cast<int>(socket->socketDescriptor()), SOL_SOCKET, SO_PEERCRED, &cred, &credLen) == 0) {
+
+    if (getsockopt(static_cast<int>(socket->socketDescriptor()), SOL_SOCKET, SO_PEERCRED, &cred, &credLen) == 0)
+    {
         return static_cast<qint64>(cred.pid) == expectedPid;
     }
+
     return false;
+
 #elif defined(Q_OS_MACOS)
+
     pid_t pid = 0;
+
     socklen_t pidLen = sizeof(pid);
-    if (getsockopt(static_cast<int>(socket->socketDescriptor()), SOL_LOCAL, LOCAL_PEERPID, &pid, &pidLen) == 0) {
+
+    if (getsockopt(static_cast<int>(socket->socketDescriptor()), SOL_LOCAL, LOCAL_PEERPID, &pid, &pidLen) == 0) 
+    {
         return static_cast<qint64>(pid) == expectedPid;
     }
+
     return false;
+
 #elif defined(Q_OS_WIN)
+
     ULONG pid = 0;
+
     HANDLE hPipe = reinterpret_cast<HANDLE>(static_cast<qintptr>(socket->socketDescriptor()));
-    if (GetNamedPipeClientProcessId(hPipe, &pid)) {
+
+    if (GetNamedPipeClientProcessId(hPipe, &pid)) 
+    {
         return static_cast<qint64>(pid) == expectedPid;
     }
+
     return false;
+
 #else
+
     Q_UNUSED(socket)
         return true;
+
 #endif
 }
 
-// Определяет, нужно ли использовать тёмную цветовую схему подсветки журнала.
-// Для известных тем яркость задаётся явно, для системных тем берётся режим ОС.
-static bool themeUsesDarkLog(const QString& theme) {
+static bool themeUsesDarkLog(const QString& theme) 
+{
     const auto lower = theme.toLower();
-    if (lower.contains("vista") || lower.contains("flatgray") || lower.contains("lightblue")) {
+    if (lower.contains("vista") || lower.contains("flatgray") || lower.contains("lightblue")) 
+    {
         return false; // light themes
     }
-    if (lower.contains("qdarkstyle") || lower.contains("blacksoft")) {
+
+    if (lower.contains("qdarkstyle") || lower.contains("blacksoft")) 
+    {
         return true; // dark themes
     }
+
     return isDarkMode(); // bi-mode themes, follow system preference
 }
 
@@ -146,359 +172,318 @@ namespace
 std::shared_ptr<Configs::Profile>
 MainWindow::runningProfileSnapshot() const noexcept
 {
-    return runningProfile_.load(
-        std::memory_order_acquire
-    );
+    return runningProfile_.load(std::memory_order_acquire);
 }
 
-
-void MainWindow::publishRunningProfile(
-    const std::shared_ptr<Configs::Profile>& profile
-) noexcept
+void MainWindow::publishRunningProfile(const std::shared_ptr<Configs::Profile>& profile) noexcept
 {
-    runningProfile_.store(
-        profile,
-        std::memory_order_release
-    );
+    runningProfile_.store(profile, std::memory_order_release);
 }
 
-
-bool MainWindow::clearRunningProfileIf(
-    const std::shared_ptr<Configs::Profile>& expected
-) noexcept
+bool MainWindow::clearRunningProfileIf(const std::shared_ptr<Configs::Profile>& expected) noexcept
 {
     if (!expected)
     {
         return false;
     }
 
+    auto current = expected;
 
-    auto current =
-        expected;
-
-
-    return runningProfile_
-        .compare_exchange_strong(
-            current,
-            nullptr,
-
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );
+    return runningProfile_.compare_exchange_strong(current, nullptr, std::memory_order_acq_rel, std::memory_order_acquire);
 }
 
-// Конструктор полностью собирает рабочее состояние главного окна.
-// Последовательность инициализации:
-//   1. Регистрирует глобальные UI-callback и deeplink-обработчик.
-//   2. Восстанавливает автозапуск, URL-схему, тему, геометрию и шрифты.
-//   3. Настраивает журнал и фоновые потоки.
-//   4. Создаёт локальный IPC-сервер для GryphCore и запускает ядро.
-//   5. Подключает меню, таблицы, фильтры, статистику и график скорости.
-//   6. Формирует системный трей и динамические меню.
-//   7. Настраивает маршруты, тестирование, импорт, таймеры и обновления.
-// Большинство connect() связывают действие пользователя или системное событие с методом MainWindow либо асинхронной задачей.
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
-    // Регистрация главного окна и глобальных UI-маршрутизаторов.
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) 
+{
     setAcceptDrops(true);
 
-    // Проверка соответствия прав записи автозапуска текущим правам процесса и при необходимости перенос старого формата настройки автозапуска.
     AutoRun_FixPrivilegeIfNeeded();
+
     AutoRun_MigrateIfNeeded();
 
-    // Регистрация пользовательской URL-схемы Gryph://.
     UrlScheme_RegisterIfNeeded();
 
-    // Создание интерфейса и применение темы.
     bool isNum;
+
     Configs::dataManager->settingsRepo->theme.toInt(&isNum);
-    if (isNum) {
+
+    if (isNum) 
+    {
         Configs::dataManager->settingsRepo->theme = "System";
     }
-    // Тема применяется до setupUi(), чтобы создаваемые виджеты сразу получили правильную палитру и таблицы стилей.
+
     themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme);
-    // Создание элементов mainwindow.ui, их назначение ui-полям.
+
     ui->setupUi(this);
 
-    // Инициализация сочетаний клавиш.
     setActionsData();
+
     loadShortcuts();
 
-    // Восстановление положения и размеров окна.
-    if (!Configs::dataManager->settingsRepo->mainWindowGeometry.isEmpty()) {
+    if (!Configs::dataManager->settingsRepo->mainWindowGeometry.isEmpty()) 
+    {
         auto geo = DecodeB64IfValid(Configs::dataManager->settingsRepo->mainWindowGeometry);
         this->restoreGeometry(geo);
     }
 
-    // Настройка просмотрщика журналов.
     ui->splitter->restoreState(DecodeB64IfValid(Configs::dataManager->settingsRepo->splitter_state));
-    rebuildLogHighlighter(
-        themeUsesDarkLog(
-            Configs::dataManager
-            ->settingsRepo
-            ->theme
-        )
-    );
+   
+    rebuildLogHighlighter(themeUsesDarkLog(Configs::dataManager->settingsRepo->theme));
+
     qvLogDocument->setUndoRedoEnabled(false);
+
     qvLogDocument->setMaximumBlockCount(Configs::dataManager->settingsRepo->max_log_line);
+
     ui->masterLogBrowser->setUndoRedoEnabled(false);
+
     ui->masterLogBrowser->setDocument(qvLogDocument);
+
     applyLogBrowserFont();
+
     updateLogFilterFields();
-    logStopRequested_.store(
-        false,
-        std::memory_order_release
-    );
 
+    logStopRequested_.store(false, std::memory_order_release);
 
-    logWorkerThread_ =
-        QThread::create(
-            [this]()
-            {
-                log_process_loop();
-            }
-        );
-
-
-    logWorkerThread_
-        ->setObjectName(
-            QStringLiteral(
-                "GryphLogWorker"
-            )
-        );
-
-
-    logWorkerThread_
-        ->start();
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
-    connect(
-        qApp->styleHints(),
-        &QStyleHints::colorSchemeChanged,
-        this,
-
-        [this](
-            const Qt::ColorScheme scheme
-            )
+    logWorkerThread_ = QThread::create(
+        [this]()
         {
-            rebuildLogHighlighter(
-                scheme ==
-                Qt::ColorScheme::Dark
-            );
-
-
-            themeManager->ApplyTheme(
-                Configs::dataManager
-                ->settingsRepo
-                ->theme,
-
-                true
-            );
+            log_process_loop();
         }
     );
-#endif
-    // Реакция на смену темы из настроек.
-    connect(
-        themeManager,
-        &ThemeManager::themeChanged,
-        this,
 
-        [this](
-            const QString& theme
-            )
+
+    logWorkerThread_->setObjectName(QStringLiteral("GryphLogWorker"));
+
+    logWorkerThread_->start();
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+
+    connect(qApp->styleHints(), &QStyleHints::colorSchemeChanged, this,
+        [this](const Qt::ColorScheme scheme)
         {
-            rebuildLogHighlighter(
-                themeUsesDarkLog(
-                    theme
-                )
-            );
+            rebuildLogHighlighter(scheme == Qt::ColorScheme::Dark);
 
+            themeManager->ApplyTheme(Configs::dataManager->settingsRepo->theme, true);
+        }
+    );
+
+#endif
+
+    connect(themeManager, &ThemeManager::themeChanged,this,
+        [this](const QString& theme)
+        {
+            rebuildLogHighlighter(themeUsesDarkLog(theme));
 
             scheduleProxyListRefresh();
         }
     );
     
-    // Выбор входящего порта.
     if (Configs::dataManager->settingsRepo->random_inbound_port)
     {
         Configs::dataManager->settingsRepo->inbound_socks_port = MkPort();
     }
 
-    // Получение сведений об устройстве.
-    Async::run(
-        []
-        {
-            GetDeviceDetails();
-        }
-    );
+    Async::run([] {GetDeviceDetails(); });
 
-    // Подготовка параметров GryphCore.
-    QString core_path =
-        QDir(QApplication::applicationDirPath()).filePath(
+    QString core_path = QDir(QApplication::applicationDirPath()).filePath(
     #ifdef Q_OS_WIN
             QStringLiteral("GryphCore.exe")
     #else
             QStringLiteral("GryphCore")
     #endif
         );
-    // Режим отладки ядра в зависимости от выбранного уровня журналирования.
+
     bool coreDebugMode = (Configs::dataManager->settingsRepo->log_level == "debug");
 
-    // Создание локального IPC-сервера со случаййным UUID для избежания конфликтов между экземплярами.
-    Configs::dataManager->settingsRepo->core_socket_name =
-        "gryphIPC-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    Configs::dataManager->settingsRepo->core_socket_name = "gryphIPC-" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+
     core_server = new QLocalServer(this);
-    // Подключение к IPC-серверу только для текущего пользователя.
+
     core_server->setSocketOptions(QLocalServer::UserAccessOption);
-    if (!core_server->listen(Configs::dataManager->settingsRepo->core_socket_name)) {
+
+    if (!core_server->listen(Configs::dataManager->settingsRepo->core_socket_name)) 
+    {
         qWarning() << "Failed to start IPC server:" << core_server->errorString();
         qApp->quit();
     }
 
-    // Обработка подключения ядра к серверу.
-    // PID клиента дополнительно сверяется с PID GryphCore.
-    connect(core_server, &QLocalServer::newConnection, this, [=, this]() {
-        auto socket = core_server->nextPendingConnection();
-        int profileId = -1;
+    connect(core_server, & QLocalServer::newConnection, this, [this]()
         {
-            // Защита core_process от одновременного чтения и записи.
-            // Поток DS_cores может в этот момент ещё создавать или запускать объект процесса.
-            QMutexLocker lock(&coreProcessMutex);
-            if (!verify_core_pid(socket)) {
-                MW_show_log("[Warn] IPC connection from unexpected process rejected");
-                socket->close();
-                socket->deleteLater();
+            QLocalSocket* socket = core_server->nextPendingConnection();
+
+            if (!socket)
+            {
                 return;
             }
-            if (core_process) {
-                // Забираем одноразовое задание запуска сохранённого профиля.
-                profileId = core_process->start_profile_when_core_is_up;
-                // Сбрасываем значение, чтобы профиль не был запущен повторно при следующем переподключении ядра.
-                core_process->start_profile_when_core_is_up = -1;
+
+            Configs_sys::CoreSupervisor* supervisor = nullptr;
+
+            qint64 expectedPid = 0;
+
+            {
+                QMutexLocker lock(&coreProcessMutex);
+
+                if (!verify_core_pid(socket))
+                {
+                    MW_show_log("[Warn] IPC connection from unexpected process rejected");
+
+                    socket->close();
+                    socket->deleteLater();
+                    return;
+                }
+
+                supervisor = core_process;
+                expectedPid = supervisor->processId();
+            }
+
+            // Reconnect() adopts the socket on the RPC
+            // IO thread using BlockingQueuedConnection.
+            // It must complete before Ready is announced.
+            setup_rpc(socket);
+
+            // The process may have exited or restarted while the RPC socket was being adopted.
+            {
+                QMutexLocker lock(&coreProcessMutex);
+
+                if (core_process != supervisor || !supervisor || supervisor->processId() != expectedPid)
+                {
+                    MW_show_log("[CoreSupervisor] Stale IPC connection ignored");
+
+                    return;
+                }
+
+                // State transitions belong to DS_cores.
+                // Do not modify supervisor state in UI thread.
+                QMetaObject::invokeMethod(supervisor, [supervisor, expectedPid]()
+                    {
+                        supervisor->ConfirmIpcReady(expectedPid);
+                    },
+                    Qt::QueuedConnection
+                );
             }
         }
-        // Создание RPC-канала поверх сокета после проверки клиента.
-        setup_rpc(socket);
-        Configs::dataManager->settingsRepo->core_running.store(
-            true,
-            std::memory_order_release
-        );
-        // Уведомление главного окна о готовности ядра.
-        // Обработчик CoreStarted восстановит нужные режимы и при необходимости запустит profileId.
-        MW_dialog_message(MwMessage::CoreStarted, { Int2String(profileId) });
-        });
+    );
 
-    // Запуск GryphCore
     auto socketFullName = core_server->fullServerName();
-    runOnThread(
-        [=, this] {
+    runOnThread([=, this] 
+        {
             QMutexLocker lock(&coreProcessMutex);
-            MW_show_log(
-                "[Debug] Core path: " +
-                QDir::toNativeSeparators(core_path)
-            );
 
-            MW_show_log(
-                QString("[Debug] Core exists: %1")
-                .arg(QFileInfo::exists(core_path))
-            );
-            core_process = new Configs_sys::CoreProcess(core_path, socketFullName, coreDebugMode);
-            // Если включено восстановление последнего профиля, его ID сохраняется в объекте процесса до фактического запуска ядра.
-            if (Configs::dataManager->settingsRepo->remember_enable &&
-                Configs::dataManager->settingsRepo->remember_id >= 0) {
-                core_process->start_profile_when_core_is_up =
-                    Configs::dataManager->settingsRepo->remember_id;
+            MW_show_log("[Debug] Core path: " + QDir::toNativeSeparators(core_path));
+            MW_show_log(QString("[Debug] Core exists: %1").arg(QFileInfo::exists(core_path)));
+
+            core_process = new Configs_sys::CoreSupervisor(core_path, socketFullName,coreDebugMode);
+
+            if (Configs::dataManager->settingsRepo->remember_enable && Configs::dataManager->settingsRepo->remember_id >= 0) 
+            {
+                core_process->start_profile_when_core_is_up = Configs::dataManager->settingsRepo->remember_id;
             }
+
             core_process->Start();
         },
         DS_cores);
 
-    // Применение пользовательского шрифта
-    if (!Configs::dataManager->settingsRepo->font.isEmpty()) {
+    if (!Configs::dataManager->settingsRepo->font.isEmpty()) 
+    {
         auto font = qApp->font();
+
         font.setFamily(Configs::dataManager->settingsRepo->font);
-        qApp->setFont(font);
-    }
-    if (Configs::dataManager->settingsRepo->font_size != 0) {
-        auto font = qApp->font();
-        font.setPointSize(Configs::dataManager->settingsRepo->font_size);
+
         qApp->setFont(font);
     }
 
-    // Ограничение параллельных вызовов ядра
+    if (Configs::dataManager->settingsRepo->font_size != 0)
+    {
+        auto font = qApp->font();
+
+        font.setPointSize(Configs::dataManager->settingsRepo->font_size);
+
+        qApp->setFont(font);
+    }
+
     parallelCoreCallPool->setMaxThreadCount(10);
 
-    // Основные действия, вкладки и фильтры
     connect(ui->menu_start, &QAction::triggered, this, [=, this]() { profile_start(); });
     connect(ui->menu_stop, &QAction::triggered, this, [=, this]() { profile_stop(false, false, true); });
-    // При перетаскивании вкладки сохраняем новый порядок групп.
-    connect(ui->tabWidget->tabBar(), &QTabBar::tabMoved, this, [=, this](int from, int to) {
-        // tabData каждой вкладки содержит ID соответствующей группы.
-        QList<int> tabOrder;
-        for (int i = 0; i < ui->tabWidget->tabBar()->count(); i++) {
-            tabOrder += ui->tabWidget->tabBar()->tabData(i).toInt();
+
+    connect(ui->tabWidget->tabBar(), &QTabBar::tabMoved, this, [=, this](int from, int to) 
+        {
+            QList<int> tabOrder;
+
+            for (int i = 0; i < ui->tabWidget->tabBar()->count(); i++) 
+            {
+                tabOrder += ui->tabWidget->tabBar()->tabData(i).toInt();
+            }
+
+            Configs::dataManager->groupsRepo->SetGroupsTabOrder(tabOrder);
+
+            on_tabWidget_currentChanged(ui->tabWidget->tabBar()->currentIndex());
         }
-        Configs::dataManager->groupsRepo->SetGroupsTabOrder(tabOrder);
-        on_tabWidget_currentChanged(ui->tabWidget->tabBar()->currentIndex());
-        });
-    // Главное окно перехватывает клики и двойные клики виджетов через MainWindow::eventFilter().
+    );
+
     ui->label_running->installEventFilter(this);
     ui->label_inbound->installEventFilter(this);
+
     ui->splitter->installEventFilter(this);
     ui->tabWidget->installEventFilter(this);
-    // Кнопка в углу вкладок показывает или скрывает поля фильтрации в пользовательском заголовке таблицы профилей.
+
     auto btnFilter = new QToolButton(this);
+
     btnFilter->setIcon(QIcon(":/icon/filter.png"));
     btnFilter->setToolTip(QString("%1\n%2").arg(tr("Enable Filter"), QKeySequence(QKeySequence::Find).toString(QKeySequence::NativeText)));
     btnFilter->setShortcut(QKeySequence::Find);
     btnFilter->setCheckable(true);
+    
     connect(btnFilter, &QToolButton::toggled, static_cast<ProfilesTableFilterHeader*>(ui->profilesTableView->horizontalHeader()), &ProfilesTableFilterHeader::setFiltersVisible);
+    
     ui->tabWidget->setCornerWidget(btnFilter, Qt::TopRightCorner);
-    // Регистрация глобальных системных горячих клавиш.
+
     RegisterHotkey(false);
-    // Дополнительное восстановление размера для старого формата настроек вида "ШxВ".
+
     auto last_size = Configs::dataManager->settingsRepo->mw_size.split("x");
-    if (last_size.length() == 2) {
+   
+    if (last_size.length() == 2) 
+    {
         auto w = last_size[0].toInt();
         auto h = last_size[1].toInt();
-        if (w > 0 && h > 0) {
+
+        if (w > 0 && h > 0) 
+        {
             resize(w, h);
         }
     }
 
-    // Идентификация приложения и подготовка служебных каталогов
     software_name = "Gryph";
     software_core_name = "sing-box";
-    //  Создание локальной страницы-заглушки при первом запуске.
-    if (auto dashDir = QDir("dashboard"); !dashDir.exists() && QDir().mkdir("dashboard")) {
+
+    if (auto dashDir = QDir("dashboard"); !dashDir.exists() && QDir().mkdir("dashboard")) 
+    {
         if (auto dashFile = QFile(":/Gryph/dashboard-notice.html"); dashFile.exists() && dashFile.open(QIODevice::ReadOnly))
         {
             auto data = dashFile.readAll();
+
             if (auto dest = QFile("dashboard/index.html"); dest.open(QIODevice::Truncate | QIODevice::WriteOnly))
             {
                 dest.write(data);
                 dest.close();
             }
+
             dashFile.close();
         }
     }
-    // Использование каталога icons для пользовательских иконок профилей.
-    if (auto iconsDir = QDir("icons"); !iconsDir.exists()) {
+
+    if (auto iconsDir = QDir("icons"); !iconsDir.exists()) 
+    {
         QDir().mkdir("icons") ? qDebug("created icons dir") : qDebug("Failed to create icons dir");
     }
 
-    // Верхняя панель и меню.
     ui->toolButton_program->setMenu(ui->menu_program);
     ui->toolButton_preferences->setMenu(ui->menu_preferences);
     ui->toolButton_server->setMenu(ui->menu_server);
     ui->toolButton_routing->setMenu(ui->menuRouting_Menu);
-    ui->menubar->setVisible(false);
-    // Проверка обновлений выполняется в новом потоке, так как содержит сетевой запрос к GitHub.
-    connect(
-        ui->toolButton_update,
-        &QToolButton::clicked,
-        this,
 
-        [this]()
+    ui->menubar->setVisible(false);
+
+    connect(ui->toolButton_update, & QToolButton::clicked, this, [this]()
         {
             CheckUpdate();
         }
@@ -509,256 +494,125 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         ui->toolButton_update->hide();
     }
 
-    // Таблица активных соединений и статистика.
     setupConnectionList();
-    // Возврат пользователя на последнюю открытую вкладку статистики.
+
     ui->stats_widget->tabBar()->setCurrentIndex(Configs::dataManager->settingsRepo->stats_tab);
+
     connect(ui->stats_widget->tabBar(), &QTabBar::currentChanged, this, [=, this](int index)
         {
             Configs::dataManager->settingsRepo->stats_tab = ui->stats_widget->tabBar()->currentIndex();
-        });
-    // Изменение критерия сортировки активных соединений при нажатии на заголовок.
-    // Сортировка профилей по нажатию на заголовок.
-    // Повторное нажатие на тот же столбец
-    // переключает направление.
-    const auto sortGroupAsync =
-        [](
-            const std::shared_ptr<
-            Configs::Group
-            >& group,
+        }
+    );
 
-            const GroupSortAction& action
-            )
+    const auto sortGroupAsync = [](const std::shared_ptr<Configs::Group>& group, const GroupSortAction& action)
+    {
+        if (!group)
         {
-            if (!group)
+            return;
+        }
+
+        const int groupId = group->Id();
+
+        Async::run([group, groupId, action]()
             {
-                return;
-            }
-
-
-            const int groupId =
-                group->Id();
-
-
-            Async::run(
-                [
-                    group,
-                    groupId,
-                    action
-                ]()
+                if (!group->SortProfiles(action))
                 {
-                    // =================================================
-                    // Background part
-                    //
-                    // No MainWindow pointer.
-                    // =================================================
-
-                    if (!group->SortProfiles(
-                        action
-                    ))
+                    if (!group->SortProfiles(action))
                     {
-                        // Retry once because the Group may have changed
-                        // between snapshot and commit.
+                        MW_show_log("Group changed while sorting; sort cancelled.");
 
-                        if (!group->SortProfiles(
-                            action
-                        ))
+                        return;
+                    }
+                }
+
+                Configs::dataManager->groupsRepo->Save(group);
+
+                (void)MainWindowApi::Post([groupId](MainWindow & window)
+                    {
+                        const auto currentGroup = Configs::dataManager->groupsRepo->CurrentGroup();
+
+                        if (!currentGroup || currentGroup->Id() != groupId)
                         {
-                            MW_show_log(
-                                "Group changed while sorting; "
-                                "sort cancelled."
-                            );
-
                             return;
                         }
+
+                        window.refresh_proxy_list({}, true);
                     }
+                );
+            }
+        );
+    };
 
-
-                    Configs::dataManager
-                        ->groupsRepo
-                        ->Save(
-                            group
-                        );
-
-
-                    // =================================================
-                    // UI part
-                    // =================================================
-
-                    (void)MainWindowApi::Post(
-                        [
-                            groupId
-                        ](MainWindow& window)
-                        {
-                            const auto currentGroup =
-                                Configs::dataManager
-                                ->groupsRepo
-                                ->CurrentGroup();
-
-
-                            // User may have switched tabs while the sort
-                            // operation was running.
-                            if (!currentGroup ||
-                                currentGroup->Id()
-                                != groupId)
-                            {
-                                return;
-                            }
-
-
-                            window.refresh_proxy_list(
-                                {},
-                                true
-                            );
-                        }
-                                );
-                }
-            );
-        };
-
-    // =========================================================
     // Profile table sort state
     //
     // 0 = default subscription order
     // 1 = ascending
     // 2 = descending
-    // =========================================================
-
     struct ProfileSortState
     {
         int column = -1;
         int mode = 0;
     };
 
+    const auto profileSortState = std::make_shared<ProfileSortState>();
 
-    const auto profileSortState =
-        std::make_shared<ProfileSortState>();
-
-
-    const auto restoreDefaultOrderAsync =
-        [](
-            const std::shared_ptr<
-            Configs::Group
-            >& group
-            )
+    const auto restoreDefaultOrderAsync = [](const std::shared_ptr<Configs::Group> & group)
+    {
+        if (!group)
         {
-            if (!group)
+            return;
+        }
+
+        const int groupId = group->Id();
+
+        Async::run([group, groupId]()
             {
-                return;
-            }
-
-
-            const int groupId =
-                group->Id();
-
-
-            Async::run(
-                [
-                    group,
-                    groupId
-                ]()
+                if (!group->RestoreDefaultProfileOrder())
                 {
-                    // =================================================
-                    // Background work
-                    // =================================================
+                    MW_show_log("Default profile order is not available.");
 
-                    if (!group
-                        ->RestoreDefaultProfileOrder())
-                    {
-                        MW_show_log(
-                            "Default profile order "
-                            "is not available."
-                        );
-
-                        return;
-                    }
-
-
-                    Configs::dataManager
-                        ->groupsRepo
-                        ->Save(
-                            group
-                        );
-
-
-                    // =================================================
-                    // UI completion
-                    // =================================================
-
-                    (void)MainWindowApi::Post(
-                        [
-                            groupId
-                        ](MainWindow& window)
-                        {
-                            const auto currentGroup =
-                                Configs::dataManager
-                                ->groupsRepo
-                                ->CurrentGroup();
-
-
-                            if (!currentGroup ||
-                                currentGroup->Id()
-                                != groupId)
-                            {
-                                return;
-                            }
-
-
-                            window.refresh_proxy_list(
-                                {},
-                                true
-                            );
-                        }
-                                );
+                    return;
                 }
-            );
-        };
 
-    connect(
-        ui->profilesTableView->horizontalHeader(),
-        &QHeaderView::sectionClicked,
-        this,
+                Configs::dataManager->groupsRepo->Save(group);
 
-        [
-            this,
-            sortGroupAsync,
-            restoreDefaultOrderAsync,
-            profileSortState
-        ](int logicalIndex)
+                (void)MainWindowApi::Post([groupId](MainWindow & window)
+                    {
+                        const auto currentGroup = Configs::dataManager->groupsRepo->CurrentGroup();
+
+                        if (!currentGroup || currentGroup->Id() != groupId)
+                        {
+                            return;
+                        }
+
+                        window.refresh_proxy_list({}, true);
+                    }
+                );
+            }
+        );
+    };
+
+    connect(ui->profilesTableView->horizontalHeader(), &QHeaderView::sectionClicked, this,
+    [this, sortGroupAsync, restoreDefaultOrderAsync,profileSortState](int logicalIndex)
         {
             // We only have five sortable columns.
-            if (logicalIndex < 0 ||
-                logicalIndex > 4)
+            if (logicalIndex < 0 || logicalIndex > 4)
             {
                 return;
             }
 
-
-            auto group =
-                Configs::dataManager
-                ->groupsRepo
-                ->CurrentGroup();
-
+            auto group = Configs::dataManager->groupsRepo->CurrentGroup();
 
             if (!group)
             {
                 return;
             }
 
-
-            // =================================================
-            // Determine next state
-            // =================================================
-
-            if (profileSortState->column !=
-                logicalIndex)
+            if (profileSortState->column != logicalIndex)
             {
-                // First click on another column.
-                profileSortState->column =
-                    logicalIndex;
+                profileSortState->column = logicalIndex;
 
-                profileSortState->mode =
-                    1; // ascending
+                profileSortState->mode = 1; // ascending
             }
             else
             {
@@ -776,74 +630,44 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                 {
                 case 0:
 
-                    profileSortState->mode =
-                        1;
+                    profileSortState->mode = 1;
 
                     break;
-
 
                 case 1:
 
-                    profileSortState->mode =
-                        2;
+                    profileSortState->mode = 2;
 
                     break;
-
 
                 case 2:
 
-                    profileSortState->mode =
-                        0;
+                    profileSortState->mode = 0;
 
                     break;
 
-
                 default:
 
-                    profileSortState->mode =
-                        1;
+                    profileSortState->mode = 1;
 
                     break;
                 }
             }
 
-
-            auto* header =
-                ui->profilesTableView
-                ->horizontalHeader();
-
-
-            // =================================================
-            // Default subscription order
-            // =================================================
+            auto* header = ui->profilesTableView->horizontalHeader();
 
             if (profileSortState->mode == 0)
             {
-                // No active ascending/descending sort.
-                header->setSortIndicatorShown(
-                    false
-                );
+                header->setSortIndicatorShown(false);
 
-
-                restoreDefaultOrderAsync(
-                    group
-                );
-
+                restoreDefaultOrderAsync(group);
 
                 return;
             }
 
-
-            // =================================================
-            // Ascending / descending
-            // =================================================
-
             GroupSortAction action;
 
-
-            action.descending =
-                profileSortState->mode == 2;
-
+            action.descending = profileSortState->mode == 2;
 
             // -------------------------------------------------
             // Column mapping
@@ -854,81 +678,51 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             // 3 = Test Result
             // 4 = Traffic
             // -------------------------------------------------
-
             switch (logicalIndex)
             {
             case 0:
 
-                action.method =
-                    GroupSortMethod::ByName;
+                action.method = GroupSortMethod::ByName;
 
                 break;
-
 
             case 1:
 
-                action.method =
-                    GroupSortMethod::ByType;
+                action.method = GroupSortMethod::ByType;
 
                 break;
-
 
             case 2:
 
-                action.method =
-                    GroupSortMethod::ByAddress;
+                action.method = GroupSortMethod::ByAddress;
 
                 break;
-
 
             case 3:
 
-                action.method =
-                    GroupSortMethod::ByTestResult;
+                action.method = GroupSortMethod::ByTestResult;
 
                 break;
-
 
             case 4:
 
-                action.method =
-                    GroupSortMethod::ByTraffic;
+                action.method = GroupSortMethod::ByTraffic;
 
                 break;
-
 
             default:
 
                 return;
             }
 
+            header->setSortIndicatorShown(true);
 
-            // =================================================
-            // Visual sort indicator
-            // =================================================
-
-            header->setSortIndicatorShown(
-                true
-            );
-
-
-            header->setSortIndicator(
-                logicalIndex,
-
-                action.descending
+            header->setSortIndicator(logicalIndex, action.descending
                 ? Qt::DescendingOrder
                 : Qt::AscendingOrder
             );
 
-
-            // =================================================
-            // Execute
-            // =================================================
-
-            sortGroupAsync(
-                group,
-                action
-            );
+            sortGroupAsync(group, action);
         }
     );
 
@@ -3756,291 +3550,187 @@ void MainWindow::on_commitDataRequest() {
 
 void MainWindow::prepare_exit()
 {
-    qDebug()
-        << "prepare for exit...";
-
+    qDebug() << "prepare for exit...";
 
     mu_exit.lock();
 
-
-    if (Configs::dataManager
-        ->settingsRepo
-        ->prepare_exit)
+    if (Configs::dataManager->settingsRepo->prepare_exit)
     {
-        qDebug()
-            << "prepare exit had already succeeded, ignoring...";
+        qDebug() << "prepare exit had already succeeded, ignoring...";
 
         mu_exit.unlock();
 
         return;
     }
 
-
-    Configs::dataManager
-        ->settingsRepo
-        ->prepare_exit =
-        true;
-
-
-    // =====================================================
-    // Invalidate asynchronous runtime operations FIRST.
-    // =====================================================
+    Configs::dataManager->settingsRepo->prepare_exit = true;
 
     if (runtimeSessionState_)
     {
-        runtimeSessionState_
-            ->shutdown();
+        runtimeSessionState_->shutdown();
     }
 
+    set_system_proxy(false);
 
-    // =====================================================
-    // Normal shutdown continues below.
-    // =====================================================
-
-    set_system_proxy(
-        false
-    );
-
-
-    if (Configs::dataManager
-        ->settingsRepo
-        ->system_dns_set)
+    if (Configs::dataManager->settingsRepo->system_dns_set)
     {
-        set_system_dns(
-            false,
-            false
-        );
+        set_system_dns(false, false);
     }
 
+    RegisterHiddenMenuShortcuts(true);
 
-    RegisterHiddenMenuShortcuts(
-        true
-    );
-
-
-    RegisterHotkey(
-        true
-    );
-
+    RegisterHotkey(true);
 
     on_commitDataRequest();
 
+    Configs::dataManager->settingsRepo->noSave = true;
 
-    Configs::dataManager
-        ->settingsRepo
-        ->noSave =
-        true;
+    profile_stop(false, true);
 
-
-    profile_stop(
-        false,
-        true
-    );
-
-
-    runOnThread(
-        [this]()
+    runOnThread([this]()
         {
-            core_process
-                ->Kill();
-        },
-
-        DS_cores,
-
-        true
+            if (core_process)
+            {
+                core_process->StopForExit();
+            }
+        }, DS_cores, true
     );
 
-
-    HideWindow(
-        this
-    );
-
+    HideWindow(this);
 
     mu_exit.unlock();
 
-
-    qDebug()
-        << "prepare exit done!";
+    qDebug() << "prepare exit done!";
 }
 
-void MainWindow::on_menu_exit_triggered() {
+void MainWindow::on_menu_exit_triggered() 
+{
     prepare_exit();
-    //
-    if (exit_reason == 1) {
+   
+    if (exit_reason == 1) 
+    {
         QDir::setCurrent(QApplication::applicationDirPath());
+
 #ifdef Q_OS_WIN
+
         QFile::copy("./updater.exe", "./updater.old");
+
         QProcess::startDetached("./updater.old", QStringList{});
+
 #else
+
         QProcess::startDetached("./updater", QStringList{});
+
 #endif
+
     }
-    else if (exit_reason == 2 || exit_reason == 3 || exit_reason == 4) {
+    else if (exit_reason == 2 || exit_reason == 3 || exit_reason == 4) 
+    {
         QDir::setCurrent(QApplication::applicationDirPath());
 
         auto arguments = Configs::dataManager->settingsRepo->argv;
-        if (arguments.length() > 0) {
+
+        if (arguments.length() > 0) 
+        {
             arguments.removeFirst();
             arguments.removeAll("-tray");
             arguments.removeAll("-flag_restart_tun_on");
             arguments.removeAll("-flag_restart_dns_set");
         }
+
         auto program = QApplication::applicationFilePath();
 
-        if (exit_reason == 3 || exit_reason == 4) {
+        if (exit_reason == 3 || exit_reason == 4) 
+        {
             if (exit_reason == 3) arguments << "-flag_restart_tun_on";
             if (exit_reason == 4) arguments << "-flag_restart_dns_set";
+
 #ifdef Q_OS_WIN
+
             WinCommander::runProcessElevated(program, arguments, "", 1, false);
+
 #else
+
             QProcess::startDetached(program, arguments);
+
 #endif
+
         }
-        else {
+        else 
+        {
             QProcess::startDetached(program, arguments);
         }
     }
     QCoreApplication::quit();
 }
 
-void MainWindow::toggle_system_proxy() {
+void MainWindow::toggle_system_proxy() 
+{
     auto currentState = Configs::dataManager->settingsRepo->spmode_system_proxy;
-    if (currentState) {
+
+    if (currentState) 
+    {
         set_spmode_system_proxy(false);
     }
-    else {
+    else 
+    {
         set_spmode_system_proxy(true);
     }
 }
 
-bool MainWindow::get_elevated_permissions(int reason) {
+bool MainWindow::get_elevated_permissions(int reason) 
+{
     if (Configs::dataManager->settingsRepo->disable_privilege_req)
     {
         MW_show_log(tr("User opted for no privilege req, some features may not work"));
         return true;
     }
-    if (Configs::IsAdmin()) return true;
+
+    if (Configs::IsAdmin()) 
+    {
+        return true;
+    }
+        
 #ifdef Q_OS_LINUX
 
     if (!Linux_HavePkexec())
     {
-        MessageBoxWarning(
-            software_name,
-            "Please install \"pkexec\" first."
-        );
+        MessageBoxWarning(software_name, "Please install \"pkexec\" first.");
 
         return false;
     }
 
-
-    const auto answer =
-        QMessageBox::warning(
-            GetMessageBoxParent(),
-            software_name,
-            tr("Please give the core root privileges"),
-            QMessageBox::Yes |
-            QMessageBox::No
-        );
-
+    const auto answer = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please give the core root privileges"), QMessageBox::Yes | QMessageBox::No);
 
     if (answer == QMessageBox::Yes)
     {
-        // =====================================================
-        // Finite background operation.
-        //
-        // No MainWindow pointer is required here.
-        // =====================================================
-        Async::run(
-            []()
+        
+        Async::run([]()
             {
-                const QString corePath =
-                    Configs::FindCoreRealPath();
+                const QString corePath = Configs::FindCoreRealPath();
+                const QString chownArgs =QStringLiteral("root:root ") + corePath;
 
-
-                // =====================================================
-                // Owner
-                // =====================================================
-
-                const QString chownArgs =
-                    QStringLiteral(
-                        "root:root "
-                    )
-                    +
-                    corePath;
-
-
-                int ret =
-                    Linux_Run_Command(
-                        "chown",
-                        chownArgs
-                    );
-
+                int ret = Linux_Run_Command("chown", chownArgs);
 
                 if (ret != 0)
                 {
-                    MW_show_log(
-                        QString(
-                            "Failed to run chown %1, "
-                            "code is %2"
-                        )
-                        .arg(
-                            chownArgs
-                        )
-                        .arg(
-                            ret
-                        )
-                    );
+                    MW_show_log(QString("Failed to run chown %1, code is %2").arg(chownArgs).arg(ret));
+                    return;
+                }
 
+                const QString chmodArgs = QStringLiteral("u+s ") + corePath;
+               
+                ret = Linux_Run_Command("chmod", chmodArgs);
+
+                if (ret != 0)
+                {
+                    MW_show_log(QString("Failed to run chmod %1, code is %2").arg(chmodArgs).arg(ret));
 
                     return;
                 }
 
-
-                // =====================================================
-                // setuid
-                // =====================================================
-
-                const QString chmodArgs =
-                    QStringLiteral(
-                        "u+s "
-                    )
-                    +
-                    corePath;
-
-
-                ret =
-                    Linux_Run_Command(
-                        "chmod",
-                        chmodArgs
-                    );
-
-
-                if (ret != 0)
-                {
-                    MW_show_log(
-                        QString(
-                            "Failed to run chmod %1, "
-                            "code is %2"
-                        )
-                        .arg(
-                            chmodArgs
-                        )
-                        .arg(
-                            ret
-                        )
-                    );
-
-
-                    return;
-                }
-
-
-                // Core process interaction belongs back to MainWindow /
-                // DS_cores, not to this Async worker.
-                (void)MainWindowApi::Post(
-                    [](
-                        MainWindow& window
-                        )
+                // Core process interaction belongs back to MainWindow / DS_cores, not to this Async worker.
+                (void)MainWindowApi::Post([](MainWindow& window)
                     {
                         window.StopVPNProcess();
                     }
@@ -4051,182 +3741,144 @@ bool MainWindow::get_elevated_permissions(int reason) {
     }
 
 #endif
+
 #ifdef Q_OS_WIN
+
     auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please run Gryph as admin"), QMessageBox::Yes | QMessageBox::No);
-    if (n == QMessageBox::Yes) {
+    
+    if (n == QMessageBox::Yes) 
+    {
         this->exit_reason = reason;
         on_menu_exit_triggered();
     }
+
 #endif
 
 #ifdef Q_OS_MACOS
+
     if (Configs::isSetuidSet(Configs::FindCoreRealPath().toStdString()))
     {
         StopVPNProcess();
         return true;
     }
+
     auto n = QMessageBox::warning(GetMessageBoxParent(), software_name, tr("Please give the core root privileges"), QMessageBox::Yes | QMessageBox::No);
+    
     if (n == QMessageBox::Yes)
     {
         auto Command = QString("sudo chown root:wheel '%1' && sudo chmod u+s '%1'").arg(Configs::FindCoreRealPath());
+       
         auto ret = Mac_Run_Command(Command);
-        if (ret == 0) {
+        
+        if (ret == 0) 
+        {
             MessageBoxInfo(tr("Requesting permission"), tr("Please Enter your password in the opened terminal, then try again"));
             return false;
         }
-        else {
+        else 
+        {
             MW_show_log(QString("Failed to run %1 with %2").arg(Command).arg(ret));
             return false;
         }
     }
+
 #endif
+
     return false;
+
 }
 
-void MainWindow::set_system_proxy(bool enable) {
-    if (enable) {
+void MainWindow::set_system_proxy(bool enable) 
+{
+    if (enable) 
+    {
         auto socks_port = Configs::dataManager->settingsRepo->inbound_socks_port;
+
         SetSystemProxy(socks_port, socks_port, Configs::dataManager->settingsRepo->proxy_scheme);
     }
-    else {
+    else 
+    {
         ClearSystemProxy();
     }
 }
 
-void MainWindow::set_spmode_system_proxy(
-    bool enable,
-    bool save
-)
+void MainWindow::set_spmode_system_proxy(bool enable, bool save)
 {
-    // =====================================================
-    // Validate operation
-    // =====================================================
-
-    if (enable &&
-        Configs::dataManager
-        ->settingsRepo
-        ->disable_mixed_inbound)
+    if (enable && Configs::dataManager->settingsRepo->disable_mixed_inbound)
     {
-        runOnUiThread(
-            this,
-
-            [this]()
+        runOnUiThread(this, [this]()
             {
-                MessageBoxWarning(
-                    "Invalid Operation",
-                    "Cannot set system proxy when "
-                    "mixed inbound is disabled."
-                );
+                MessageBoxWarning("Invalid Operation", "Cannot set system proxy when mixed inbound is disabled.");
 
-
-                ui->checkBox_SystemProxy
-                    ->setChecked(
-                        false
-                    );
+                ui->checkBox_SystemProxy->setChecked(false);
             }
         );
-
 
         return;
     }
 
+    Configs::dataManager->settingsRepo->spmode_system_proxy = enable;
 
-    // =====================================================
-    // Save requested state
-    // =====================================================
-
-    Configs::dataManager
-        ->settingsRepo
-        ->spmode_system_proxy =
-        enable;
-
-
-    // =====================================================
-    // Stable snapshot of running profile
-    // =====================================================
-
-    const auto runningSnapshot =
-        runningProfileSnapshot();
-
-
-    // =====================================================
-    // Apply system proxy
-    // =====================================================
+    const auto runningSnapshot = runningProfileSnapshot();
 
     if (runningSnapshot)
     {
-        set_system_proxy(
-            enable
-        );
+        set_system_proxy(enable);
 
-
-        if (!enable &&
-            Configs::dataManager
-            ->settingsRepo
-            ->reset_proxy_on_disable_sp)
+        if (!enable && Configs::dataManager->settingsRepo->reset_proxy_on_disable_sp)
         {
-            const int runningProfileId =
-                runningSnapshot->Id();
-
+            const int runningProfileId = runningSnapshot->Id();
 
             if (runningProfileId >= 0)
             {
-                profile_start(
-                    runningProfileId
-                );
+                profile_start(runningProfileId);
             }
         }
     }
 
-
-    // =====================================================
-    // Persist settings
-    // =====================================================
-
     if (save)
     {
-        Configs::dataManager
-            ->settingsRepo
-            ->Save();
+        Configs::dataManager->settingsRepo->Save();
     }
-
-
-    // =====================================================
-    // Refresh UI
-    // =====================================================
 
     refresh_status();
 }
 
-void MainWindow::set_spmode_vpn(bool enable, bool save) {
+void MainWindow::set_spmode_vpn(bool enable, bool save) 
+{
     if (enable == Configs::dataManager->settingsRepo->spmode_vpn) return;
 
-    if (enable) {
+    if (enable) 
+    {
         bool requestPermission = !Configs::IsAdmin();
-        if (requestPermission) {
-            if (!get_elevated_permissions()) {
+
+        if (requestPermission) 
+        {
+            if (!get_elevated_permissions()) 
+            {
                 refresh_status();
                 return;
             }
         }
     }
 
-    if (save) {
+    if (save) 
+    {
         Configs::dataManager->settingsRepo->Save();
     }
 
     Configs::dataManager->settingsRepo->spmode_vpn = enable;
     refresh_status();
 
-    if (Configs::dataManager->settingsRepo->started_id >= 0) profile_start(Configs::dataManager->settingsRepo->started_id);
+    if (Configs::dataManager->settingsRepo->started_id >= 0) 
+    {
+        profile_start(Configs::dataManager->settingsRepo->started_id);
+    }
 }
 
-void MainWindow::UpdateDataView(
-    bool force
-)
+void MainWindow::UpdateDataView(bool force)
 {
-    runOnUiThread(
-        this,
+    runOnUiThread(this,
 
         [
             this,

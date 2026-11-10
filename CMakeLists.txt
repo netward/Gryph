@@ -108,6 +108,8 @@ set(PROJECT_SOURCES
 
         include/sys/Process.hpp
         src/sys/Process.cpp
+        include/sys/CoreSupervisor.hpp
+        src/sys/CoreSupervisor.cpp
 
         include/sys/UrlScheme.hpp
         src/sys/UrlScheme.cpp

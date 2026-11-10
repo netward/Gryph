@@ -1,107 +1,80 @@
 #include "include/sys/Process.hpp"
 #include "include/global/Configs.hpp"
-
-#include <QTimer>
-#include <QDir>
-#include <QApplication>
-
-#include <atomic>
-
 #include "include/ui/MainWindowAPI.h"
 
+#include <QProcessEnvironment>
+
 namespace Configs_sys {
-    CoreProcess::~CoreProcess() {
+
+    CoreProcess::CoreProcess(
+        const QString& corePath,
+        const QString& socketName,
+        bool debugMode,
+        QObject* parent
+    )
+        : QProcess(parent),
+        program(corePath),
+        socketName_(socketName),
+        debugMode_(debugMode)
+    {
+        connect(this, &QProcess::readyReadStandardOutput, this, 
+            [this]()
+            {
+                const QByteArray output = readAllStandardOutput();
+
+                if (output.contains("Extra process exited unexpectedly"))
+                {
+                    MW_show_log("Extra Core exited, stopping profile...");
+                    MW_dialog_message(MwMessage::CoreCrashed, {});
+                }
+
+                const int lines = output.count('\n');
+
+                if (logCounter.fetchAndAddRelaxed(lines) > Configs::dataManager->settingsRepo->max_log_line)
+                {
+                    return;
+                }
+
+                MW_show_log(output);
+            }
+        );
+
+        connect(this, &QProcess::readyReadStandardError, this,
+            [this]()
+            {
+                MW_show_log(readAllStandardError().trimmed());
+            }
+        );
     }
 
-    void CoreProcess::Kill() {
+    void CoreProcess::Start()
+    {
+        if (QProcess::state() != QProcess::NotRunning)
+        {
+            return;
+        }
+
+        auto environment = QProcessEnvironment::systemEnvironment();
+        environment.insert("GRYPH_CORE_SOCKET", socketName_);
+
+        if (debugMode_)
+        {
+            environment.insert("GRYPH_CORE_DEBUG", "1");
+        }
+
+        setProcessEnvironment(environment);
+        start(program, arguments);
+    }
+
+    void CoreProcess::Kill()
+    {
+        if (QProcess::state() == QProcess::NotRunning)
+        {
+            return;
+        }
+
         kill();
         waitForFinished();
-    }
-
-    CoreProcess::CoreProcess(const QString &core_path, const QString &socketName, bool debugMode)
-        : m_socketName(socketName), m_debugMode(debugMode) {
-        program = core_path;
-
-        connect(this, &QProcess::readyReadStandardOutput, this, [&]() {
-            auto log = readAllStandardOutput();
-            if (log.contains("Extra process exited unexpectedly"))
-            {
-                MW_show_log("Extra Core exited, stopping profile...");
-                MW_dialog_message(MwMessage::CoreCrashed, {});
-            }
-            if (logCounter.fetchAndAddRelaxed(log.count("\n")) > Configs::dataManager->settingsRepo->max_log_line) return;
-            MW_show_log(log);
-        });
-        connect(this, &QProcess::readyReadStandardError, this, [&]() {
-            auto log = readAllStandardError().trimmed();
-            MW_show_log(log);
-        });
-        connect(this, &QProcess::errorOccurred, this, [&](ProcessError error) {
-            if (error == FailedToStart) {
-                failed_to_start = true;
-                MW_show_log("start core error occurred: " + errorString() + "\n");
-            }
-        });
-
-        connect(this, &QProcess::stateChanged, this,
-            [this](QProcess::ProcessState state)
-            {
-                if (state == QProcess::NotRunning)
-                {
-                    Configs::dataManager->settingsRepo->core_running.store(
-                        false,
-                        std::memory_order_release
-                    );
-
-                    qDebug()
-                        << "Core state changed to not running";
-                }
-
-                if (!Configs::dataManager->settingsRepo->prepare_exit && state == NotRunning) {
-                    if (failed_to_start) return; // no retry
-                    if (restarting) return;
-
-                    MW_show_log("[Fatal] " + QObject::tr("Core exited, cleaning up..."));
-
-                    MainWindowApi::StopProfile(true, true);
-
-                    // Retry rate limit
-                    if (coreRestartTimer.isValid()) {
-                        if (coreRestartTimer.restart() < 10 * 1000) {
-                            coreRestartTimer = QElapsedTimer();
-                            MW_show_log("[ERROR] " + QObject::tr("Core exits too frequently, stop automatic restart this profile."));
-                            return;
-                        }
-                    } else {
-                        coreRestartTimer.start();
-                    }
-
-                    // Restart
-                    start_profile_when_core_is_up = Configs::dataManager->settingsRepo->started_id;
-                    MW_show_log("[Warn] " + QObject::tr("Restarting the core ..."));
-                    setTimeout([=,this] { Restart(); }, this, 200);
-                }
-        });
-    }
-
-    void CoreProcess::Start() {
-        if (started) return;
-        started = true;
-
-        auto env = QProcessEnvironment::systemEnvironment();
-        env.insert("GRYPH_CORE_SOCKET", m_socketName);
-        if (m_debugMode) env.insert("GRYPH_CORE_DEBUG", "1");
-        setProcessEnvironment(env);
-        start(program, {});
-    }
-
-    void CoreProcess::Restart() {
-        restarting = true;
-        kill();
-        waitForFinished(500);
-        started = false;
-        Start();
-        restarting = false;
     }
 
 } // namespace Configs_sys

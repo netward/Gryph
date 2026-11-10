@@ -1,44 +1,36 @@
 #pragma once
 
-#include <memory>
-#include <QElapsedTimer>
+#include <QAtomicInt>
 #include <QProcess>
+#include <QString>
+#include <QStringList>
 
 namespace Configs_sys {
+
     class CoreProcess : public QProcess
     {
     public:
-        QString tag;
+        explicit CoreProcess(
+            const QString& corePath,
+            const QString& socketName,
+            bool debugMode,
+            QObject* parent = nullptr
+        );
+
+        ~CoreProcess() override = default;
+
+        // Low-level process operations only.
+        void Start();
+        void Kill();
+
         QString program;
         QStringList arguments;
 
-        ~CoreProcess();
-
-        // start & kill is one time
-
-        void Start();
-
-        void Kill();
-
-        CoreProcess(const QString &core_path, const QString &socketName, bool debugMode);
-
-        void Restart();
-
-        int start_profile_when_core_is_up = -1;
-
     private:
-        QString m_socketName;
-        bool m_debugMode = false;
-        bool show_stderr = false;
-        bool failed_to_start = false;
-        bool restarting = false;
-
-        QElapsedTimer coreRestartTimer;
-
-    protected:
-        bool started = false;
-        bool crashed = false;
+        QString socketName_;
+        bool debugMode_ = false;
     };
 
     inline QAtomicInt logCounter;
+
 } // namespace Configs_sys
