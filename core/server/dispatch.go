@@ -101,10 +101,19 @@ func writeIPCAll(w io.Writer, data []byte) error {
 //
 //	[uint32 reqId][uint8 status][uint32 dataLen][data]
 func runDispatch(conn net.Conn) {
-	defer func() {
-		conn.Close()
-		log.Fatal("IPC connection dropped, exiting")
-	}()
+	err := serveIPC(conn, dispatch)
+	log.Fatalf("IPC connection dropped, exiting: %v", err)
+}
+
+// serveIPC implements the IPC protocol without
+// terminating the process when the connection closes.
+//
+// The handler can be replaced by a test implementation.
+func serveIPC(
+	conn net.Conn,
+	handler func(string, []byte) ([]byte, error),
+) error {
+	defer conn.Close()
 
 	var writeMu sync.Mutex
 	admission := newRPCAdmission()
@@ -157,7 +166,7 @@ func runDispatch(conn net.Conn) {
 				)
 			}
 
-			return
+			return err
 		}
 
 		// Reserve capacity before creating a goroutine.
@@ -189,7 +198,7 @@ func runDispatch(conn net.Conn) {
 			// Release the slot when this handler finishes.
 			defer release()
 
-			respData, dispatchErr := dispatch(
+			respData, dispatchErr := handler(
 				method,
 				pl,
 			)
