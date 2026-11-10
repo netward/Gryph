@@ -90,7 +90,6 @@ namespace API {
             }
         }
         // Called on io_thread via readyRead
-
         void onReadyRead()
         {
             if (!sock)
@@ -217,10 +216,8 @@ namespace API {
                     call->cv.notify_one();
                 }
             }
-
             return true;
         }
-
 
     public:
         LocalSocketChannel()

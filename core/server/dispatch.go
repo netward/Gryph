@@ -107,6 +107,7 @@ func runDispatch(conn net.Conn) {
 	}()
 
 	var writeMu sync.Mutex
+	admission := newRPCAdmission()
 
 	writeResponse := func(reqID uint32, status uint8, data []byte) {
 		if len(data) > int(maxRPCPayloadBytes) {
@@ -121,11 +122,11 @@ func runDispatch(conn net.Conn) {
 			header[5:], uint32(len(data)),
 		)
 		log.Printf(
-		    "[IPC][TX] requestId=%d status=%d payloadLen=%d header=%x",
-		    reqID,
-		    status,
-		    len(data),
-		    header,
+			"[IPC][TX] requestId=%d status=%d payloadLen=%d header=%x",
+			reqID,
+			status,
+			len(data),
+			header,
 		)
 
 		writeMu.Lock()
@@ -144,27 +145,76 @@ func runDispatch(conn net.Conn) {
 	}
 
 	for {
-		requestID, method, payload, err := readIPCRequest(conn)
+		// Read and validate the incoming IPC request.
+		requestID, method, payload, err :=
+			readIPCRequest(conn)
+
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("[IPC] request read failed: %v", err)
+				log.Printf(
+					"[IPC] request read failed: %v",
+					err,
+				)
 			}
+
 			return
 		}
 
-		// Existing concurrent dispatch behavior.
-		// This is intentionally unchanged in PR-4.9A.
-		go func(id uint32, method string, pl []byte) {
-			respData, dispatchErr := dispatch(method, pl)
+		// Reserve capacity before creating a goroutine.
+		//
+		// This operation does not wait for free slots.
+		release, accepted := admission.tryAcquire(method)
+
+		if !accepted {
+			// Keep the connection alive.
+			// Reject only this RPC request.
+			writeResponse(
+				requestID,
+				1,
+				[]byte(
+					"RPC_BUSY: concurrency limit reached",
+				),
+			)
+
+			continue
+		}
+
+		// The request has been admitted.
+		go func(
+			id uint32,
+			method string,
+			pl []byte,
+			release func(),
+		) {
+			// Release the slot when this handler finishes.
+			defer release()
+
+			respData, dispatchErr := dispatch(
+				method,
+				pl,
+			)
 
 			if dispatchErr != nil {
 				writeResponse(
-					id, 1, []byte(dispatchErr.Error()),
+					id,
+					1,
+					[]byte(dispatchErr.Error()),
 				)
-			} else {
-				writeResponse(id, 0, respData)
+				return
 			}
-		}(requestID, method, payload)
+
+			writeResponse(
+				id,
+				0,
+				respData,
+			)
+
+		}(
+			requestID,
+			method,
+			payload,
+			release,
+		)
 	}
 }
 

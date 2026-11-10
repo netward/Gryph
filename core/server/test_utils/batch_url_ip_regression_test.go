@@ -210,68 +210,68 @@ func TestBatchIPCancelledAndMissingOutbound(t *testing.T) {
 }
 
 func TestBatchIPTwelveFinalResults(t *testing.T) {
-    instance := newBatchTestBox(t)
+	instance := newBatchTestBox(t)
 
-    endpoint := httptest.NewServer(
-        http.HandlerFunc(func(
-            w http.ResponseWriter,
-            r *http.Request,
-        ) {
-            w.Header().Set(
-                "Content-Type",
-                "application/json",
-            )
+	endpoint := httptest.NewServer(
+		http.HandlerFunc(func(
+			w http.ResponseWriter,
+			r *http.Request,
+		) {
+			w.Header().Set(
+				"Content-Type",
+				"application/json",
+			)
 
-            _, _ = w.Write([]byte(
-                `{"ip":"203.0.113.7","country_code":"ZZ"}`,
-            ))
-        }),
-    )
-    defer endpoint.Close()
+			_, _ = w.Write([]byte(
+				`{"ip":"203.0.113.7","country_code":"ZZ"}`,
+			))
+		}),
+	)
+	defer endpoint.Close()
 
-    tags := make([]string, 12)
+	tags := make([]string, 12)
 
-    for i := range tags {
-        tags[i] = "direct"
-    }
+	for i := range tags {
+		tags[i] = "direct"
+	}
 
-    results := BatchIPTestWithEndpoint(
-        context.Background(),
-        instance,
-        tags,
-        4,
-        3*time.Second,
-        endpoint.URL,
-    )
+	results := BatchIPTestWithEndpoint(
+		context.Background(),
+		instance,
+		tags,
+		4,
+		3*time.Second,
+		endpoint.URL,
+	)
 
-    if len(results) != len(tags) {
-        t.Fatalf(
-            "expected %d results, got %d",
-            len(tags),
-            len(results),
-        )
-    }
+	if len(results) != len(tags) {
+		t.Fatalf(
+			"expected %d results, got %d",
+			len(tags),
+			len(results),
+		)
+	}
 
-    for i, result := range results {
-        if result == nil {
-            t.Fatalf("nil result at index %d", i)
-        }
+	for i, result := range results {
+		if result == nil {
+			t.Fatalf("nil result at index %d", i)
+		}
 
-        if result.Error != nil {
-            t.Fatalf(
-                "unexpected error at index %d: %v",
-                i,
-                result.Error,
-            )
-        }
+		if result.Error != nil {
+			t.Fatalf(
+				"unexpected error at index %d: %v",
+				i,
+				result.Error,
+			)
+		}
 
-        if result.Result.IP != "203.0.113.7" ||
-            result.Result.CountryCode != "ZZ" {
-            t.Fatalf(
-                "unexpected IP result at index %d: %+v",
-                i,
-                result.Result,
-            )
-        }
-    }
+		if result.Result.IP != "203.0.113.7" ||
+			result.Result.CountryCode != "ZZ" {
+			t.Fatalf(
+				"unexpected IP result at index %d: %+v",
+				i,
+				result.Result,
+			)
+		}
+	}
 }

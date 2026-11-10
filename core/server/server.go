@@ -69,7 +69,11 @@ func (s *server) Start(
 	}()
 
 	if debug {
-		log.Println("Start:", in.GetCoreConfig())
+		log.Printf(
+			"[Core] Start request received: configBytes=%d needXray=%t",
+			len(in.GetCoreConfig()),
+			in.GetNeedXray(),
+		)
 	}
 
 	if boxInstance != nil || xrayInstance != nil || extraProcess != nil {
@@ -494,10 +498,10 @@ func (s *server) IPTest(
 }
 
 func (s *server) QueryIPTest(
-    ctx context.Context,
-    in *gen.EmptyReq,
+	ctx context.Context,
+	in *gen.EmptyReq,
 ) (*gen.QueryIPTestResponse, error) {
-    return &gen.QueryIPTestResponse{}, nil
+	return &gen.QueryIPTestResponse{}, nil
 }
 
 func (s *server) QueryStats(

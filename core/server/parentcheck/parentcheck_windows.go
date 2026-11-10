@@ -4,8 +4,8 @@ package parentcheck
 
 import (
 	"fmt"
-    "strings"
 	"golang.org/x/sys/windows"
+	"strings"
 )
 
 func getDrivePath(devicePath string) string {

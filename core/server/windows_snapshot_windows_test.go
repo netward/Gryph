@@ -280,7 +280,6 @@ func BenchmarkPR44WindowsLegacyFinderUpdate(b *testing.B) {
 	}
 }
 
-
 // Experimental implementation: one complete
 // GetAdaptersAddresses snapshot per update,
 // except when buffer resizing requires retries.
@@ -294,7 +293,6 @@ func BenchmarkPR44WindowsSnapshot(b *testing.B) {
 		}
 	}
 }
-
 
 func pr44LegacySnapshot() ([]control.Interface, error) {
 	netIfs, err := net.Interfaces()
