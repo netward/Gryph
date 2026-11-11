@@ -2265,6 +2265,8 @@ void MainWindow::profile_start(int _id)
         return;
     }
 
+    MW_show_log(QStringLiteral("[ProfileLifecycle] Start requested: profileId=%1 coreReady=%2").arg(ent->Id()).arg(Configs::dataManager->settingsRepo->core_running.load(std::memory_order_acquire)));
+
     auto group = Configs::dataManager->groupsRepo->GetGroup(ent->GroupId());
 
     if (!group)
@@ -2323,6 +2325,7 @@ void MainWindow::profile_start(int _id)
 
             if (!error.isEmpty())
             {
+                MW_show_log(QStringLiteral("[Core][Start] Error: %1").arg(error));
                 if (error.contains("configure tun interface"))
                 {
                     runOnUiThread([this, error]()

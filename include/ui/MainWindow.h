@@ -80,7 +80,7 @@ public:
 
     void toggle_system_proxy();
 
-    void set_spmode_vpn(bool enable, bool save = true);
+    void set_spmode_vpn(bool enable, bool save = true, bool restartProfile = true);
 
     bool get_elevated_permissions(int reason = 3);
 
