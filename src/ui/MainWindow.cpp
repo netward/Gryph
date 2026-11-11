@@ -14,6 +14,7 @@
 #include <QAbstractItemView>
 #include <QMenu>
 #include <QMetaObject>
+#include <QTimer>
 
 #include "include/configs/sub/GroupUpdater.hpp"
 #include "include/sys/CoreSupervisor.hpp"
@@ -301,6 +302,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         qApp->quit();
     }
 
+    qInfo() << "[IPC][TEST] Server:" << core_server->fullServerName();
+
     connect(core_server, & QLocalServer::newConnection, this, [this]()
         {
             QLocalSocket* socket = core_server->nextPendingConnection();
@@ -353,6 +356,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
                     },
                     Qt::QueuedConnection
                 );
+                //ONLY FOR TEST:
+                //QMetaObject::invokeMethod(supervisor, [supervisor, expectedPid]()
+                //    {
+                //        // Simulate a stale readiness notification.
+                //        supervisor->ConfirmIpcReady(expectedPid + 1);
+                //
+                //        // Real readiness notification.
+                //        supervisor->ConfirmIpcReady(expectedPid);
+                //
+                //        // Duplicate notification for the same process.
+                //        supervisor->ConfirmIpcReady(expectedPid);
+                //    }, Qt::QueuedConnection
+                //);
+                // diagnostic: delay IPC readiness by 10 seconds.
+                //qInfo() << "[TEST] IPC ready will be delayed by 30 seconds";
+                //QTimer::singleShot(30000, supervisor, [supervisor, expectedPid]()
+                //    {
+                //        qInfo() << "[TEST] Confirming IPC ready" << "PID:" << expectedPid;
+                //        supervisor->ConfirmIpcReady(expectedPid);
+                //    }
+                //);
             }
         }
     );
