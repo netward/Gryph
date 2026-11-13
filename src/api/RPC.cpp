@@ -323,12 +323,12 @@ namespace API {
                     // Only now may the previous session be invalidated.
                     if (sock)
                     {
+                        // Invalidate pending RPC calls belonging to the previous session.
+                        wakeAllWithError();
                         sock->disconnect(io_anchor);
                         sock->close();
                         sock->deleteLater();
                     }
-
-                    wakeAllWithError();
 
                     sock = newSock;
                     read_buf.clear();
