@@ -505,7 +505,8 @@ private:
     void loadShortcuts();
 
     // rpc
-    void setup_rpc(QLocalSocket *socket);
+    [[nodiscard]]
+    bool setup_rpc(QLocalSocket* socket, quint64 generation);
 
     bool verify_core_pid(QLocalSocket *socket);
 

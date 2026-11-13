@@ -71,6 +71,9 @@ namespace API {
         QMap<quint32, std::shared_ptr<PendingCall>> pending;
         std::atomic_bool connected_{ false };
         std::atomic<quint64> connectionEpoch_{ 0 };
+        // Last successfully adopted Core process generation.
+        // Never reset on disconnect; prevents stale readoption.
+        std::atomic<quint64> activeProcessGeneration_{ 0 };
 
         static constexpr int kIOTimeoutMs = 30000;
         static constexpr qsizetype kMaxRPCPayloadBytes = 16 * 1024 * 1024;
@@ -265,22 +268,59 @@ namespace API {
 
 
         // Replace the underlying connection. Must be called on the thread that currently owns `newSock` (the UI thread, same as before).
-        void Reconnect(QLocalSocket* newSock)
+        bool Reconnect(QLocalSocket* newSock, quint64 generation)
         {
-            Q_ASSERT(newSock != nullptr);
             Q_ASSERT(QThread::currentThread() != io_thread);
 
-            // Invalidate requests belonging to the old connection.
-            wakeAllWithError();
+            if (!newSock || generation == 0)
+            {
+                if (newSock)
+                {
+                    newSock->close();
+                    newSock->deleteLater();
+                }
 
-            // Called from the socket's owning UI thread.
+                return false;
+            }
+
+            // Transfer ownership to the RPC IO thread.
             newSock->setParent(nullptr);
             newSock->moveToThread(io_thread);
 
-            // Wait until the IO thread has adopted the socket.
-            // Do not announce CoreStarted before this completes.
-            const bool invoked = QMetaObject::invokeMethod(io_anchor, [this, newSock]()
+            if (newSock->thread() != io_thread)
+            {
+                qWarning() << "[RPC] Failed to move IPC socket";
+                newSock->deleteLater();
+                return false;
+            }
+
+            bool accepted = false;
+
+            const bool invoked = QMetaObject::invokeMethod(io_anchor, [this, newSock, generation, &accepted]()
                 {
+                    const quint64 currentGeneration = activeProcessGeneration_.load(std::memory_order_acquire);
+
+                    // Old or duplicate sessions cannot replace the current RPC connection.
+                    if (generation <= currentGeneration)
+                    {
+                        qWarning() << "[RPC] Stale IPC generation rejected" << generation << "current:" << currentGeneration;
+
+                        newSock->abort();
+                        newSock->deleteLater();
+                        return;
+                    }
+
+                    if (newSock->state() != QLocalSocket::ConnectedState)
+                    {
+                        qWarning() << "[RPC] IPC socket disconnected before adoption";
+
+                        newSock->abort();
+                        newSock->deleteLater();
+                        return;
+                    }
+
+                    // The candidate is valid.
+                    // Only now may the previous session be invalidated.
                     if (sock)
                     {
                         sock->disconnect(io_anchor);
@@ -288,50 +328,114 @@ namespace API {
                         sock->deleteLater();
                     }
 
+                    wakeAllWithError();
+
                     sock = newSock;
                     read_buf.clear();
 
                     const QPointer<QLocalSocket> acceptedSocket(sock);
 
-                    // Data received from the adopted socket.
-                    QObject::connect(sock, & QLocalSocket::readyRead, io_anchor, [this, acceptedSocket]()
+                    QObject::connect(sock, &QLocalSocket::readyRead, io_anchor, [this, acceptedSocket]()
                         {
-                            // Ignore signals from a socket that no longer belongs to the active RPC session.
                             if (!acceptedSocket || sock != acceptedSocket.data())
                             {
                                 return;
                             }
+
                             onReadyRead();
                         }
                     );
 
-                    // Connection termination.
                     QObject::connect(sock, & QLocalSocket::disconnected, io_anchor, [this, acceptedSocket]()
                         {
-                            // An old socket must not interrupt the currently active RPC session.
                             if (!acceptedSocket || sock != acceptedSocket.data())
                             {
                                 return;
                             }
 
-                            qWarning() << "[RPC][SOCKET] Disconnected error:" << acceptedSocket->errorString();
+                            qWarning() << "[RPC][SOCKET] Disconnected" << acceptedSocket->errorString();
+
                             wakeAllWithError();
                         }
                     );
 
-                    connected_.store(sock->state() == QLocalSocket::ConnectedState, std::memory_order_release);
+                    activeProcessGeneration_.store(generation, std::memory_order_release);
+
+                    connected_.store(true, std::memory_order_release);
 
                     if (sock->bytesAvailable() > 0)
                     {
                         onReadyRead();
+                    }
+
+                    accepted = connected_.load(std::memory_order_acquire);
+
+                    if (accepted)
+                    {
+                        qInfo() << "[RPC] IPC generation adopted" << generation;
                     }
                 }, Qt::BlockingQueuedConnection
             );
 
             if (!invoked)
             {
-                connected_.store(false, std::memory_order_release);
-                qWarning() << "[RPC] Failed to adopt IPC socket";
+                qWarning() << "[RPC] IPC adoption dispatch failed";
+                newSock->deleteLater();
+                return false;
+            }
+
+            return accepted;
+        }
+
+        bool IsSessionConnected(quint64 generation) const noexcept
+        {
+            if (generation == 0)
+            {
+                return false;
+            }
+
+            const quint64 first = activeProcessGeneration_.load(std::memory_order_acquire);
+
+            const bool connected = connected_.load(std::memory_order_acquire);
+
+            const quint64 second = activeProcessGeneration_.load(std::memory_order_acquire);
+
+            return connected && first == generation && second == generation;
+        }
+
+        void DisconnectIfGeneration(quint64 generation)
+        {
+            if (generation == 0)
+            {
+                return;
+            }
+
+            const bool queued = QMetaObject::invokeMethod(io_anchor, [this, generation]()
+                {
+                    if (!sock || activeProcessGeneration_.load(std::memory_order_acquire) != generation)
+                    {
+                        return;
+                    }
+
+                    QLocalSocket* oldSocket = sock;
+
+                    oldSocket->disconnect(io_anchor);
+
+                    sock = nullptr;
+                    read_buf.clear();
+
+                    wakeAllWithError();
+
+                    oldSocket->abort();
+                    oldSocket->deleteLater();
+
+                    qInfo() << "[RPC] IPC generation discarded" << generation;
+                }, Qt::QueuedConnection
+            );
+
+            if (!queued)
+            {
+                qWarning() << "[RPC] Failed to queue IPC session discard";
             }
         }
 
@@ -479,9 +583,20 @@ namespace API {
         this->channel = std::make_unique<LocalSocketChannel>();
     }
 
-    void Client::Reconnect(QLocalSocket *socket) 
+
+    bool Client::Reconnect(QLocalSocket* socket, quint64 generation)
     {
-        channel->Reconnect(socket);
+        return channel->Reconnect(socket, generation);
+    }
+
+    bool Client::IsSessionConnected(quint64 generation) const noexcept
+    {
+        return channel->IsSessionConnected(generation);
+    }
+
+    void Client::DisconnectIfGeneration(quint64 generation)
+    {
+        channel->DisconnectIfGeneration(generation);
     }
 
 #define CALL_OK 0

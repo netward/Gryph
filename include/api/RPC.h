@@ -4,6 +4,7 @@
 #include <core/server/gen/libcore.pb.h>
 #endif
 #include <QString>
+#include <QtGlobal>
 
 class QLocalSocket;
 
@@ -14,9 +15,14 @@ namespace API {
 
         ~Client();
 
-        // Adopt a freshly connected socket, replacing any previous
-        // connection. The Client itself is long-lived and never recreated.
-        void Reconnect(QLocalSocket *socket);
+        // Adopt a freshly connected socket, replacing any previous connection. The Client itself is long-lived and never recreated.
+        [[nodiscard]]
+        bool Reconnect( QLocalSocket* socket, quint64 generation);
+
+        [[nodiscard]]
+        bool IsSessionConnected(quint64 generation) const noexcept;
+
+        void DisconnectIfGeneration(quint64 generation);
 
         // QString returns is error string
 

@@ -67,6 +67,11 @@ namespace Configs_sys {
         return pid_.load(std::memory_order_acquire);
     }
 
+    quint64 CoreSupervisor::processGeneration() const noexcept
+    {
+        return processGeneration_.load(std::memory_order_acquire);
+    }
+
     void CoreSupervisor::transition(State next)
     {
         Q_ASSERT(QThread::currentThread() == thread());
@@ -115,35 +120,39 @@ namespace Configs_sys {
 
         pid_.store(0, std::memory_order_release);
 
+        const quint64 generation = processGeneration_.fetch_add(1, std::memory_order_acq_rel) + 1;
+
+        qInfo() << "[CoreSupervisor] Starting process generation" << generation;
+
         transition(State::Starting);
 
         CoreProcess::Start();
     }
 
-    void CoreSupervisor::ConfirmIpcReady(qint64 expectedPid)
+    bool CoreSupervisor::ConfirmIpcReady(qint64 expectedPid, quint64 expectedGeneration)
     {
         Q_ASSERT(QThread::currentThread() == thread());
 
-        if (expectedPid <= 0 || expectedPid != processId() || lifecycleState() != State::AwaitingIPC || QProcess::state() != QProcess::Running)
-        {
-            qWarning()
-                << "[CoreSupervisor] Stale IPC ready event"
-                << expectedPid;
+        const bool valid = expectedPid > 0 && expectedGeneration > 0 && expectedPid == processId() && expectedGeneration == processGeneration() && lifecycleState() == State::AwaitingIPC && QProcess::state() == QProcess::Running;
 
-            return;
+        if (!valid)
+        {
+            qWarning() << "[CoreSupervisor] Stale IPC ready event" << "pid:" << expectedPid << "generation:" << expectedGeneration;
+            return false;
         }
 
         transition(State::Ready);
 
         const int profileId = start_profile_when_core_is_up.exchange(-1, std::memory_order_acq_rel);
 
-        // MainWindow receives CoreStarted through its lifetime-safe UI dispatcher.
         const bool delivered = MainWindowApi::DispatchMessage(MwMessage::CoreStarted, { QString::number(profileId) });
 
         if (!delivered)
         {
-            MW_show_log("[CoreSupervisor] CoreStarted dispatch failed");
+            MW_show_log( "[CoreSupervisor] CoreStarted dispatch failed");
         }
+
+        return true;
     }
 
     void CoreSupervisor::scheduleRestart()

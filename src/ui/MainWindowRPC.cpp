@@ -80,41 +80,43 @@ namespace
     };
 }
 
-void MainWindow::setup_rpc(QLocalSocket* socket) {
+
+bool MainWindow::setup_rpc(QLocalSocket* socket, quint64 generation)
+{
     Q_ASSERT(API::defaultClient != nullptr);
-    API::defaultClient->Reconnect(socket);
-    // Loopers run for the lifetime of the app, start only once
+
+    const bool adopted = API::defaultClient->Reconnect(socket, generation);
+
+    if (!adopted)
+    {
+        return false;
+    }
+
+    // Start background loopers once, after successful adoption of the first IPC session.
     if (!rpc_started)
     {
         rpc_started = true;
 
-        Async::runDedicated(
-            []
+        Async::runDedicated([]
             {
                 Stats::trafficLooper->Loop();
-            },
-            "TrafficLooper"
+            }, "TrafficLooper"
         );
 
-        Async::runDedicated(
-            []
+        Async::runDedicated([]
             {
                 Stats::connection_lister->Loop();
-            },
-            "ConnectionLister"
+            }, "ConnectionLister"
         );
     }
+
+    return true;
 }
 
-void MainWindow::runURLTest(
-    const QString& config,
-    const QString& xrayConfig,
-    bool useDefault,
-    const QStringList& outboundTags,
-    const QMap<QString, int>& tag2entID,
-    int entID)
+void MainWindow::runURLTest(const QString& config, const QString& xrayConfig, bool useDefault, const QStringList& outboundTags, const QMap<QString, int>& tag2entID, int entID)
 {
-    if (stopSpeedtest.load(std::memory_order_acquire)) {
+    if (stopSpeedtest.load(std::memory_order_acquire)) 
+    {
         MW_show_log(tr("Profile test aborted"));
         return;
     }
@@ -122,28 +124,26 @@ void MainWindow::runURLTest(
     // Snapshot of the long-lived RPC client.
     auto* const client = API::defaultClient;
 
-    if (client == nullptr) {
+    if (client == nullptr) 
+    {
         MW_show_log("[URLTest] RPC client is not initialized");
         return;
     }
 
     libcore::TestReq req;
 
-    for (const auto& tag : outboundTags) {
+    for (const auto& tag : outboundTags) 
+    {
         req.outbound_tags.push_back(tag.toStdString());
     }
 
     req.config = config.toStdString();
-    req.url =
-        Configs::dataManager->settingsRepo
-        ->test_latency_url.toStdString();
+    req.url = Configs::dataManager->settingsRepo ->test_latency_url.toStdString();
 
     req.use_default_outbound = useDefault;
-    req.max_concurrency =
-        Configs::dataManager->settingsRepo->test_concurrent;
+    req.max_concurrency = Configs::dataManager->settingsRepo->test_concurrent;
 
-    req.test_timeout_ms =
-        Configs::dataManager->settingsRepo->url_test_timeout_ms;
+    req.test_timeout_ms = Configs::dataManager->settingsRepo->url_test_timeout_ms;
 
     req.xray_config = xrayConfig.toStdString();
     req.need_xray = !xrayConfig.isEmpty();
@@ -152,7 +152,8 @@ void MainWindow::runURLTest(
     bool rpcOK = false;
     const auto result = client->Test(&rpcOK, req);
 
-    if (!rpcOK) {
+    if (!rpcOK) 
+    {
         MW_show_log("[URLTest] RPC Test call failed");
         return;
     }
@@ -160,81 +161,66 @@ void MainWindow::runURLTest(
     QSet<int> processedIDs;
     int completed = 0;
 
-    for (const auto& res : result.results) {
+    for (const auto& res : result.results) 
+    {
         ++completed;
 
-        const QString tag =
-            QString::fromStdString(
-                res.outbound_tag.value()
-            );
+        const QString tag = QString::fromStdString(res.outbound_tag.value());
 
         int profileID = entID;
 
-        if (!tag2entID.isEmpty()) {
+        if (!tag2entID.isEmpty()) 
+        {
             const auto it = tag2entID.constFind(tag);
 
-            if (it == tag2entID.constEnd()) {
-                MW_show_log(
-                    "[URLTest] Unknown outbound tag: " + tag
-                );
+            if (it == tag2entID.constEnd()) 
+            {
+                MW_show_log("[URLTest] Unknown outbound tag: " + tag);
                 continue;
             }
 
             profileID = it.value();
         }
 
-        if (profileID < 0) {
-            MW_show_log(
-                "[URLTest] Missing profile ID for: " + tag
+        if (profileID < 0) 
+        {
+            MW_show_log("[URLTest] Missing profile ID for: " + tag
             );
             continue;
         }
 
         // Protect against duplicate final results.
-        if (processedIDs.contains(profileID)) {
-            MW_show_log(
-                QString("[URLTest] Duplicate result ignored: %1")
-                .arg(profileID)
-            );
+        if (processedIDs.contains(profileID)) 
+        {
+            MW_show_log(QString("[URLTest] Duplicate result ignored: %1").arg(profileID));
             continue;
         }
 
         processedIDs.insert(profileID);
 
-        auto profile =
-            Configs::dataManager->profilesRepo
-            ->GetProfile(profileID);
+        auto profile = Configs::dataManager->profilesRepo->GetProfile(profileID);
 
-        if (!profile) {
-            MW_show_log(
-                QString("[URLTest] Profile not found: %1")
-                .arg(profileID)
-            );
+        if (!profile) 
+        {
+            MW_show_log(QString("[URLTest] Profile not found: %1").arg(profileID));
             continue;
         }
 
-        const QString error =
-            QString::fromStdString(res.error.value());
+        const QString error = QString::fromStdString(res.error.value());
 
-        if (error.isEmpty()) {
+        if (error.isEmpty()) 
+        {
             profile->SetLatency(res.latency_ms.value());
         }
-        else if (
-            error.contains("test aborted") ||
-            error.contains("context canceled"))
+        else if ( error.contains("test aborted") || error.contains("context canceled"))
         {
             profile->SetLatency(0);
         }
-        else {
+        else 
+        {
             profile->SetLatency(-1);
 
-            MW_show_log(
-                tr("[%1] test error: %2")
-                .arg(
-                    profileDisplayTypeAndName(profile),
-                    error
-                )
-            );
+            MW_show_log(tr("[%1] test error: %2").arg(profileDisplayTypeAndName(profile), error));
         }
 
         // Exactly one final write per profile ID.
@@ -242,16 +228,13 @@ void MainWindow::runURLTest(
     }
 
     // This reflects completed results, not streaming progress.
-    if (completed > 0) {
+    if (completed > 0) 
+    {
         dataViewHtmlGenerator_.addTestProgress(completed);
         UpdateDataView(true);
     }
 
-    MW_show_log(
-        QString("[URLTest] Final results: %1, profiles updated: %2")
-        .arg(completed)
-        .arg(processedIDs.size())
-    );
+    MW_show_log(QString("[URLTest] Final results: %1, profiles updated: %2").arg(completed).arg(processedIDs.size()));
 
     // The parent batch already refreshes the profile list after its completion semaphore is released.
 }

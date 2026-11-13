@@ -302,7 +302,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         qApp->quit();
     }
 
-    connect(core_server, & QLocalServer::newConnection, this, [this]()
+
+    connect(core_server, &QLocalServer::newConnection, this, [this]()
         {
             QLocalSocket* socket = core_server->nextPendingConnection();
 
@@ -312,57 +313,101 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             }
 
             Configs_sys::CoreSupervisor* supervisor = nullptr;
+
             qint64 expectedPid = 0;
+            quint64 expectedGeneration = 0;
 
             {
                 QMutexLocker lock(&coreProcessMutex);
 
-                if (!verify_core_pid(socket))
+                supervisor = core_process;
+
+                if (!supervisor || !verify_core_pid(socket))
                 {
-                    MW_show_log( "[Warn] IPC connection from unexpected process rejected" );
+                    MW_show_log("[IPC] Connection rejected: unexpected process");
+
                     socket->close();
                     socket->deleteLater();
                     return;
                 }
 
-                supervisor = core_process;
                 expectedPid = supervisor->processId();
+                expectedGeneration = supervisor->processGeneration();
 
-                // Accept an IPC connection only while the current core process is awaiting IPC.
-                // A duplicate connection must not replace an already established RPC session.
-                if (supervisor->lifecycleState() != Configs_sys::CoreSupervisor::State::AwaitingIPC)
+                if (expectedGeneration == 0 || supervisor->lifecycleState() != Configs_sys::CoreSupervisor::State::AwaitingIPC)
                 {
-                    MW_show_log("[CoreSupervisor] IPC connection rejected: core is not awaiting IPC");
+                    MW_show_log( "[IPC] Connection rejected: core is not awaiting IPC");
                     socket->close();
                     socket->deleteLater();
                     return;
                 }
             }
 
-            // Adopt the socket on the RPC IO thread. 
-            // Reconnect currently uses BlockingQueuedConnection.
-            setup_rpc(socket);
+            // The RPC channel now validates the generation before replacing its active socket.
+            if (!setup_rpc(socket, expectedGeneration))
+            {
+                MW_show_log("[IPC] Socket adoption rejected");
+                return;
+            }
+
+            // Revalidate after the blocking socket adoption.
+            // The process may have exited or restarted.
+            bool stale = false;
 
             {
                 QMutexLocker lock(&coreProcessMutex);
+                stale = core_process != supervisor || supervisor->processId() != expectedPid || supervisor->processGeneration() != expectedGeneration || supervisor->lifecycleState() != Configs_sys::CoreSupervisor::State::AwaitingIPC;
+            }
 
-                // The process could have changed while the RPC socket was being adopted.
-                if (core_process != supervisor || !supervisor || supervisor->processId() != expectedPid)
+            if (stale)
+            {
+                MW_show_log("[IPC] Adopted socket belongs to stale process");
+                API::defaultClient->DisconnectIfGeneration(expectedGeneration);
+
+                return;
+            }
+
+            // CoreSupervisor owns the state transition.
+            const bool queued = QMetaObject::invokeMethod(supervisor, [supervisor, expectedPid, expectedGeneration]()
                 {
-                    MW_show_log( "[CoreSupervisor] Stale IPC connection ignored");
-                    return;
-                }
+                    auto* client = API::defaultClient;
 
-                // State transitions must happen on DS_cores.
-                QMetaObject::invokeMethod(supervisor, [supervisor, expectedPid]()
+                    if (!client)
                     {
-                        supervisor->ConfirmIpcReady(expectedPid);
-                    },
-                    Qt::QueuedConnection
-                );
+                        return;
+                    }
+
+                    // The accepted RPC session must still be connected when Ready is confirmed.
+                    if (!client->IsSessionConnected(expectedGeneration))
+                    {
+                        client->DisconnectIfGeneration(expectedGeneration);
+                        return;
+                    }
+
+                    const bool ready = supervisor->ConfirmIpcReady(expectedPid, expectedGeneration);
+
+                    if (!ready)
+                    {
+                        // A duplicate notification for an already Ready generation must not disconnect a healthy session.
+                        const bool stillCurrentReady = supervisor->processGeneration() == expectedGeneration && supervisor->processId() == expectedPid && supervisor->lifecycleState() == Configs_sys::CoreSupervisor::State::Ready;
+
+                        if (!stillCurrentReady)
+                        {
+                            client->DisconnectIfGeneration(expectedGeneration);
+                        }
+                    }
+                },
+                Qt::QueuedConnection
+            );
+
+            if (!queued)
+            {
+                MW_show_log("[IPC] Failed to queue IPC readiness confirmation");
+                API::defaultClient->DisconnectIfGeneration(expectedGeneration);
             }
         }
     );
+
 
     auto socketFullName = core_server->fullServerName();
     runOnThread([=, this] 

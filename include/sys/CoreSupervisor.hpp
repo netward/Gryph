@@ -44,10 +44,14 @@ namespace Configs_sys {
         void StopForExit();
 
         // Called after PID verification and RPC adoption.
-        void ConfirmIpcReady(qint64 expectedPid);
+        [[nodiscard]]
+        bool ConfirmIpcReady(qint64 expectedPid, quint64 expectedGeneration);
 
         [[nodiscard]]
         State lifecycleState() const noexcept;
+
+        [[nodiscard]]
+        quint64 processGeneration() const noexcept;
 
         // Thread-safe PID snapshot for MainWindow.
         [[nodiscard]]
@@ -69,13 +73,11 @@ namespace Configs_sys {
 
         void transition(State next);
         void scheduleRestart();
-        void onProcessFinished(
-            int exitCode,
-            QProcess::ExitStatus exitStatus
-        );
+        void onProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
 
         std::atomic<State> state_{ State::Stopped };
         std::atomic<qint64> pid_{ 0 };
+        std::atomic<quint64> processGeneration_{ 0 };
 
         StopIntent stopIntent_ = StopIntent::None;
         bool failedToStart_ = false;
