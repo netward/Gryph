@@ -70,13 +70,17 @@ func RunCore() {
 }
 
 func main() {
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println("Core panicked:")
-			fmt.Println(err)
-			os.Exit(0)
-		}
-	}()
+    defer func() {
+        if err := recover(); err != nil {
+            log.Printf(
+                "Core panicked: %v\n%s",
+                err,
+                runtimeDebug.Stack(),
+            )
+
+            os.Exit(1)
+        }
+    }()
 	fmt.Println("sing-box:", C.Version)
 	fmt.Println("Xray-core:", core.Version())
 	fmt.Println()

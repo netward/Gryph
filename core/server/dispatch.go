@@ -196,13 +196,14 @@ func serveIPCWithContext(
 		binary.LittleEndian.PutUint32(
 			header[5:], uint32(len(data)),
 		)
-		log.Printf(
-			"[IPC][TX] requestId=%d status=%d payloadLen=%d header=%x",
-			reqID,
-			status,
-			len(data),
-			header,
-		)
+		if debug {
+		    log.Printf(
+		        "[IPC][TX] requestId=%d status=%d payloadLen=%d",
+		        reqID,
+		        status,
+		        len(data),
+		    )
+		}
 
 		writeMu.Lock()
 		defer writeMu.Unlock()

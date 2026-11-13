@@ -302,8 +302,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         qApp->quit();
     }
 
-    qInfo() << "[IPC][TEST] Server:" << core_server->fullServerName();
-
     connect(core_server, & QLocalServer::newConnection, this, [this]()
         {
             QLocalSocket* socket = core_server->nextPendingConnection();
@@ -314,7 +312,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             }
 
             Configs_sys::CoreSupervisor* supervisor = nullptr;
-
             qint64 expectedPid = 0;
 
             {
@@ -322,8 +319,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
                 if (!verify_core_pid(socket))
                 {
-                    MW_show_log("[Warn] IPC connection from unexpected process rejected");
-
+                    MW_show_log( "[Warn] IPC connection from unexpected process rejected" );
                     socket->close();
                     socket->deleteLater();
                     return;
@@ -331,52 +327,39 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
                 supervisor = core_process;
                 expectedPid = supervisor->processId();
+
+                // Accept an IPC connection only while the current core process is awaiting IPC.
+                // A duplicate connection must not replace an already established RPC session.
+                if (supervisor->lifecycleState() != Configs_sys::CoreSupervisor::State::AwaitingIPC)
+                {
+                    MW_show_log("[CoreSupervisor] IPC connection rejected: core is not awaiting IPC");
+                    socket->close();
+                    socket->deleteLater();
+                    return;
+                }
             }
 
-            // Reconnect() adopts the socket on the RPC IO thread using BlockingQueuedConnection.
-            // It must complete before Ready is announced.
+            // Adopt the socket on the RPC IO thread. 
+            // Reconnect currently uses BlockingQueuedConnection.
             setup_rpc(socket);
 
-            // The process may have exited or restarted while the RPC socket was being adopted.
             {
                 QMutexLocker lock(&coreProcessMutex);
 
+                // The process could have changed while the RPC socket was being adopted.
                 if (core_process != supervisor || !supervisor || supervisor->processId() != expectedPid)
                 {
-                    MW_show_log("[CoreSupervisor] Stale IPC connection ignored");
-
+                    MW_show_log( "[CoreSupervisor] Stale IPC connection ignored");
                     return;
                 }
 
-                // State transitions belong to DS_cores.
-                // Do not modify supervisor state in UI thread.
+                // State transitions must happen on DS_cores.
                 QMetaObject::invokeMethod(supervisor, [supervisor, expectedPid]()
                     {
                         supervisor->ConfirmIpcReady(expectedPid);
                     },
                     Qt::QueuedConnection
                 );
-                //ONLY FOR TEST:
-                //QMetaObject::invokeMethod(supervisor, [supervisor, expectedPid]()
-                //    {
-                //        // Simulate a stale readiness notification.
-                //        supervisor->ConfirmIpcReady(expectedPid + 1);
-                //
-                //        // Real readiness notification.
-                //        supervisor->ConfirmIpcReady(expectedPid);
-                //
-                //        // Duplicate notification for the same process.
-                //        supervisor->ConfirmIpcReady(expectedPid);
-                //    }, Qt::QueuedConnection
-                //);
-                // diagnostic: delay IPC readiness by 10 seconds.
-                //qInfo() << "[TEST] IPC ready will be delayed by 30 seconds";
-                //QTimer::singleShot(30000, supervisor, [supervisor, expectedPid]()
-                //    {
-                //        qInfo() << "[TEST] Confirming IPC ready" << "PID:" << expectedPid;
-                //        supervisor->ConfirmIpcReady(expectedPid);
-                //    }
-                //);
             }
         }
     );
@@ -385,10 +368,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     runOnThread([=, this] 
         {
             QMutexLocker lock(&coreProcessMutex);
-
-            MW_show_log("[Debug] Core path: " + QDir::toNativeSeparators(core_path));
-            MW_show_log(QString("[Debug] Core exists: %1").arg(QFileInfo::exists(core_path)));
-
             core_process = new Configs_sys::CoreSupervisor(core_path, socketFullName,coreDebugMode);
 
             if (Configs::dataManager->settingsRepo->remember_enable && Configs::dataManager->settingsRepo->remember_id >= 0) 

@@ -11,6 +11,7 @@
 #include <QObject>
 #include <QThread>
 #include <QDebug>
+#include <QPointer>
 
 #include <mutex>
 #include <condition_variable>
@@ -143,7 +144,7 @@ namespace API {
                 quint32 dataLen = 0;
                 quint8 status = 0;
 
-                // 1. Decode the header FIRST.
+                //Decode the header FIRST.
                 {
                     QDataStream ds(read_buf);
                     ds.setByteOrder(QDataStream::LittleEndian);
@@ -157,14 +158,7 @@ namespace API {
                     }
                 }
 
-                // 2. Log decoded values, not uninitialized memory.
-                qDebug().noquote() << QString("[RPC][RX] reqId=%1 status=%2 payloadLen=%3 bufferSize=%4")
-                    .arg(reqId)
-                    .arg(status)
-                    .arg(dataLen)
-                    .arg(read_buf.size());
-
-                // 3. Validate the decoded header.
+                //Validate the decoded header.
                 if (dataLen > kMaxRPCPayloadBytes)
                 {
                     failProtocol(QString("response payload too large: %1 bytes").arg(dataLen));
@@ -177,7 +171,7 @@ namespace API {
                     return false;
                 }
 
-                // 4. Wait for the complete frame.
+                //Wait for the complete frame.
                 const qint64 totalSize = kHeaderSize + static_cast<qint64>(dataLen);
 
                 if (read_buf.size() < totalSize)
@@ -185,11 +179,15 @@ namespace API {
                     break;
                 }
 
-                // 5. Extract the response.
+                // The complete response frame is available.
+                // Log it only once, after validating its length.
+                qDebug().noquote() << QString("[RPC][RX] reqId=%1 status=%2 payloadLen=%3 frameBytes=%4").arg(reqId).arg(status).arg(dataLen).arg(totalSize);
+
+                //Extract the response.
                 QByteArray data = read_buf.mid(kHeaderSize, static_cast<qsizetype>(dataLen));
                 read_buf.remove(0, static_cast<qsizetype>(totalSize));
 
-                // 6. Find the matching pending RPC.
+                //Find the matching pending RPC.
                 std::shared_ptr<PendingCall> call;
 
                 {
@@ -204,7 +202,7 @@ namespace API {
                     }
                 }
 
-                // 7. Complete the request.
+                //Complete the request.
                 if (call)
                 {
                     std::lock_guard<std::mutex> lock(call->mu);
@@ -229,7 +227,6 @@ namespace API {
             io_thread->start();
         }
 
-
         ~LocalSocketChannel()
         {
             // No new RPC calls may enter during destruction.
@@ -237,8 +234,7 @@ namespace API {
             Q_ASSERT(QThread::currentThread() != io_thread);
             wakeAllWithError();
 
-            const bool queued = QMetaObject::invokeMethod(io_anchor,
-                [this]()
+            const bool queued = QMetaObject::invokeMethod(io_anchor, [this]()
                 {
                     if (sock)
                     {
@@ -250,8 +246,7 @@ namespace API {
 
                     read_buf.clear();
                     io_thread->quit();
-                },
-                Qt::QueuedConnection
+                }, Qt::QueuedConnection
             );
 
             if (!queued)
@@ -270,7 +265,6 @@ namespace API {
 
 
         // Replace the underlying connection. Must be called on the thread that currently owns `newSock` (the UI thread, same as before).
-
         void Reconnect(QLocalSocket* newSock)
         {
             Q_ASSERT(newSock != nullptr);
@@ -285,8 +279,7 @@ namespace API {
 
             // Wait until the IO thread has adopted the socket.
             // Do not announce CoreStarted before this completes.
-            const bool invoked = QMetaObject::invokeMethod(io_anchor,
-                [this, newSock]()
+            const bool invoked = QMetaObject::invokeMethod(io_anchor, [this, newSock]()
                 {
                     if (sock)
                     {
@@ -298,26 +291,30 @@ namespace API {
                     sock = newSock;
                     read_buf.clear();
 
-                    QObject::connect(
-                        sock,
-                        &QLocalSocket::readyRead,
-                        io_anchor,
-                        [this]()
+                    const QPointer<QLocalSocket> acceptedSocket(sock);
+
+                    // Data received from the adopted socket.
+                    QObject::connect(sock, & QLocalSocket::readyRead, io_anchor, [this, acceptedSocket]()
                         {
+                            // Ignore signals from a socket that no longer belongs to the active RPC session.
+                            if (!acceptedSocket || sock != acceptedSocket.data())
+                            {
+                                return;
+                            }
                             onReadyRead();
                         }
                     );
 
-                    QObject::connect(
-                        sock,
-                        &QLocalSocket::disconnected,
-                        io_anchor,
-                        [this]()
+                    // Connection termination.
+                    QObject::connect(sock, & QLocalSocket::disconnected, io_anchor, [this, acceptedSocket]()
                         {
-                            qWarning()
-                                << "[RPC][SOCKET] Disconnected"
-                                << "error:" << sock->errorString();
+                            // An old socket must not interrupt the currently active RPC session.
+                            if (!acceptedSocket || sock != acceptedSocket.data())
+                            {
+                                return;
+                            }
 
+                            qWarning() << "[RPC][SOCKET] Disconnected error:" << acceptedSocket->errorString();
                             wakeAllWithError();
                         }
                     );
@@ -328,8 +325,7 @@ namespace API {
                     {
                         onReadyRead();
                     }
-                },
-                Qt::BlockingQueuedConnection
+                }, Qt::BlockingQueuedConnection
             );
 
             if (!invoked)
@@ -410,8 +406,7 @@ namespace API {
                     }
 
                     sock->write(frame);
-                },
-                Qt::QueuedConnection
+                }, Qt::QueuedConnection
             );
 
             if (!queued)
@@ -423,8 +418,7 @@ namespace API {
             // Wait until the original deadline.
             std::unique_lock<std::mutex> lock(call->mu);
 
-            const bool completed = call->cv.wait_until(lock, deadline,
-                [&call]()
+            const bool completed = call->cv.wait_until(lock, deadline, [&call]()
                 {
                     return call->done;
                 }
@@ -435,8 +429,7 @@ namespace API {
             if (!completed)
             {
                 // Remove our pending slot if still registered.
-                // If the reader already owns the shared_ptr,
-                // it may finish safely after this caller exits.
+                // If the reader already owns the shared_ptr, it may finish safely after this caller exits.
                 std::lock_guard<std::mutex> pendingLock(pending_mu);
                 pending.remove(reqId);
                 return 1;
